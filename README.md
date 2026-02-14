@@ -1,17 +1,26 @@
 # Wisper
 
-Wisper is a WisprFlow-like voice dictation application designed for Ubuntu/Linux. It provides seamless voice-to-text integration using AI transcription, allowing you to dictate anywhere and paste the transcribed text.
+Wisper is a WisprFlow-like voice dictation application for Linux. It provides seamless voice-to-text integration using AI transcription, allowing you to dictate anywhere and have text typed directly at your cursor.
 
 ## Features
 
-- **Global Hotkey Recording** - Press `Shift+Space` to start/stop recording from anywhere
+- **Global Hotkey** - Press `Shift+Space` to start/stop recording from anywhere
+- **Direct Text Input** - Transcribed text is typed directly at your cursor (no copy-paste needed)
 - **AI Transcription** - Transcribe audio using OpenAI Whisper via Groq or OpenAI APIs
-- **Minimal UI** - Slim, transparent recording bar (300x60px) with real-time audio waveform
-- **Clipboard Integration** - Transcribed text is automatically copied to clipboard
+- **Multilingual** - Supports 99+ languages with automatic detection
+- **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
-- **Separate Settings Window** - Configure API keys and preferences in a dedicated window
+- **Compact Settings** - Configure API keys in a dedicated window
 - **Wayland & X11 Support** - Works on both display servers
 - **Privacy First** - Records locally before sending to API
+
+## Requirements
+
+- Linux (Debian/Ubuntu 22.04+)
+- Microphone access
+- Internet connection (for API calls)
+- **ydotool** - Required for direct text input (install via your package manager)
+- **Wayland users**: Need to set up custom keyboard shortcut (see Wayland Setup below)
 
 ## Installation
 
@@ -23,19 +32,32 @@ git clone https://github.com/taraksh01/wisper.git
 cd wisper
 
 # Install dependencies
-npm install
+pnpm install
 
 # Run in development
-npm run electron:dev
+pnpm run electron:dev
 
 # Build for production
-npm run build
-npm run package
+pnpm run build
+pnpm run package
+```
+
+### Install ydotool
+
+```bash
+# Ubuntu/Debian
+sudo apt install ydotool
+
+# Fedora
+sudo dnf install ydotool
+
+# Arch Linux
+sudo pacman -S ydotool
 ```
 
 ### From Release
 
-Download the latest `.AppImage` or `.deb` package from the [Releases](https://github.com/taraksh01/wisper/releases) page and install it.
+Download the latest `.AppImage` or `.deb` package from the [Releases](https://github.com/taraksh01/wisper/releases) page.
 
 ## Usage
 
@@ -46,16 +68,14 @@ Download the latest `.AppImage` or `.deb` package from the [Releases](https://gi
    - **Groq**: Free, fast Whisper models (recommended)
    - **OpenAI**: Official Whisper API
 3. Enter your API key
-4. Configure auto-copy option
-5. Click **Save Settings**
+4. Click **Save**
 
 ### Recording
 
-1. Press `Shift+Space` to start recording (slim bar appears with waveform)
+1. Press `Shift+Space` to start recording (bar appears)
 2. Speak into your microphone
 3. Press `Shift+Space` again to stop
-4. Text is transcribed, copied to clipboard, and the bar hides
-5. Paste with `Ctrl+V` (or `Ctrl+Shift+V` in terminal)
+4. Text is transcribed and typed directly at your cursor
 
 ### System Tray
 
@@ -64,13 +84,13 @@ Download the latest `.AppImage` or `.deb` package from the [Releases](https://gi
 
 ## Wayland Setup (GNOME/Debian)
 
-On Wayland, global shortcuts must be configured through your desktop environment since apps cannot register global hotkeys directly.
+On Wayland, global shortcuts must be configured through your desktop environment.
 
 ### Set Up Keyboard Shortcut
 
 1. Open **Settings** → **Keyboard** → **Keyboard Shortcuts** → **View and Customize Shortcuts**
 2. Scroll to bottom and click **Custom Shortcuts**
-3. Click **Add Shortcut** (+ button)
+3. Click **Add Shortcut** (+)
 4. Configure:
    - **Name**: `Wisper Toggle`
    - **Command**: `wisper` (or path to AppImage)
@@ -106,32 +126,29 @@ Access settings via system tray → **Settings**
 
 | Option | Description |
 |--------|-------------|
-| Transcription Provider | Choose between Groq and OpenAI |
+| Provider | Choose between Groq and OpenAI |
 | API Key | Your provider's API key |
-| Auto-copy | Automatically copy transcription to clipboard (default: on) |
-
-## Requirements
-
-- Linux (Debian/Ubuntu 22.04+ or other distributions)
-- Microphone access
-- Internet connection (for API calls)
 
 ## Building
 
 ```bash
 # Development
-npm run dev              # Start Vite dev server only
-npm run electron:dev     # Start Electron with hot reload
+pnpm run dev              # Start Vite dev server only
+pnpm run electron:dev     # Start Electron with hot reload
 
 # Production
-npm run build            # Build React app
-npm run package          # Create distributables (.AppImage, .deb)
+pnpm run build            # Build React app
+pnpm run package          # Create distributables (.AppImage, .deb)
 ```
 
 ## Troubleshooting
 
+### ydotool not working
+- Ensure ydotool is installed
+- Check permissions: `sudo chmod 666 /dev/uinput`
+- For Wayland, ydotool may require additional setup
+
 ### Global shortcut not working on Wayland
-- Wayland doesn't support global shortcuts from apps
 - Set up a custom keyboard shortcut in GNOME Settings (see Wayland Setup above)
 - The app uses single-instance lock, so running it again toggles recording
 
