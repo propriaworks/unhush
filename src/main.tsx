@@ -5,6 +5,8 @@ import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <RecordingBar />
+    <div className="w-screen h-screen m-0 p-0 overflow-hidden">
+      <RecordingBar />
+    </div>
   </React.StrictMode>
 );

@@ -4,6 +4,7 @@ import { Waveform } from "./Waveform";
 
 function RecordingBar() {
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionComplete, setTranscriptionComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { isRecording, audioLevel, startRecording, stopRecording } =
@@ -70,15 +71,22 @@ function RecordingBar() {
         if (autoCopyEnabled) {
           await window.electronAPI.copyToClipboard(trimmedText);
         }
-        window.electronAPI.hideWindow();
+        setTranscriptionComplete(true);
+        setTimeout(() => {
+          window.electronAPI?.hideWindow();
+          setTranscriptionComplete(false);
+        }, 1200);
       } else if (window.electronAPI) {
         window.electronAPI.hideWindow();
       }
     } catch (err) {
       console.error("Transcription failed:", err);
-      if (window.electronAPI) {
-        window.electronAPI.hideWindow();
-      }
+      setError(err instanceof Error ? err.message : "Transcription failed");
+      setTimeout(() => {
+        if (window.electronAPI) {
+          window.electronAPI.hideWindow();
+        }
+      }, 2000);
     } finally {
       setIsTranscribing(false);
     }
@@ -124,38 +132,56 @@ function RecordingBar() {
     }
   }, [handleStartRecording, handleStopRecording]);
 
-  return (
-    <div className="w-full h-full flex items-center justify-center px-6">
-      {error && <div className="text-red-400 text-sm text-center">{error}</div>}
-
-      {isTranscribing && !error && (
-        <div className="flex items-center gap-3">
-          <svg
-            className="w-5 h-5 text-primary-400 animate-spin"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-          <span className="text-white/60 text-sm">Transcribing...</span>
+  const renderContent = () => {
+    if (error) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+          <span className="text-red-300 text-sm font-medium">{error}</span>
         </div>
-      )}
+      );
+    }
 
-      {isRecording && !isTranscribing && !error && (
-        <Waveform audioLevel={audioLevel} isRecording={isRecording} />
-      )}
+    if (transcriptionComplete) {
+      return (
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="text-green-300 text-sm font-medium">Copied!</span>
+        </div>
+      );
+    }
+
+    if (isTranscribing) {
+      return (
+        <div className="flex items-center gap-1.5 h-6">
+          <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite]" style={{ height: '40%' }} />
+          <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ height: '80%' }} />
+          <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '60%' }} />
+          <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ height: '100%' }} />
+          <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ height: '50%' }} />
+        </div>
+      );
+    }
+
+    if (isRecording) {
+      return <Waveform audioLevel={audioLevel} isRecording={isRecording} />;
+    }
+
+    return (
+      <div className="flex items-center gap-2 text-white/40">
+        <div className="w-6 h-6 rounded-full border-2 border-white/20 flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-white/40" />
+        </div>
+        <span className="text-xs font-medium">Press Shift+Space to record</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="w-full h-full flex items-center justify-center px-4">
+      {renderContent()}
     </div>
   );
 }

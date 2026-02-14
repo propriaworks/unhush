@@ -33,7 +33,21 @@ try {
 function toggleRecording() {
   if (mainWindow) {
     if (!isRecording) {
+      mainWindow.show();
       positionWindowAtBottom();
+      mainWindow.webContents.send("start-recording");
+      isRecording = true;
+    } else {
+      mainWindow.webContents.send("stop-recording");
+      isRecording = false;
+    }
+  }
+}
+
+// Toggle recording: show+record or stop+hide
+function toggleRecording() {
+  if (mainWindow) {
+    if (!isRecording) {
       mainWindow.show();
       mainWindow.webContents.send("start-recording");
       isRecording = true;
@@ -44,37 +58,28 @@ function toggleRecording() {
   }
 }
 
-function positionWindowAtBottom() {
-  if (!mainWindow) return;
-  const { screen } = require("electron");
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.workAreaSize;
-  const windowBounds = mainWindow.getBounds();
-  const x = Math.round((width - windowBounds.width) / 2);
-  const y = Math.round(height - windowBounds.height - 20);
-  mainWindow.setPosition(x, y);
-}
-
 function createWindow() {
   const { screen } = require("electron");
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
-  const winWidth = 300;
-  const winHeight = 60;
+  const winWidth = 320;
+  const winHeight = 80;
   const x = Math.round((width - winWidth) / 2);
   const y = Math.round(height - winHeight - 20);
 
   mainWindow = new BrowserWindow({
     width: winWidth,
     height: winHeight,
+    minWidth: 200,
+    minHeight: 60,
     x,
     y,
     frame: false,
     transparent: true,
     hasShadow: false,
     alwaysOnTop: true,
-    resizable: false,
-    movable: false,
+    resizable: true,
+    movable: true,
     skipTaskbar: true,
     show: false,
     webPreferences: {
@@ -95,14 +100,6 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-
-  // Hide window when it loses focus (optional - can be removed if annoying)
-  mainWindow.on("blur", () => {
-    // Only hide if not recording
-    if (!isRecording && mainWindow && mainWindow.isVisible()) {
-      // Don't auto-hide, let user control via hotkey
-    }
-  });
 }
 
 function createSettingsWindow() {
@@ -112,12 +109,12 @@ function createSettingsWindow() {
   }
 
   settingsWindow = new BrowserWindow({
-    width: 480,
-    height: 780,
+    minWidth: 320,
+    minHeight: 360,
     frame: true,
     resizable: true,
     minimizable: true,
-    maximizable: false,
+    maximizable: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -203,22 +200,17 @@ ipcMain.on("set-recording-state", (event, state) => {
 
 const gotTheLock = app.requestSingleInstanceLock();
 
-// Check for --toggle argument
-const hasToggleArg = process.argv.includes("--toggle");
-
 if (!gotTheLock) {
-  // Another instance exists - it will receive second-instance event
-  // and toggle recording
   app.quit();
 } else {
-  app.on("second-instance", (event, argv) => {
-    // Toggle recording when second instance is launched
+  app.on("second-instance", () => {
     if (mainWindow) {
       toggleRecording();
     }
   });
 
   app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
     createWindow();
     createTray();
 
@@ -230,14 +222,12 @@ if (!gotTheLock) {
 
     globalShortcut.unregisterAll();
 
-    // Register global shortcut
     if (!isWayland) {
       globalShortcut.register("Shift+Space", () => {
         toggleRecording();
       });
     }
 
-    // Also register local shortcut for when window is focused
     if (mainWindow) {
       localShortcut.register(mainWindow, "Shift+Space", () => {
         toggleRecording();
