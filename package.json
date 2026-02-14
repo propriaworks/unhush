@@ -9,8 +9,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "electron": "electron . --no-sandbox",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
-    "package": "npm run build && electron-builder --linux"
+    "electron:dev": "concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
+    "package": "pnpm run build && electron-builder --linux"
   },
   "keywords": [
     "voice",
@@ -22,19 +22,19 @@
   "license": "MIT",
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
-    "@types/node": "^25.0.3",
-    "@types/react": "^19.2.7",
+    "@types/node": "^25.2.3",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.2",
+    "@vitejs/plugin-react": "^5.1.4",
     "concurrently": "^9.2.1",
-    "electron": "^39.2.7",
-    "electron-builder": "^26.0.12",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "electron": "40.4.1",
+    "electron-builder": "^26.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
-    "vite": "^7.3.0",
-    "wait-on": "^9.0.3"
+    "vite": "^7.3.1",
+    "wait-on": "^9.0.4"
   },
   "build": {
     "appId": "com.wisper.voice",
@@ -55,7 +55,6 @@
     ]
   },
   "dependencies": {
-    "electron-localshortcut": "^3.2.1",
-    "framer-motion": "^12.23.26"
+    "electron-localshortcut": "^3.2.1"
   }
 }
