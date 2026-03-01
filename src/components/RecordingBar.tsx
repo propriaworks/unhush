@@ -9,14 +9,36 @@ function RecordingBar() {
   const { isRecording, audioLevel, startRecording, stopRecording } =
     useAudioRecorder();
 
-  const getApiKey = () => localStorage.getItem("wisper_api_key") || "";
-
   const transcribeAudio = async (audioBlob: Blob) => {
-    const apiKey = getApiKey();
     const provider = localStorage.getItem("wisper_provider") || "groq";
 
-    if (!apiKey) {
-      setError("No API key. Open Settings from tray.");
+    let apiKey: string;
+    let apiUrl: string;
+    let model: string;
+
+    if (provider === "groq") {
+      apiKey = localStorage.getItem("wisper_groq_key") || "";
+      apiUrl = "https://api.groq.com/openai/v1/audio/transcriptions";
+      model = "whisper-large-v3-turbo";
+    } else if (provider === "openai") {
+      apiKey = localStorage.getItem("wisper_openai_key") || "";
+      apiUrl = "https://api.openai.com/v1/audio/transcriptions";
+      model = "whisper-1";
+    } else {
+      apiKey = localStorage.getItem("wisper_custom_key") || "";
+      apiUrl = localStorage.getItem("wisper_custom_url") || "";
+      model = localStorage.getItem("wisper_custom_model") || "";
+    }
+
+    let errMsg = ""
+    if (provider === "custom" && !(apiUrl && model)) {
+      errMsg = "API URL or model is unset. Open Settings from tray.";
+    } else if (provider !== "custom" && !apiKey) {
+      // apiKey is not required for custom
+      errMsg = "No API key. Open Settings from tray.";
+    }
+    if (errMsg) {
+      setError(errMsg);
       setTimeout(() => {
         if (window.electronAPI) {
           window.electronAPI.hideWindow();
@@ -32,17 +54,6 @@ function RecordingBar() {
       const extension = audioBlob.type.includes("ogg") ? "ogg" : "webm";
       formData.append("file", audioBlob, `recording.${extension}`);
       formData.append("response_format", "text");
-
-      let apiUrl: string;
-      let model: string;
-
-      if (provider === "groq") {
-        apiUrl = "https://api.groq.com/openai/v1/audio/transcriptions";
-        model = "whisper-large-v3-turbo";
-      } else {
-        apiUrl = "https://api.openai.com/v1/audio/transcriptions";
-        model = "whisper-1";
-      }
 
       formData.append("model", model);
 
