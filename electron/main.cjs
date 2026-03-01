@@ -182,6 +182,7 @@ function createTray() {
 ipcMain.handle("hide-window", async () => {
   if (mainWindow) {
     mainWindow.hide();
+    isRecording = false;
   }
 });
 
@@ -192,12 +193,13 @@ ipcMain.handle("copy-to-clipboard", async (event, text) => {
 
 ipcMain.handle("paste-to-cursor", async (event, text) => {
   const { execSync } = require("child_process");
-  
+
   try {
     const tempFile = '/tmp/wisper-text.txt';
     require('fs').writeFileSync(tempFile, text);
     const timeout = Math.max(5000, text.length * 50);
-    execSync(`ydotool type --file ${tempFile}`, { timeout, stdio: 'ignore' });
+    // key delay (how fast the text is written) may be something worth exposing to the user
+    execSync(`ydotool type --delay 100 --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
   } catch (err) {
     require('fs').appendFileSync('/tmp/wisper.log', `error: ${err.message}\n`);
   }
@@ -240,9 +242,7 @@ if (!gotTheLock) {
       globalShortcut.register("Shift+Space", () => {
         toggleRecording();
       });
-    }
-
-    if (mainWindow) {
+    } else if (mainWindow) {
       localShortcut.register(mainWindow, "Shift+Space", () => {
         toggleRecording();
       });

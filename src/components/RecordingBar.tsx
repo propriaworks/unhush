@@ -102,6 +102,8 @@ function RecordingBar() {
     }
     if (audioBlob) {
       await transcribeAudio(audioBlob);
+    } else if (window.electronAPI) {
+      window.electronAPI.hideWindow();
     }
   }, [stopRecording]);
 
@@ -149,14 +151,7 @@ function RecordingBar() {
       return <Waveform audioLevel={audioLevel} isRecording={isRecording} />;
     }
 
-    return (
-      <div className="flex items-center gap-2 text-white/40">
-        <div className="w-6 h-6 rounded-full border-2 border-white/20 flex items-center justify-center">
-          <div className="w-2 h-2 rounded-full bg-white/40" />
-        </div>
-        <span className="text-xs font-medium">Press Shift+Space to record</span>
-      </div>
-    );
+    return <Waveform audioLevel={0} isRecording={false} />;
   };
 
   return (

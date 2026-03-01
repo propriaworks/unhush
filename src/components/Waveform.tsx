@@ -80,7 +80,7 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
         const x = startX + i * (barWidth + gap);
         const y = centerY - smoothedHeight / 2;
 
-        ctx.fillStyle = isSpeaking ? primaryColor : "rgba(255, 255, 255, 0.25)";
+        ctx.fillStyle = isRecording ? primaryColor : "rgba(255, 255, 255, 0.25)";
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(x, y, barWidth, smoothedHeight, 10);
