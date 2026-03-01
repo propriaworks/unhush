@@ -71,7 +71,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          // noiseSuppression: false,  // Keep noise suppression (on by default)
+          autoGainControl: false,
+        },
+      });
       streamRef.current = stream;
 
       const audioContext = audioContextRef.current!;
@@ -97,11 +103,19 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       audioChunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
+      // Resolve when the first encoded chunk arrives — proves full pipeline readiness.
+      const firstChunkReady = new Promise<void>((resolve) => {
+        let resolved = false;
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+            if (!resolved) {
+              resolved = true;
+              resolve();
+            }
+          }
+        };
+      });
 
       mediaRecorder.onstop = () => {
         const actualMimeType = mediaRecorder.mimeType || "audio/webm";
@@ -130,29 +144,16 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       };
       updateLevel();
 
-      // Wait until the mic is delivering real audio AND at least 300 ms have elapsed.
-      // The 300 ms floor covers both hardware warmup and codec initialization time.
-      // The analyser check (noise floor > 0) is a secondary gate; on its own it fires
-      // too fast (first-frame noise), so the timer dominates on cold start.
-      await Promise.all([
-        new Promise<void>(resolve => setTimeout(resolve, 300)),
-        new Promise<void>(resolve => {
-          const warmupData = new Uint8Array(analyser.frequencyBinCount);
-          const deadline = setTimeout(resolve, 500);
-          const check = () => {
-            analyser.getByteFrequencyData(warmupData);
-            if (warmupData.some(v => v > 0)) {
-              clearTimeout(deadline);
-              resolve();
-            } else {
-              requestAnimationFrame(check);
-            }
-          };
-          requestAnimationFrame(check);
-        }),
+      // Wait for end-to-end readiness: first encoded audio chunk must arrive.
+      // Adaptive: fast mics ~100ms, slow USB mics ~200–800ms.
+      // 2s timeout is a safety net for broken mics.
+      await Promise.race([
+        firstChunkReady,
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
       ]);
 
       playChime(880);       // signals "mic is live, speak now"
+      audioChunksRef.current = audioChunksRef.current.slice(0, 1); // keep header chunk, discard remaining warmup
       setIsRecording(true);
     } catch (err) {
       console.error("Failed to start recording:", err);

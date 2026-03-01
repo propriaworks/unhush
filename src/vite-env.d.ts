@@ -15,6 +15,7 @@ declare global {
       resizeWindow: (width: number, height: number) => void;
       onOpenSettings: (callback: () => void) => void;
       removeAllListeners: (channel: string) => void;
+      saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string) => Promise<string | null>;
     };
   }
 }

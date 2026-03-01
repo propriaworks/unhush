@@ -239,16 +239,31 @@ if (!gotTheLock) {
     globalShortcut.unregisterAll();
 
     if (!isWayland) {
-      globalShortcut.register("Ctrl+Alt+Space", () => {
+      globalShortcut.register("Shift+Space", () => {
         toggleRecording();
       });
     } else if (mainWindow) {
-      localShortcut.register(mainWindow, "Ctrl+Alt+Space", () => {
+      localShortcut.register(mainWindow, "Shift+Space", () => {
         toggleRecording();
       });
     }
   });
 }
+
+ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType) => {
+  try {
+    const extension = mimeType.includes("ogg") ? "ogg" : "webm";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const debugDir = "/tmp/wisper-debug";
+    fs.mkdirSync(debugDir, { recursive: true });
+    const filePath = path.join(debugDir, `recording-${timestamp}.${extension}`);
+    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    return filePath;
+  } catch (err) {
+    console.error("Failed to save debug audio:", err);
+    return null;
+  }
+});
 
 app.on("window-all-closed", () => {
   // Keep app running in tray

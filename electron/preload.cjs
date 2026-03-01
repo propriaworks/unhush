@@ -21,4 +21,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // Debug
+  saveDebugAudio: (arrayBuffer, mimeType) =>
+    ipcRenderer.invoke("save-debug-audio", arrayBuffer, mimeType),
 });

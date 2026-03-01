@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 
+const DEBUG_AUDIO = false;
+
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -117,6 +119,11 @@ function RecordingBar() {
       window.electronAPI.setRecordingState(false);
     }
     if (audioBlob) {
+      if (DEBUG_AUDIO && window.electronAPI?.saveDebugAudio) {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const savedPath = await window.electronAPI.saveDebugAudio(arrayBuffer, audioBlob.type);
+        if (savedPath) console.log("Debug audio saved to:", savedPath);
+      }
       await transcribeAudio(audioBlob);
     } else if (window.electronAPI) {
       setOverlayVisible(false);
