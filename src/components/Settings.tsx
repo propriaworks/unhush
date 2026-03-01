@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 
-type Provider = "groq" | "openai";
+type Provider = "groq" | "openai" | "custom";
 
 function Settings() {
   const [groqKey, setGroqKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
+  const [customKey, setCustomKey] = useState("");
+  const [customUrl, setCustomUrl] = useState("");
+  const [customModel, setCustomModel] = useState("");
   const [provider, setProvider] = useState<Provider>("groq");
   const [saved, setSaved] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -12,22 +15,24 @@ function Settings() {
   useEffect(() => {
     setGroqKey(localStorage.getItem("wisper_groq_key") || "");
     setOpenaiKey(localStorage.getItem("wisper_openai_key") || "");
+    setCustomKey(localStorage.getItem("wisper_custom_key") || "");
+    setCustomUrl(localStorage.getItem("wisper_custom_url") || "");
+    setCustomModel(localStorage.getItem("wisper_custom_model") || "");
     setProvider(
       (localStorage.getItem("wisper_provider") as Provider) || "groq",
     );
   }, []);
 
-  const currentKey = provider === "groq" ? groqKey : openaiKey;
-  const setCurrentKey = provider === "groq" ? setGroqKey : setOpenaiKey;
+  const currentKey = provider === "groq" ? groqKey : provider === "openai" ? openaiKey : customKey;
+  const setCurrentKey = provider === "groq" ? setGroqKey : provider === "openai" ? setOpenaiKey : setCustomKey;
 
   const handleSave = async () => {
     localStorage.setItem("wisper_groq_key", groqKey);
     localStorage.setItem("wisper_openai_key", openaiKey);
+    localStorage.setItem("wisper_custom_key", customKey);
+    localStorage.setItem("wisper_custom_url", customUrl);
+    localStorage.setItem("wisper_custom_model", customModel);
     localStorage.setItem("wisper_provider", provider);
-    localStorage.setItem(
-      "wisper_api_key",
-      provider === "groq" ? groqKey : openaiKey,
-    );
 
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -35,10 +40,6 @@ function Settings() {
 
   const handleProviderChange = (newProvider: Provider) => {
     setProvider(newProvider);
-    localStorage.setItem(
-      "wisper_api_key",
-      newProvider === "groq" ? groqKey : openaiKey,
-    );
     localStorage.setItem("wisper_provider", newProvider);
   };
 
@@ -83,6 +84,16 @@ function Settings() {
               >
                 OpenAI
               </button>
+              <button
+                onClick={() => handleProviderChange("custom")}
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                  provider === "custom"
+                    ? "bg-primary-500 text-white"
+                    : "bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
+              >
+                Custom
+              </button>
             </div>
           </div>
 
@@ -95,7 +106,7 @@ function Settings() {
                 type={showPassword ? "text" : "password"}
                 value={currentKey}
                 onChange={(e) => setCurrentKey(e.target.value)}
-                placeholder={provider === "groq" ? "gsk_..." : "sk-..."}
+                placeholder={provider === "groq" ? "gsk_..." : provider === "openai" ? "sk-..." : "Bearer token..."}
                 className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
               />
               <button
@@ -116,6 +127,31 @@ function Settings() {
               </button>
             </div>
           </div>
+
+          {provider === "custom" && (
+            <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+              <div>
+                <label className="block text-white/70 text-xs font-medium mb-1">API URL</label>
+                <input
+                  type="text"
+                  value={customUrl}
+                  onChange={(e) => setCustomUrl(e.target.value)}
+                  placeholder="https://your-server/v1/audio/transcriptions"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-white/70 text-xs font-medium mb-1">Model name</label>
+                <input
+                  type="text"
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="whisper-1"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="p-3 bg-white/5 rounded-xl border border-white/5">
             <div className="flex items-center gap-2 text-white/60 text-xs">
