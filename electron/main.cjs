@@ -226,11 +226,11 @@ if (!gotTheLock) {
     globalShortcut.unregisterAll();
 
     if (!isWayland) {
-      globalShortcut.register("Shift+Space", () => {
+      globalShortcut.register("Ctrl+Alt+Space", () => {
         toggleRecording();
       });
     } else if (mainWindow) {
-      localShortcut.register(mainWindow, "Shift+Space", () => {
+      localShortcut.register(mainWindow, "Ctrl+Alt+Space", () => {
         toggleRecording();
       });
     }

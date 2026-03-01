@@ -82,26 +82,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         await audioContext.resume();
       }
 
-      playChime(880);
-
       // Connect stream to the persistent AnalyserNode
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
       streamSourceRef.current = source;
 
-      // Start monitoring audio level
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      isMonitoringRef.current = true;
-      const updateLevel = () => {
-        if (isMonitoringRef.current && analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          setAudioLevel(avg / 255);
-          animationFrameRef.current = requestAnimationFrame(updateLevel);
-        }
-      };
-      updateLevel();
-
+      // Start MediaRecorder immediately — codec must be running before speech arrives.
+      // Starting it here (before the warmup delay) gives the Opus encoder time to
+      // fully initialize; any leading silence is harmless for Whisper.
       const mimeType = mimeTypeRef.current;
       const mediaRecorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -128,6 +116,43 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(100);
+
+      // Start monitoring audio level
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      isMonitoringRef.current = true;
+      const updateLevel = () => {
+        if (isMonitoringRef.current && analyserRef.current) {
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          setAudioLevel(avg / 255);
+          animationFrameRef.current = requestAnimationFrame(updateLevel);
+        }
+      };
+      updateLevel();
+
+      // Wait until the mic is delivering real audio AND at least 300 ms have elapsed.
+      // The 300 ms floor covers both hardware warmup and codec initialization time.
+      // The analyser check (noise floor > 0) is a secondary gate; on its own it fires
+      // too fast (first-frame noise), so the timer dominates on cold start.
+      await Promise.all([
+        new Promise<void>(resolve => setTimeout(resolve, 300)),
+        new Promise<void>(resolve => {
+          const warmupData = new Uint8Array(analyser.frequencyBinCount);
+          const deadline = setTimeout(resolve, 500);
+          const check = () => {
+            analyser.getByteFrequencyData(warmupData);
+            if (warmupData.some(v => v > 0)) {
+              clearTimeout(deadline);
+              resolve();
+            } else {
+              requestAnimationFrame(check);
+            }
+          };
+          requestAnimationFrame(check);
+        }),
+      ]);
+
+      playChime(880);       // signals "mic is live, speak now"
       setIsRecording(true);
     } catch (err) {
       console.error("Failed to start recording:", err);
