@@ -3,6 +3,7 @@ import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 
 function RecordingBar() {
+  const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +42,7 @@ function RecordingBar() {
       setError(errMsg);
       setTimeout(() => {
         if (window.electronAPI) {
+          setOverlayVisible(false);
           window.electronAPI.hideWindow();
         }
       }, 2000);
@@ -76,9 +78,11 @@ function RecordingBar() {
       const trimmedText = text.trim();
 
       if (trimmedText && window.electronAPI) {
+        setOverlayVisible(false);
         window.electronAPI.hideWindow();
         window.electronAPI.pasteToCursor(trimmedText);
       } else if (window.electronAPI) {
+        setOverlayVisible(false);
         window.electronAPI.hideWindow();
       }
     } catch (err) {
@@ -86,6 +90,7 @@ function RecordingBar() {
       setError(err instanceof Error ? err.message : "Transcription failed");
       setTimeout(() => {
         if (window.electronAPI) {
+          setOverlayVisible(false);
           window.electronAPI.hideWindow();
         }
       }, 2000);
@@ -114,6 +119,7 @@ function RecordingBar() {
     if (audioBlob) {
       await transcribeAudio(audioBlob);
     } else if (window.electronAPI) {
+      setOverlayVisible(false);
       window.electronAPI.hideWindow();
     }
   }, [stopRecording]);
@@ -122,6 +128,7 @@ function RecordingBar() {
   useEffect(() => {
     if (window.electronAPI) {
       window.electronAPI.onStartRecording(() => {
+        setOverlayVisible(true);
         handleStartRecording();
       });
 
@@ -137,6 +144,8 @@ function RecordingBar() {
   }, [handleStartRecording, handleStopRecording]);
 
   const renderContent = () => {
+    if (!overlayVisible) return null;
+
     if (error) {
       return (
         <div className="flex items-center gap-2">

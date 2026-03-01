@@ -33,7 +33,8 @@ try {
 function toggleRecording() {
   if (mainWindow) {
     if (!isRecording) {
-      mainWindow.show();
+      mainWindow.setIgnoreMouseEvents(false);
+      mainWindow.setAlwaysOnTop(true);
       mainWindow.webContents.send("start-recording");
       isRecording = true;
     } else {
@@ -66,7 +67,7 @@ function createWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
-    show: false,
+    type: "notification",   // Linux: _NET_WM_WINDOW_TYPE_NOTIFICATION — excludes from Alt-Tab, atom is pre-cached by Chromium
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -84,6 +85,17 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  // Window is shown once at startup (transparent + click-through).
+  // All subsequent visibility changes are handled via setIgnoreMouseEvents
+  // to avoid OS window-manager sounds on every recording toggle.
+  // Window is shown once at startup (transparent + click-through + not on top).
+  // All subsequent visibility changes use setIgnoreMouseEvents / setAlwaysOnTop
+  // to avoid OS window-manager sounds on every recording toggle.
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.setIgnoreMouseEvents(true);
+    mainWindow.setAlwaysOnTop(false);
   });
 }
 
@@ -166,7 +178,8 @@ function createTray() {
 // IPC Handlers
 ipcMain.handle("hide-window", async () => {
   if (mainWindow) {
-    mainWindow.hide();
+    mainWindow.setIgnoreMouseEvents(true);
+    mainWindow.setAlwaysOnTop(false);
     isRecording = false;
   }
 });
