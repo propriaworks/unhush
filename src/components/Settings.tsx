@@ -8,7 +8,7 @@ const SHORTCUT_OPTIONS = [
   "Ctrl+Shift+Space",
   "Ctrl+Shift+Insert",
   "Alt+F12",
-];
+]; // Note: ScrollLock, Super key, and ContextMenu key combos don't work
 
 function Settings() {
   const [groqKey, setGroqKey] = useState("");
