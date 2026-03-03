@@ -107,6 +107,7 @@ function createWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
+    focusable: false,
     type: "notification",   // Linux: _NET_WM_WINDOW_TYPE_NOTIFICATION — excludes from Alt-Tab, atom is pre-cached by Chromium
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -148,7 +149,8 @@ function createSettingsWindow() {
 
   settingsWindow = new BrowserWindow({
     minWidth: 320,
-    minHeight: 385,
+    minHeight: 360,
+    height: 630,
     frame: true,
     resizable: true,
     minimizable: true,
@@ -283,6 +285,10 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+});
+
+process.on("SIGINT", () => {
+  app.quit();
 });
 
 app.on("before-quit", () => {

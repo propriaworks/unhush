@@ -36,7 +36,8 @@ function Settings() {
   const currentKey = provider === "groq" ? groqKey : provider === "openai" ? openaiKey : customKey;
   const setCurrentKey = provider === "groq" ? setGroqKey : provider === "openai" ? setOpenaiKey : setCustomKey;
 
-  const handleSave = async () => {
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     localStorage.setItem("wisper_groq_key", groqKey);
     localStorage.setItem("wisper_openai_key", openaiKey);
     localStorage.setItem("wisper_custom_key", customKey);
@@ -59,7 +60,7 @@ function Settings() {
 
   return (
     <div className="min-h-screen bg-dark-400 text-white p-4">
-      <div className="max-w-sm mx-auto">
+      <form onSubmit={handleSave} className="max-w-sm mx-auto">
         <div className="flex items-center justify-center gap-3 mb-4">
           <div className="w-8 h-8 rounded-full bg-primary-500 flex items-center justify-center shadow-lg shadow-primary-500/20">
             <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -79,6 +80,7 @@ function Settings() {
             </label>
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={() => handleProviderChange("groq")}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
                   provider === "groq"
@@ -89,6 +91,7 @@ function Settings() {
                 Groq
               </button>
               <button
+                type="button"
                 onClick={() => handleProviderChange("openai")}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
                   provider === "openai"
@@ -99,6 +102,7 @@ function Settings() {
                 OpenAI
               </button>
               <button
+                type="button"
                 onClick={() => handleProviderChange("custom")}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
                   provider === "custom"
@@ -186,7 +190,7 @@ function Settings() {
         </div>
 
         <button
-          onClick={handleSave}
+          type="submit"
           className={`w-full mt-4 py-2.5 px-4 rounded-lg font-medium text-sm transition-all ${
             saved
               ? "bg-green-500 text-white"
@@ -197,7 +201,7 @@ function Settings() {
         </button>
 
         <p className="mt-4 text-center text-white/25 text-xs">v1.1.0</p>
-      </div>
+      </form>
     </div>
   );
 }
