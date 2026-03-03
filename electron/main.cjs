@@ -30,12 +30,14 @@ try {
   isWayland = process.env.XDG_SESSION_TYPE === "wayland";
 } catch (e) {}
 
-function registerShortcut(shortcut) {
+async function registerShortcut(shortcut) {
   if (!isWayland) {
     globalShortcut.unregisterAll();
-    globalShortcut.register(shortcut, () => {
-      toggleRecording();
-    });
+    try {
+      await globalShortcut.register(shortcut, () => {
+        toggleRecording();
+      });
+    } catch {}
   } else if (mainWindow) {
     localShortcut.unregisterAll(mainWindow);
     localShortcut.register(mainWindow, shortcut, () => {
@@ -43,6 +45,28 @@ function registerShortcut(shortcut) {
     });
   }
   currentShortcut = shortcut;
+  updateTrayMenu();
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: `Toggle Recording (${currentShortcut})`,
+      click: () => { toggleRecording(); },
+    },
+    { type: "separator" },
+    {
+      label: "Settings",
+      click: () => { createSettingsWindow(); },
+    },
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => { app.quit(); },
+    },
+  ]);
+  tray.setContextMenu(contextMenu);
 }
 
 // Toggle recording: show+record or stop+hide
@@ -89,6 +113,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false, // disable cors checks, same-origin policy, mixed content blocking, file:// isolation, so we can load from APIs that don't send cors headers
     },
     icon: path.join(__dirname, "../assets/icon.png"),
   });
@@ -123,7 +148,7 @@ function createSettingsWindow() {
 
   settingsWindow = new BrowserWindow({
     minWidth: 320,
-    minHeight: 360,
+    minHeight: 385,
     frame: true,
     resizable: true,
     minimizable: true,
@@ -160,31 +185,8 @@ function createTray() {
   const trayIcon = icon.resize({ width: 22, height: 22 });
   tray = new Tray(trayIcon);
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Toggle Recording (Shift+Space)",
-      click: () => {
-        toggleRecording();
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Settings",
-      click: () => {
-        createSettingsWindow();
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => {
-        app.quit();
-      },
-    },
-  ]);
-
   tray.setToolTip("Wisper - Voice Dictation");
-  tray.setContextMenu(contextMenu);
+  updateTrayMenu();
 
   tray.on("click", () => {
     toggleRecording();
@@ -231,7 +233,7 @@ ipcMain.on("set-recording-state", (event, state) => {
 });
 
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
-  registerShortcut(shortcut);
+  await registerShortcut(shortcut);
   return true;
 });
 
@@ -256,8 +258,7 @@ if (!gotTheLock) {
         createWindow();
       }
     });
-
-    registerShortcut("Shift+Space");
+    // shortcut registration will occur (via IPC) immediately after the renderer loads
   });
 }
 

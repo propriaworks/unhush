@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "electron": "electron . --no-sandbox",
-    "electron:dev": "concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
+    "electron:dev": "concurrently --kill-others --success first \"vite\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
     "package": "pnpm run build && electron-builder --linux"
   },
   "keywords": [

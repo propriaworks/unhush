@@ -71,9 +71,12 @@ function RecordingBar() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`,
-        );
+        if (provider === "custom" && response.status == 405)
+          throw new Error("API error 405. Did you include the full v1/audio/transcriptions endpoint URL?")
+        else
+          throw new Error(
+            errorData.error?.message || `API error ${response.status}: ${response.statusText}`,
+          );
       }
 
       const text = await response.text();
