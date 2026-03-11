@@ -1,7 +1,7 @@
 export const VAD_CONFIG = {
   positiveSpeechThreshold: 0.35,
-  negativeSpeechThreshold: 0.25,
-  redemptionFrames: 8,        // consecutive non-speech frames before ending a segment (~256ms at 32ms/frame)
+  negativeSpeechThreshold: 0.20,
+  redemptionFrames: 9,          // consecutive non-speech frames before ending a segment (~288ms at 32ms/frame)
   minSegmentDuration: 15,       // seconds - flush on speech→silence if above this
   maxSegmentDuration: 29.9,     // seconds - forced cut
   hardCutLookback: 15,          // seconds to look back for best cut point

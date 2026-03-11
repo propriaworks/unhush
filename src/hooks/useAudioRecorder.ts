@@ -44,7 +44,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   // Debug audio saving
   const debugSessionRef = useRef<string | null>(null);
-  const debugSegmentTranscriptsRef = useRef<Map<number, string>>(new Map());
+  const debugSegmentTranscriptsRef = useRef<Map<number, { text: string; durationSec: number }>>(new Map());
 
   // Create AudioContext and AnalyserNode once on mount
   useEffect(() => {
@@ -182,7 +182,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       if (debugAudio) {
         debugSegmentTranscriptsRef.current = new Map();
         whisperQueue.onSegmentTranscribed = (idx, text) => {
-          debugSegmentTranscriptsRef.current.set(idx, text);
+          const existing = debugSegmentTranscriptsRef.current.get(idx);
+          debugSegmentTranscriptsRef.current.set(idx, { text, durationSec: existing?.durationSec ?? 0 });
         };
       }
       whisperQueueRef.current = whisperQueue;
@@ -191,12 +192,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       let vadInitialized = false;
       let accumulateFrames = false; // gate: don't accumulate audio until chime finishes
       try {
-        // const t0 = Date.now();
+        const t0 = Date.now();
         const { MicVAD } = await import("@ricky0123/vad-web");
 
-        const accumulator = new SegmentAccumulator((wavBlob, segmentIndex) => {
+        const accumulator = new SegmentAccumulator((wavBlob, segmentIndex, durationSec) => {
           whisperQueueRef.current?.enqueue(wavBlob, segmentIndex);
           if (debugSessionRef.current) {
+            debugSegmentTranscriptsRef.current.set(segmentIndex, { text: "", durationSec });
             const segmentName = `segment-${String(segmentIndex).padStart(3, "0")}.wav`;
             saveDebugBlob(wavBlob, segmentName);
           }
@@ -391,7 +393,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           const lines: string[] = [];
           [...debugSegmentTranscriptsRef.current.entries()]
             .sort((a, b) => a[0] - b[0])
-            .forEach(([idx, text]) => lines.push(`=== Segment ${idx} ===\n${text}\n`));
+            .forEach(([idx, { text, durationSec }]) =>
+              lines.push(`=== Segment ${idx} (${durationSec.toFixed(1)}s) ===\n${text}\n`));
           lines.push(`=== Final ===\n${transcript}`);
           saveDebugBlob(new Blob([lines.join("\n")], { type: "text/plain" }), "transcript.txt");
         }

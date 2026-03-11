@@ -7,12 +7,12 @@ export class SegmentAccumulator {
   private wasSpeaking = false;
   private redemptionCounter = 0;
   private segmentIndex = 0;
-  private onFlush: (wavBlob: Blob, segmentIndex: number) => void;
+  private onFlush: (wavBlob: Blob, segmentIndex: number, durationSec: number) => void;
 
   // Debug: retains references to all frames across flushes for full-recording export
   private allFrames: Float32Array[] | null = null;
 
-  constructor(onFlush: (wavBlob: Blob, segmentIndex: number) => void) {
+  constructor(onFlush: (wavBlob: Blob, segmentIndex: number, durationSec: number) => void) {
     this.onFlush = onFlush;
   }
 
@@ -100,9 +100,11 @@ export class SegmentAccumulator {
 
     if (framesToFlush.length === 0) return;
 
+    const totalSamples = framesToFlush.reduce((sum, f) => sum + f.length, 0);
+    const durationSec = totalSamples / VAD_CONFIG.sampleRate;
     const wavBlob = SegmentAccumulator.encodeWav(framesToFlush, VAD_CONFIG.sampleRate);
     const idx = this.segmentIndex++;
-    this.onFlush(wavBlob, idx);
+    this.onFlush(wavBlob, idx, durationSec);
 
     // If we flushed everything (natural pause), reset fully
     if (frameCount >= this.frames.length) {
