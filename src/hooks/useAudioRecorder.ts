@@ -44,6 +44,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   // Debug audio saving
   const debugSessionRef = useRef<string | null>(null);
+  const debugChunkTranscriptsRef = useRef<Map<number, string>>(new Map());
 
   // Create AudioContext and AnalyserNode once on mount
   useEffect(() => {
@@ -72,9 +73,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     };
   }, []);
 
-  const playChime = useCallback((frequency: number) => {
+  const playChime = useCallback((frequency: number): Promise<void> => {
     const ctx = audioContextRef.current;
-    if (!ctx) return;
+    if (!ctx) return Promise.resolve();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -87,6 +88,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
     osc.start(now);
     osc.stop(now + 0.18);
+    return new Promise<void>((resolve) => { osc.onended = () => resolve(); });
   }, []);
 
   const startAudioLevelMonitoring = useCallback(() => {
@@ -177,11 +179,19 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setTranscriptionProgress({ completed, total });
       };
       whisperQueue.onLog = wlog;
+      if (debugAudio) {
+        debugChunkTranscriptsRef.current = new Map();
+        whisperQueue.onChunkTranscribed = (idx, text) => {
+          debugChunkTranscriptsRef.current.set(idx, text);
+        };
+      }
       whisperQueueRef.current = whisperQueue;
 
       // Try VAD pipeline using MicVAD with our existing stream and AudioContext
       let vadInitialized = false;
+      let accumulateFrames = false; // gate: don't accumulate audio until chime finishes
       try {
+        // const t0 = Date.now();
         const { MicVAD } = await import("@ricky0123/vad-web");
 
         const accumulator = new ChunkAccumulator((wavBlob, chunkIndex) => {
@@ -194,10 +204,15 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         if (debugAudio) accumulator.enableDebug();
         chunkAccumulatorRef.current = accumulator;
 
+        let firstFrameResolve: (() => void) | null = null;
+        const firstFrameReady = new Promise<void>((resolve) => {
+          firstFrameResolve = resolve;
+        });
+        // wlog("info", `VAD: loading model (audioCtx state=${audioContext.state})`);
         const vad = await MicVAD.new({
           model: "v5",
           baseAssetPath: "./vad/",
-          onnxWASMBasePath: "./vad/",
+          onnxWASMBasePath: new URL("./vad/", window.location.href).href,
           audioContext,
           getStream: () => Promise.resolve(stream),
           pauseStream: () => Promise.resolve(),   // we handle stream lifecycle ourselves
@@ -209,6 +224,22 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
             probabilities: { isSpeech: number },
             frame: Float32Array,
           ) => {
+            if (firstFrameResolve) {
+              // Mic hardware sends silent frames during init — skip until real audio arrives
+              let maxAbs = 0;
+              for (let i = 0; i < frame.length; i++) {
+                const abs = Math.abs(frame[i]);
+                if (abs > maxAbs) maxAbs = abs;
+              }
+              if (maxAbs > 0.0001) {
+                // wlog("info", `VAD: first non-silent frame at +${Date.now() - t0}ms (peak=${maxAbs.toFixed(6)})`);
+                firstFrameResolve();
+                firstFrameResolve = null;
+              } else {
+                return; // discard silent frame from mic init
+              }
+            }
+            if (!accumulateFrames) return; // discard frames during chime
             chunkAccumulatorRef.current?.addFrame(
               probabilities.isSpeech,
               frame,
@@ -220,10 +251,23 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           onSpeechRealStart: () => {},
         });
 
+        // wlog("info", `VAD: model loaded at +${Date.now() - t0}ms, starting audio pipeline`);
         await vad.start();
+        // wlog("info", `VAD: pipeline started at +${Date.now() - t0}ms (audioCtx state=${audioContext.state}), waiting for first frame`);
         vadRef.current = vad;
         vadAvailableRef.current = true;
         vadInitialized = true;
+
+        // Wait for first real audio frame to confirm mic is active (2s timeout fallback)
+        const timedOut = await Promise.race([
+          firstFrameReady.then(() => false),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 2000)),
+        ]);
+        // if (timedOut) {
+        //   wlog("warn", `VAD: timed out waiting for first frame after ${Date.now() - t0}ms`);
+        // } else {
+        //   wlog("info", `VAD: ready at +${Date.now() - t0}ms`);
+        // }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         wlog("warn", `VAD initialization failed, falling back to MediaRecorder: ${msg}`);
@@ -266,20 +310,18 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       startAudioLevelMonitoring();
 
-      // Brief delay for VAD to initialize before chime
-      if (vadInitialized) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 200));
-      }
+      // wlog("info", `Recording: playing chime and setting isRecording(true) (audioCtx state=${audioContextRef.current?.state})`);
+      const chimePromise = playChime(880);
+      setIsRecording(true);  // turn red as chime plays
 
-      playChime(880);  // signals "mic is live, speak now"
-
+      await chimePromise;    // wait for chime to finish
 
       if (!vadInitialized) {
         // Keep header chunk for MediaRecorder fallback
         audioChunksRef.current = audioChunksRef.current.slice(0, 1);
       }
+      accumulateFrames = true; // open gate: start accumulating audio
 
-      setIsRecording(true);
     } catch (err) {
       console.error("Failed to start recording:", err);
       throw err;
@@ -343,6 +385,15 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         const queue = whisperQueueRef.current!;
         setTranscriptionProgress({ completed: 0, total: totalChunks });
         transcript = await queue.finalize(totalChunks);
+
+        if (debugSessionRef.current) {
+          const lines: string[] = [];
+          [...debugChunkTranscriptsRef.current.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .forEach(([idx, text]) => lines.push(`=== Chunk ${idx} ===\n${text}\n`));
+          lines.push(`=== Final ===\n${transcript}`);
+          saveDebugBlob(new Blob([lines.join("\n")], { type: "text/plain" }), "transcript.txt");
+        }
       } else {
         // MediaRecorder fallback: get blob, transcribe directly
         const mediaRecorder = mediaRecorderRef.current;
@@ -369,6 +420,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setTranscriptionProgress({ completed: 0, total: 1 });
         transcript = await transcribeAudioBlob(audioBlob, config);
         setTranscriptionProgress({ completed: 1, total: 1 });
+
+        if (debugSessionRef.current) {
+          saveDebugBlob(new Blob([transcript], { type: "text/plain" }), "transcript.txt");
+        }
       }
 
       cleanupStream();

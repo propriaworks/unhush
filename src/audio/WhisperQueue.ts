@@ -14,6 +14,7 @@ export class WhisperQueue {
   private expectedTotal: number | null = null;
   private resolveFinalize: ((transcript: string) => void) | null = null;
   onProgress: ((completed: number, total: number) => void) | null = null;
+  onChunkTranscribed: ((chunkIndex: number, text: string) => void) | null = null;
   onLog: ((level: "info" | "warn" | "error", message: string) => void) | null = null;
 
   constructor(config: TranscriptionConfig) {
@@ -57,6 +58,7 @@ export class WhisperQueue {
     try {
       const text = await transcribeAudioBlob(wavBlob, this.config);
       this.results.set(chunkIndex, text);
+      this.onChunkTranscribed?.(chunkIndex, text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (attempt < VAD_CONFIG.retryAttempts) {

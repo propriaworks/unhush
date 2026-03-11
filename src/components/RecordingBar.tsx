@@ -100,12 +100,6 @@ function RecordingBar() {
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '60%' }} />
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ height: '100%' }} />
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ height: '50%' }} />
-          {transcriptionProgress &&
-            transcriptionProgress.total > 1 && (
-              <span className="text-white/60 text-xs ml-1.5 font-mono">
-                {transcriptionProgress.completed}/{transcriptionProgress.total}
-              </span>
-            )}
         </div>
       );
     }

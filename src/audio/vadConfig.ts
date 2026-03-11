@@ -1,8 +1,8 @@
 export const VAD_CONFIG = {
   positiveSpeechThreshold: 0.3,
   negativeSpeechThreshold: 0.25,
-  minChunkDuration: 15,       // seconds - flush on speech→silence if above this
-  maxChunkDuration: 29.8,     // seconds - forced cut
+  minChunkDuration: 20,       // seconds - flush on speech→silence if above this
+  maxChunkDuration: 29.9,     // seconds - forced cut
   hardCutLookback: 15,        // seconds to look back for best cut point
   minFinalChunkDuration: 0.5, // seconds - discard trailing silence below this
   maxConcurrentRequests: 3,

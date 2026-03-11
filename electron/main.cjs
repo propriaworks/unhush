@@ -146,6 +146,24 @@ function createWindow() {
     mainWindow.setIgnoreMouseEvents(true);
     mainWindow.setAlwaysOnTop(false);
   });
+
+  // Inject settings.json into localStorage on load
+  const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
+  mainWindow.webContents.once("did-finish-load", () => {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
+      for (const [key, value] of Object.entries(cfg)) {
+        const lsKey = `wisper_${key}`;
+        const lsValue = typeof value === "string" ? value : JSON.stringify(value);
+        mainWindow.webContents.executeJavaScript(
+          `localStorage.setItem(${JSON.stringify(lsKey)}, ${JSON.stringify(lsValue)})`
+        );
+      }
+      log("info", `Loaded settings from ${settingsFilePath}`);
+    } catch (e) {
+      if (e.code !== "ENOENT") log("warn", `Failed to read settings.json: ${e.message}`);
+    }
+  });
 }
 
 function createSettingsWindow() {
