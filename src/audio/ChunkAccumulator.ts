@@ -5,6 +5,7 @@ export class ChunkAccumulator {
   private scores: number[] = [];
   private sampleCount = 0;
   private wasSpeaking = false;
+  private redemptionCounter = 0;
   private chunkIndex = 0;
   private onFlush: (wavBlob: Blob, chunkIndex: number) => void;
 
@@ -28,7 +29,6 @@ export class ChunkAccumulator {
     this.sampleCount += frame.length;
 
     const durationSec = this.sampleCount / VAD_CONFIG.sampleRate;
-    const isSpeaking = isSpeech >= VAD_CONFIG.positiveSpeechThreshold;
 
     // Hard cut: approaching Whisper's 30s limit
     if (durationSec >= VAD_CONFIG.maxChunkDuration) {
@@ -36,12 +36,27 @@ export class ChunkAccumulator {
       return;
     }
 
-    // Natural pause: speech→silence transition with enough accumulated audio
-    if (this.wasSpeaking && !isSpeaking && durationSec >= VAD_CONFIG.minChunkDuration) {
-      this.flush(this.frames.length);
-    }
+    // Speech state with hysteresis: start speaking at positiveSpeechThreshold,
+    // stop speaking only after redemptionFrames consecutive frames below negativeSpeechThreshold
+    if (isSpeech >= VAD_CONFIG.positiveSpeechThreshold) {
+      this.wasSpeaking = true;
+      this.redemptionCounter = 0;
+    } else if (this.wasSpeaking && isSpeech < VAD_CONFIG.negativeSpeechThreshold) {
+      this.redemptionCounter++;
+      if (this.redemptionCounter >= VAD_CONFIG.redemptionFrames) {
+        // Speech has ended — flush if we have enough audio
+        this.wasSpeaking = false;
+        this.redemptionCounter = 0;
 
-    this.wasSpeaking = isSpeaking;
+        // Natural pause: speech→silence transition with enough accumulated audio. send prior segment for transcription.
+        if (durationSec >= VAD_CONFIG.minChunkDuration) {
+          this.flush(this.frames.length);
+        }
+      }
+    } else if (this.wasSpeaking) {
+      // Frame is between negativeSpeechThreshold and positiveSpeechThreshold — reset redemption
+      this.redemptionCounter = 0;
+    }
   }
 
   /** Forced cut near max duration - finds the best cut point by looking back for minimum speech score */
@@ -76,6 +91,7 @@ export class ChunkAccumulator {
     this.wasSpeaking = remainingScores.length > 0
       ? remainingScores[remainingScores.length - 1] >= VAD_CONFIG.positiveSpeechThreshold
       : false;
+    this.redemptionCounter = 0;
   }
 
   /** Flush frames [0..count) as a WAV blob */
@@ -94,6 +110,7 @@ export class ChunkAccumulator {
       this.scores = [];
       this.sampleCount = 0;
       this.wasSpeaking = false;
+      this.redemptionCounter = 0;
     }
   }
 
@@ -133,6 +150,7 @@ export class ChunkAccumulator {
     this.scores = [];
     this.sampleCount = 0;
     this.wasSpeaking = false;
+    this.redemptionCounter = 0;
     this.chunkIndex = 0;
     this.allFrames = null;
   }
