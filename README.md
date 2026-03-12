@@ -7,6 +7,7 @@ Wisper is a WisprFlow-like voice dictation application for Linux. It provides se
 - **Global Hotkey** - Press hotkey to start/stop recording from anywhere
 - **Direct Text Input** - Transcribed text is typed directly at your cursor (no copy-paste needed)
 - **AI Transcription** - Transcribe audio using OpenAI Whisper via Groq or OpenAI APIs
+- **Unlimited Recording Length** - Voice Activity Detection (VAD) segments long dictations at natural pauses; each segment is sent to Whisper concurrently, so there is no time limit on recordings
 - **Multilingual** - Supports 99+ languages with automatic detection
 - **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
@@ -90,9 +91,9 @@ Download the latest `.AppImage` or `.deb` package from the [Releases](https://gi
 ### Recording
 
 1. Press your *hotkey* to start recording (bar appears)
-2. When the chime sounds and the bar turns red, **Speak into your microphone**
-3. Press your *hotkey* again to stop
-4. Text is transcribed and typed directly at your cursor location
+2. When the chime sounds and the bar turns red, **speak into your microphone** — there is no time limit
+3. Press your *hotkey* again to stop — a second chime plays and a thinking indicator appears while your speech is transcribed
+4. Text is typed directly at your cursor location
 
 ### System Tray
 
