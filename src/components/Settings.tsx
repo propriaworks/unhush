@@ -66,6 +66,13 @@ function Settings() {
     llmProvider === "custom" ? setLlmModelCustom : (() => {});
   const currentLlmModelStorageKey = `wisper_llm_model_${llmProvider}`;
 
+  // Helper: update React state + persist to localStorage in one step
+  const persist = (setter: (v: string) => void, key: string) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setter(e.target.value);
+      localStorage.setItem(key, e.target.value);
+    };
+
   const handleProviderChange = (newProvider: Provider) => {
     setProvider(newProvider);
     localStorage.setItem("wisper_provider", newProvider);
@@ -154,8 +161,7 @@ function Settings() {
                   <input
                     type={showPassword ? "text" : "password"}
                     value={currentKey}
-                    onChange={(e) => setCurrentKey(e.target.value)}
-                    onBlur={(e) => localStorage.setItem(currentKeyStorageKey, e.target.value)}
+                    onChange={persist(setCurrentKey, currentKeyStorageKey)}
                     placeholder={provider === "groq" ? "gsk_..." : provider === "openai" ? "sk-..." : "Bearer token..."}
                     className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                   />
@@ -184,8 +190,7 @@ function Settings() {
                     <input
                       type="text"
                       value={customUrl}
-                      onChange={(e) => setCustomUrl(e.target.value)}
-                      onBlur={(e) => localStorage.setItem("wisper_custom_url", e.target.value)}
+                      onChange={persist(setCustomUrl, "wisper_custom_url")}
                       placeholder="https://localhost:8000/v1/audio/transcriptions"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -195,8 +200,7 @@ function Settings() {
                     <input
                       type="text"
                       value={customModel}
-                      onChange={(e) => setCustomModel(e.target.value)}
-                      onBlur={(e) => localStorage.setItem("wisper_custom_model", e.target.value)}
+                      onChange={persist(setCustomModel, "wisper_custom_model")}
                       placeholder="whisper-1"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -259,8 +263,7 @@ function Settings() {
                     <input
                       type="text"
                       value={currentLlmModel}
-                      onChange={(e) => setCurrentLlmModel(e.target.value)}
-                      onBlur={(e) => localStorage.setItem(currentLlmModelStorageKey, e.target.value)}
+                      onChange={persist(setCurrentLlmModel, currentLlmModelStorageKey)}
                       placeholder={
                         llmProvider === "groq" ? LLM_DEFAULT_MODELS.groq :
                         llmProvider === "openai" ? LLM_DEFAULT_MODELS.openai :
@@ -276,8 +279,7 @@ function Settings() {
                         <input
                           type="text"
                           value={llmCustomUrl}
-                          onChange={(e) => setLlmCustomUrl(e.target.value)}
-                          onBlur={(e) => localStorage.setItem("wisper_llm_custom_url", e.target.value)}
+                          onChange={persist(setLlmCustomUrl, "wisper_llm_custom_url")}
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
                       </div>
@@ -286,8 +288,7 @@ function Settings() {
                         <input
                           type="password"
                           value={llmCustomKey}
-                          onChange={(e) => setLlmCustomKey(e.target.value)}
-                          onBlur={(e) => localStorage.setItem("wisper_llm_custom_key", e.target.value)}
+                          onChange={persist(setLlmCustomKey, "wisper_llm_custom_key")}
                           placeholder="Bearer token..."
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
@@ -303,8 +304,7 @@ function Settings() {
                 <label className="block text-white/70 text-xs font-medium mb-2">System Prompt</label>
                 <textarea
                   value={llmSystemPrompt}
-                  onChange={(e) => setLlmSystemPrompt(e.target.value)}
-                  onBlur={(e) => localStorage.setItem("wisper_llm_system_prompt", e.target.value)}
+                  onChange={persist(setLlmSystemPrompt, "wisper_llm_system_prompt")}
                   rows={5}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500 resize-y"
                 />
