@@ -12,10 +12,16 @@ function RecordingBar() {
   const {
     isRecording,
     audioLevel,
+    fatalTranscriptionError,
     startRecording,
     stopRecording,
     saveDebugBlob,
+    playErrorSound,
   } = useAudioRecorder();
+
+  useEffect(() => {
+    if (fatalTranscriptionError && isRecording) handleStopRecording();
+  }, [fatalTranscriptionError]);
 
   const handleStartRecording = useCallback(async () => {
     try {
@@ -26,9 +32,16 @@ function RecordingBar() {
         window.electronAPI.setRecordingState(true);
       }
     } catch (err) {
-      setError("Failed to access microphone");
+      playErrorSound();
+      setError(err instanceof Error ? err.message : "Failed to access microphone");
+      setTimeout(() => {
+        if (window.electronAPI) {
+          setOverlayVisible(false);
+          window.electronAPI.hideWindow();
+        }
+      }, 3500);
     }
-  }, [startRecording]);
+  }, [startRecording, playErrorSound]);
 
   const handleStopRecording = useCallback(async () => {
     if (window.electronAPI) {
@@ -91,13 +104,14 @@ function RecordingBar() {
       }
     } catch (err) {
       console.error("Transcription failed:", err);
+      playErrorSound();
       setError(err instanceof Error ? err.message : "Transcription failed");
       setTimeout(() => {
         if (window.electronAPI) {
           setOverlayVisible(false);
           window.electronAPI.hideWindow();
         }
-      }, 2000);
+      }, 3500);
     } finally {
       setIsTranscribing(false);
     }
@@ -131,7 +145,7 @@ function RecordingBar() {
       return (
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-          <span className="text-red-300 text-sm font-medium">{error}</span>
+          <span className="text-red-300 text-sm font-medium whitespace-pre-wrap">{error}</span>
         </div>
       );
     }

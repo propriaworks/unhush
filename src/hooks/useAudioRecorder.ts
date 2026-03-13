@@ -12,9 +12,11 @@ interface UseAudioRecorderReturn {
   isRecording: boolean;
   audioLevel: number;
   transcriptionProgress: { completed: number; total: number } | null;
+  fatalTranscriptionError: Error | null;
   startRecording: (readyPromise?: Promise<void>) => Promise<void>;
   stopRecording: (separator?: string) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
+  playErrorSound: () => void;
 }
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
@@ -24,6 +26,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     completed: number;
     total: number;
   } | null>(null);
+  const [fatalTranscriptionError, setFatalTranscriptionError] = useState<Error | null>(null);
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
@@ -72,6 +75,23 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       isMonitoringRef.current = false;
       audioContext.close();
     };
+  }, []);
+
+  const playErrorSound = useCallback((): void => {
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "square";
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(43, now);
+    gain.gain.setValueAtTime(0.06, now);
+    gain.gain.setValueAtTime(0.06, now + 0.10);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+    osc.start(now);
+    osc.stop(now + 0.2);
   }, []);
 
   const playChime = useCallback((frequency: number): Promise<void> => {
@@ -142,6 +162,11 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, []);
 
   const startRecording = useCallback(async (readyPromise?: Promise<void>) => {
+    // check transcription Config and fail early for obvious errors
+    const config = getTranscriptionConfig();
+    const validationError = validateTranscriptionConfig(config);
+    if (validationError) throw new Error(validationError);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -181,6 +206,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setTranscriptionProgress({ completed, total });
       };
       whisperQueue.onLog = wlog;
+      whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
       if (debugAudio) {
         debugSegmentTranscriptsRef.current = new Map();
         whisperQueue.onSegmentTranscribed = (idx, text) => {
@@ -342,24 +368,11 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     playChime(660);
     stopAudioLevelMonitoring();
     setIsRecording(false);
+    // Disable auto-stop callback — from here, rejectFinalize surfaces errors instead
+    if (whisperQueueRef.current) whisperQueueRef.current.onFatalError = null;
 
-    // Validate config before transcribing
+    // config was validated at recording start
     const config = getTranscriptionConfig();
-    const validationError = validateTranscriptionConfig(config);
-    if (validationError) {
-      // Clean up recording resources
-      if (vadRef.current) {
-        await vadRef.current.pause();
-        await vadRef.current.destroy();
-        vadRef.current = null;
-      }
-      mediaRecorderRef.current = null;
-      segmentAccumulatorRef.current?.reset();
-      segmentAccumulatorRef.current = null;
-      whisperQueueRef.current = null;
-      cleanupStream();
-      throw new Error(validationError);
-    }
 
     try {
       let transcript: string;
@@ -452,8 +465,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     isRecording,
     audioLevel,
     transcriptionProgress,
+    fatalTranscriptionError,
     startRecording,
     stopRecording,
     saveDebugBlob,
+    playErrorSound,
   };
 }

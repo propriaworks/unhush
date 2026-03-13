@@ -32,9 +32,9 @@ export function validateTranscriptionConfig(config: TranscriptionConfig): string
   const provider = localStorage.getItem("wisper_provider") || "groq";
 
   if (provider === "custom" && !(config.apiUrl && config.model)) {
-    return "API URL or model is unset. Open Settings from tray.";
+    return "API URL or model is unset.\nOpen Settings from tray.";
   } else if (provider !== "custom" && !config.apiKey) {
-    return "No API key. Open Settings from tray.";
+    return "No API key.\nOpen Settings from tray.";
   }
   return null;
 }

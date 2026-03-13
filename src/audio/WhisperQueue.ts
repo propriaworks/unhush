@@ -14,9 +14,13 @@ export class WhisperQueue {
   private expectedTotal: number | null = null;
   private separator = " ";
   private resolveFinalize: ((transcript: string) => void) | null = null;
+  private rejectFinalize: ((err: Error) => void) | null = null;
+  private failed = false;
+  private firstError: string | null = null;
   onProgress: ((completed: number, total: number) => void) | null = null;
   onSegmentTranscribed: ((segmentIndex: number, text: string) => void) | null = null;
   onLog: ((level: "info" | "warn" | "error", message: string) => void) | null = null;
+  onFatalError: ((err: Error) => void) | null = null;
   private readyPromise: Promise<void> | null = null;
 
   setReadyPromise(p: Promise<void>): void {
@@ -37,19 +41,23 @@ export class WhisperQueue {
     this.expectedTotal = totalSegments;
     this.separator = separator;
 
+    if (this.firstError) return Promise.reject(new Error(this.firstError));
+
     // If all segments are already transcribed (e.g. single short recording)
     if (this.results.size >= totalSegments && this.inFlight === 0 && this.queue.length === 0) {
       return Promise.resolve(this.concatenateResults());
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.resolveFinalize = resolve;
+      this.rejectFinalize = reject;
       // Kick processing in case there are queued items
       this.processNext();
     });
   }
 
   private processNext(): void {
+    if (this.failed) return;
     while (this.inFlight < VAD_CONFIG.maxConcurrentRequests && this.queue.length > 0) {
       const entry = this.queue.shift()!;
       this.inFlight++;
@@ -62,12 +70,14 @@ export class WhisperQueue {
     segmentIndex: number,
     attempt: number,
   ): Promise<void> {
-    // if we've just run the startup command, give it time to load before making requests
+    if (this.failed) { this.inFlight--; return; }
     if (this.readyPromise) await this.readyPromise;
     try {
       const text = await transcribeAudioBlob(wavBlob, this.config);
-      this.results.set(segmentIndex, text);
-      this.onSegmentTranscribed?.(segmentIndex, text);
+      if (!this.failed) {
+        this.results.set(segmentIndex, text);
+        this.onSegmentTranscribed?.(segmentIndex, text);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (attempt < VAD_CONFIG.retryAttempts) {
@@ -81,16 +91,20 @@ export class WhisperQueue {
       }
       this.onLog?.("error", `Segment ${segmentIndex} transcription failed permanently after ${attempt + 1} attempts: ${msg}`);
       console.error(`Segment ${segmentIndex} transcription failed after ${attempt + 1} attempts:`, err);
-      this.results.set(segmentIndex, `[Error: ${msg}]`);
+      if (!this.failed) {
+        this.failed = true;
+        this.firstError = msg;
+        const err = new Error(msg);
+        this.rejectFinalize?.(err);
+        this.resolveFinalize = null;
+        this.rejectFinalize = null;
+        this.onFatalError?.(err);
+      }
     }
 
     this.inFlight--;
     this.reportProgress();
-
-    // Process more queued items
     this.processNext();
-
-    // Check if finalization is complete
     this.checkComplete();
   }
 
@@ -102,6 +116,7 @@ export class WhisperQueue {
 
   private checkComplete(): void {
     if (
+      !this.failed &&
       this.resolveFinalize &&
       this.expectedTotal !== null &&
       this.results.size >= this.expectedTotal &&
