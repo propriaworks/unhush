@@ -20,6 +20,7 @@ let healthCheckedThisSession = false;
 
 // Keyed by "baseUrl:kind" (e.g. "http://localhost:8080:transcription")
 const lastWarmupTime = new Map<string, number>();
+const lastWarmupModel = new Map<string, string>();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -272,9 +273,10 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
     const warmupKey = `${service.baseUrl}:${service.kind}`;
     const lastWarmup = lastWarmupTime.get(warmupKey) ?? 0;
-    if (now - lastWarmup < intervalMs) continue;
+    if (now - lastWarmup < intervalMs && lastWarmupModel.get(warmupKey) === service.model) continue;
 
     lastWarmupTime.set(warmupKey, now);
+    lastWarmupModel.set(warmupKey, service.model);
 
     if (service.kind === "transcription") {
       warmupPromises.push(warmUpTranscription(service.baseUrl, service.apiKey, service.model, log));
@@ -283,5 +285,6 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
     }
   }
 
-  await Promise.allSettled(warmupPromises);
+  // Fire warm-up in the background — caller has already been unblocked after Phase 1
+  Promise.allSettled(warmupPromises);
 }

@@ -12,7 +12,7 @@ interface UseAudioRecorderReturn {
   isRecording: boolean;
   audioLevel: number;
   transcriptionProgress: { completed: number; total: number } | null;
-  startRecording: () => Promise<void>;
+  startRecording: (readyPromise?: Promise<void>) => Promise<void>;
   stopRecording: (separator?: string) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
 }
@@ -141,7 +141,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (readyPromise?: Promise<void>) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -176,6 +176,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       // Get transcription config early so WhisperQueue is ready
       const config = getTranscriptionConfig();
       const whisperQueue = new WhisperQueue(config);
+      if (readyPromise) whisperQueue.setReadyPromise(readyPromise);
       whisperQueue.onProgress = (completed, total) => {
         setTranscriptionProgress({ completed, total });
       };

@@ -241,11 +241,15 @@ ipcMain.handle("paste-to-cursor", async (event, text) => {
   try {
     const tempFile = '/tmp/wisper-text.txt';
     require('fs').writeFileSync(tempFile, text);
-    // Wait for the window to hide and the OS to return focus to the target app
-    await new Promise(resolve => setTimeout(resolve, 250));
-    const timeout = Math.max(5000, text.length * 50);
-    // key delay (how fast the text is written) may be something worth exposing to the user
-    execSync(`ydotool type --delay 100 --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+    if (text) {
+      // Wait for the window to hide and the OS to return focus to the target app
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const timeout = Math.max(5000, text.length * 50);
+      // key delay (how fast the text is written) may be something worth exposing to the user
+      execSync(`ydotool type --delay 100 --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+    } else {
+      log('info', 'no output to paste')
+    }
   } catch (err) {
     log('error', `paste-to-cursor failed: ${err.message}`);
   }

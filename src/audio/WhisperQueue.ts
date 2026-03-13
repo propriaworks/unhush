@@ -17,6 +17,11 @@ export class WhisperQueue {
   onProgress: ((completed: number, total: number) => void) | null = null;
   onSegmentTranscribed: ((segmentIndex: number, text: string) => void) | null = null;
   onLog: ((level: "info" | "warn" | "error", message: string) => void) | null = null;
+  private readyPromise: Promise<void> | null = null;
+
+  setReadyPromise(p: Promise<void>): void {
+    this.readyPromise = p;
+  }
 
   constructor(config: TranscriptionConfig) {
     this.config = config;
@@ -57,6 +62,8 @@ export class WhisperQueue {
     segmentIndex: number,
     attempt: number,
   ): Promise<void> {
+    // if we've just run the startup command, give it time to load before making requests
+    if (this.readyPromise) await this.readyPromise;
     try {
       const text = await transcribeAudioBlob(wavBlob, this.config);
       this.results.set(segmentIndex, text);

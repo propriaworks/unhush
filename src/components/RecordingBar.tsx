@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
-import { getLLMConfig, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
+import { getLLMConfig, makeUserPrompt, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
 import { ensureCustomServices } from "../audio/customModelService";
 
 function RecordingBar() {
@@ -20,8 +20,8 @@ function RecordingBar() {
   const handleStartRecording = useCallback(async () => {
     try {
       setError(null);
-      ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg)).catch(() => {});
-      await startRecording();
+      const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
+      await startRecording(readyPromise);
       if (window.electronAPI) {
         window.electronAPI.setRecordingState(true);
       }
@@ -42,25 +42,36 @@ function RecordingBar() {
       const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
 
       if (transcript && window.electronAPI) {
-        let finalTranscript = transcript;
+        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ");  // fallback
         if (llmConfig && !transcript.startsWith("[Error")) {
-          try {
-            finalTranscript = await postProcessTranscript(transcript, llmConfig);
-          } catch (err) {
+          let llmStatus = "error";
+          const llmOutput = await postProcessTranscript(transcript, llmConfig).catch((err) => {
             console.error("LLM post-processing failed, using raw transcript:", err);
             window.electronAPI.log(
               "error",
               `LLM post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
             );
-            finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ");
+          });
+          if (llmOutput !== undefined) {
+            if (llmOutput.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
+              window.electronAPI.log("warn",
+                `LLM output (${llmOutput.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
+              llmStatus = "rejected_over_length";
+            } else {
+              llmStatus = "ok";
+              finalTranscript = llmOutput;
+            }
           }
           if (localStorage.getItem("wisper_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
                 model: llmConfig.model,
                 system_prompt: llmConfig.systemPrompt,
-                input: transcript,
-                output: finalTranscript,
+                whisper_transcript: transcript,
+                input: makeUserPrompt(transcript, llmConfig),
+                output: llmOutput || "",
+                status: llmStatus,
+                ...(llmStatus !== "ok" ? { returned_transcript: finalTranscript } : {}),
               },
               null,
               2,
