@@ -21,7 +21,21 @@ export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434/v1/chat/completion
 export const SPLIT_POINT_MARKER = " <split_point/> ";
 
 export const LLM_DEFAULT_SYSTEM_PROMPT =
-  'You are a dictation formatter; clean up the following raw speech transcript. Fix punctuation, capitalization, and grammar; fix misspellings (like homonyms or proper nouns) given the context, remove filler words such as "um", "uh", "you know", or "I mean" when appropriate, and fix verbal course corrections. You may translate words like "slash help" ("/help") or "wink emoji", into appropriate characters, strings, or formatting if the context supports it. DO NOT add new content, DO NOT reword, DO NOT elaborate, DO NOT change the meaning in any way. The transcript may contain <split_point/> markers indicating arbitrary boundaries between separately transcribed audio segments — use these as context for ensuring continuity but remove them from your output. In some cases a transcript may end abruptly-- NEVER ATTEMPT TO CONTINUE AN INCOMPLETE TRANSCRIPT OR TO PREDICT TEXT.'
+  `You are a dictation transcript formatter. Output ONLY the cleaned transcript, nothing else.
+The goal is to accurately convey what the speaker actually said, not to improve it.
+
+Rules (in priority order):
+1. NEVER add, remove, or change the meaning of any content.
+2. Fix punctuation, capitalization, and grammar
+3. Fix obvious mishearings: wrong homophones, misspelled proper nouns
+4. Remove filler words: um, uh, like, you know, so yeah, etc.
+5. Resolve verbal corrections: "the red — or rather the blue one" → "the blue one"
+6. Convert spoken symbols when unambiguous: "slash help" → "/help", "dot com" → ".com", "hashtag" → "#"
+7. Remove all <split_point/> markers — these are (arbitrary) transcription boundaries, not content
+8. Even if text starts / ends abruptly or seems incomplete, leave it as-is`
+//#8. Write numbers, dates, and times in their conventional written form
+
+  //not bad: 'You are a dictation formatter; clean up the following raw speech transcript. Fix punctuation, capitalization, and grammar; fix misspellings (like homonyms or proper nouns) given the context, remove filler words such as "um", "uh", "you know", or "I mean" when appropriate, and fix verbal course corrections. You may translate words like "slash help" ("/help") or "wink emoji", into appropriate characters, strings, or formatting if the context supports it. DO NOT add new content, DO NOT reword, DO NOT elaborate, DO NOT change the meaning in any way. The transcript may contain <split_point/> markers indicating arbitrary boundaries between separately transcribed audio segments — use these as context for ensuring continuity but remove them from your output. In some cases a transcript may end abruptly-- NEVER ATTEMPT TO CONTINUE AN INCOMPLETE TRANSCRIPT OR TO PREDICT TEXT.'
   //original: 'You are a transcript editor. Clean up the following speech-to-text transcript: fix punctuation, capitalization, and grammar; remove filler words such as "um", "uh", and "you know". Do not add new content or change the meaning. The transcript may contain <split_point> markers indicating boundaries between separately transcribed audio segments — use these as context for continuity and fixing mistranscriptions at the boundary, but remove them from your output. Return only the corrected transcript, with no additional commentary.';
   //testing: 'You are a dictation formatter. Clean up the following raw speech transcript. Fix punctuation, capitalization, and grammar; fix misspellings given the context, remove filler words such as "um", "uh", and "you know" and fix verbal course corrections. You may translate words like "slash help" ("/help") or "wink emoji",  into appropriate characters, strings, or formatting if the context supports it. DO NOT add new content, reword, or change the meaning. The transcript may contain <split_point> markers indicating arbitrary boundaries between separately transcribed audio segments — use these as context for ensuring continuity but remove them from your output. Return ONLY the corrected transcript, nothing else.'
   //better in testing(current): You are a dictation formatter; clean up the following raw speech transcript.Fix punctuation, capitalization, and grammar; fix misspellings (like homonyms) given the context, remove filler words such as "um", "uh", "you know", or "I mean" when appropriate, and fix verbal course corrections. You may translate words like "slash help" ("/help") or "wink emoji", into appropriate characters, strings, or formatting if the context supports it. DO NOT add new content, DO NOT reword, DO NOT elaborate, DO NOT change the meaning in any way. The transcript may contain <split_point/> markers indicating arbitrary boundaries between separately transcribed audio segments — use these as context for ensuring continuity but remove them from your output. Return ONLY the corrected transcript, nothing else. In some cases a transcript may end abruptly-- NEVER ATTEMPT TO CONTINUE AN INCOMPLETE TRANSCRIPT OR TO PREDICT TEXT.
@@ -29,7 +43,7 @@ export const LLM_DEFAULT_SYSTEM_PROMPT =
   //manually tested: "You are a dictation formatter. The following is a raw speech transcript. Remove filler words, fix course corrections, correct punctuation and capitalization, fix misspellings given the context, and interpret words like "wink emoji", or vocalizations of computer code, for what they are. Do not interpret the text, produce it faithfully. You may use formatting like lists if the transcript warrants it. Output only the cleaned text with formatting, nothing else."
 
 export const LLM_FINAL_INSTRUCTIONS = // placed after the xml-enclosed transcript
-  'Output the formatted transcript only, even if nothing changed. Nothing else. Never provide comments about the task.'
+  'Output the cleaned transcript only. No commentary, no explanations, no preamble.'
 
 export function getLLMConfig(): LLMConfig | null {
   const provider = (localStorage.getItem("wisper_llm_provider") || "none") as LLMProvider;
@@ -118,5 +132,9 @@ export async function postProcessTranscript(
   }
 
   const data = await response.json();
-  return (data.choices?.[0]?.message?.content?.trim() ?? "") as string;
+  const content = data.choices?.[0]?.message?.content?.trim() ?? "";
+  if (!content) {
+    throw new Error(`LLM returned empty response [model: ${config.model}, finish_reason: ${data.choices?.[0]?.finish_reason ?? "unknown"}]`);
+  }
+  return content as string;
 }

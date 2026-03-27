@@ -25,7 +25,7 @@ flowchart LR
     assembled in order`"]
     FINAL --> LLMAPI["`LLM API fixes formatting,
     removes filler text
-    (if enabled)`"] --> PASTE(["`**Pasted to cursor**`"])
+    (if enabled)`"] --> PASTE(["`**Output text**`"])
 
     style START fill:#14532d,stroke:#22c55e,color:#86efac
     style PASTE fill:#14532d,stroke:#22c55e,color:#86efac
@@ -119,8 +119,8 @@ flowchart TD
     fix punctuation, fillers
     remove split markers`"]
     LLMCHECK -->|No| STRIPMARKERS["`Strip split markers`"]
-    LLMPASS -->|Success| PASTE["`pasteToCursor
-    via ydotool`"]
+    LLMPASS -->|Success| PASTE["`outputText
+    (paste | type | save to clipboard)`"]
     LLMPASS -->|Failed - fallback| STRIPMARKERS
     STRIPMARKERS --> PASTE
     DIRECT --> LLMCHECK

@@ -55,8 +55,8 @@ function RecordingBar() {
       const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
 
       if (transcript && window.electronAPI) {
-        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ");  // fallback
-        if (llmConfig && !transcript.startsWith("[Error")) {
+        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
+        if (finalTranscript && llmConfig && !transcript.startsWith("[Error")) {
           let llmStatus = "error";
           const llmOutput = await postProcessTranscript(transcript, llmConfig).catch((err) => {
             console.error("LLM post-processing failed, using raw transcript:", err);
