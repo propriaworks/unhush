@@ -58,27 +58,31 @@ function RecordingBar() {
         let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
         if (finalTranscript && llmConfig && !transcript.startsWith("[Error")) {
           let llmStatus = "error";
-          const llmOutput = await postProcessTranscript(transcript, llmConfig).catch((err) => {
+          let llmLatencyMs: number | undefined;
+          const llmResult = await postProcessTranscript(transcript, llmConfig).catch((err) => {
             console.error("LLM post-processing failed, using raw transcript:", err);
             window.electronAPI.log(
               "error",
               `LLM post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
             );
           });
-          if (llmOutput !== undefined) {
-            if (llmOutput.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
+          const llmOutput = llmResult?.content;
+          if (llmResult !== undefined) {
+            llmLatencyMs = llmResult.latencyMs;
+            if (llmOutput!.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
               window.electronAPI.log("warn",
-                `LLM output (${llmOutput.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
+                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
               llmStatus = "rejected_over_length";
             } else {
               llmStatus = "ok";
-              finalTranscript = llmOutput;
+              finalTranscript = llmOutput!;
             }
           }
           if (localStorage.getItem("wisper_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
                 model: llmConfig.model,
+                ...(llmLatencyMs !== undefined ? { latency_ms: llmLatencyMs } : {}),
                 system_prompt: llmConfig.systemPrompt,
                 whisper_transcript: transcript,
                 input: makeUserPrompt(transcript, llmConfig),

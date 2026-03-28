@@ -48,7 +48,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   // Debug audio saving
   const debugSessionRef = useRef<string | null>(null);
-  const debugSegmentTranscriptsRef = useRef<Map<number, { text: string; durationSec: number }>>(new Map());
+  const debugSegmentTranscriptsRef = useRef<Map<number, { text: string; durationSec: number; latencyMs?: number }>>(new Map());
 
   // Create AudioContext and AnalyserNode once on mount
   useEffect(() => {
@@ -209,9 +209,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
       if (debugAudio) {
         debugSegmentTranscriptsRef.current = new Map();
-        whisperQueue.onSegmentTranscribed = (idx, text) => {
+        whisperQueue.onSegmentTranscribed = (idx, text, latencyMs) => {
           const existing = debugSegmentTranscriptsRef.current.get(idx);
-          debugSegmentTranscriptsRef.current.set(idx, { text, durationSec: existing?.durationSec ?? 0 });
+          debugSegmentTranscriptsRef.current.set(idx, { text, durationSec: existing?.durationSec ?? 0, latencyMs });
         };
       }
       whisperQueueRef.current = whisperQueue;
@@ -409,8 +409,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           const lines: string[] = [];
           [...debugSegmentTranscriptsRef.current.entries()]
             .sort((a, b) => a[0] - b[0])
-            .forEach(([idx, { text, durationSec }]) =>
-              lines.push(`=== Segment ${idx} (${durationSec.toFixed(1)}s) ===\n${text}\n`));
+            .forEach(([idx, { text, durationSec, latencyMs }]) => {
+              const timing = latencyMs !== undefined ? `${durationSec.toFixed(1)}s, ${latencyMs}ms latency` : `${durationSec.toFixed(1)}s`;
+              lines.push(`=== Segment ${idx} (${timing}) ===\n${text}\n`);
+            });
           lines.push(`=== Full concatenated ===\n${transcript}`);
           saveDebugBlob(new Blob([lines.join("\n")], { type: "text/plain" }), "transcript.txt");
         }

@@ -18,7 +18,7 @@ export class WhisperQueue {
   private failed = false;
   private firstError: string | null = null;
   onProgress: ((completed: number, total: number) => void) | null = null;
-  onSegmentTranscribed: ((segmentIndex: number, text: string) => void) | null = null;
+  onSegmentTranscribed: ((segmentIndex: number, text: string, latencyMs: number) => void) | null = null;
   onLog: ((level: "info" | "warn" | "error", message: string) => void) | null = null;
   onFatalError: ((err: Error) => void) | null = null;
   private readyPromise: Promise<void> | null = null;
@@ -73,10 +73,12 @@ export class WhisperQueue {
     if (this.failed) { this.inFlight--; return; }
     if (this.readyPromise) await this.readyPromise;
     try {
+      const t0 = Date.now();
       const text = await transcribeAudioBlob(wavBlob, this.config);
+      const latencyMs = Date.now() - t0;
       if (!this.failed) {
         this.results.set(segmentIndex, text);
-        this.onSegmentTranscribed?.(segmentIndex, text);
+        this.onSegmentTranscribed?.(segmentIndex, text, latencyMs);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

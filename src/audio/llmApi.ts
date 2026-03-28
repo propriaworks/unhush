@@ -93,7 +93,7 @@ export function makeUserPrompt(transcript: string, config: LLMConfig): string {
 export async function postProcessTranscript(
   transcript: string,
   config: LLMConfig,
-): Promise<string> {
+): Promise<{ content: string; latencyMs: number }> {
   if (!config.model) {
     throw new Error(`LLM model is not set (URL: ${config.apiUrl})`);
   }
@@ -110,6 +110,7 @@ export async function postProcessTranscript(
   // while still stopping runaway generation. ~4 chars/token for English; floor at 256.
   const maxTokens = Math.max(256, Math.ceil(transcript.length / 4) * 2);
 
+  const t0 = Date.now();
   const response = await fetch(config.apiUrl, {
     method: "POST",
     headers,
@@ -132,9 +133,10 @@ export async function postProcessTranscript(
   }
 
   const data = await response.json();
+  const latencyMs = Date.now() - t0;
   const content = data.choices?.[0]?.message?.content?.trim() ?? "";
   if (!content) {
     throw new Error(`LLM returned empty response [model: ${config.model}, finish_reason: ${data.choices?.[0]?.finish_reason ?? "unknown"}]`);
   }
-  return content as string;
+  return { content, latencyMs };
 }

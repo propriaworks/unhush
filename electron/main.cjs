@@ -19,6 +19,7 @@ let settingsWindow = null;
 let tray = null;
 let isRecording = false;
 let currentShortcut = "Shift+Space";
+let lastTranscript = null;
 
 const isDev = !app.isPackaged;
 
@@ -57,12 +58,25 @@ async function registerShortcut(shortcut) {
 
 function updateTrayMenu() {
   if (!tray) return;
+  const preview = lastTranscript
+    ? `"${lastTranscript.slice(0, 45)}${lastTranscript.length > 45 ? "…" : ""}"`
+    : null;
   const contextMenu = Menu.buildFromTemplate([
     {
       label: `Toggle Recording (${currentShortcut})`,
       click: () => { toggleRecording(); },
     },
     { type: "separator" },
+    ...(preview ? [
+      {
+        label: `Copy last: ${preview}`,
+        click: () => {
+          clipboard.writeText(lastTranscript);
+          clipboard.writeText(lastTranscript, 'selection');
+        },
+      },
+      { type: "separator" },
+    ] : []),
     {
       label: "Settings",
       click: () => { createSettingsWindow(); },
@@ -265,6 +279,10 @@ ipcMain.handle("output-text", async (event, text, method) => {
     log('info', 'output-text: no text to output');
     return true;
   }
+
+  log('info', `output-text: ${method} (${text.length} chars)`);
+  lastTranscript = text;
+  updateTrayMenu();
 
   async function doPaste() {
     const saved = saveClipboard();

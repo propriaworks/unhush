@@ -91,6 +91,7 @@ async function warmUpTranscription(
   formData.append("response_format", "text");
   const headers: Record<string, string> = {};
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  const t0 = Date.now();
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -98,13 +99,15 @@ async function warmUpTranscription(
       body: formData,
       signal: AbortSignal.timeout(30000),
     });
+    const latencyMs = Date.now() - t0;
     if (response.ok) {
-      log("info", `Transcription warm-up succeeded for ${baseUrl}`);
+      log("info", `Transcription warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
     } else {
-      log("warn", `Transcription warm-up returned ${response.status} for ${baseUrl}`);
+      log("warn", `Transcription warm-up returned ${response.status} for ${baseUrl} [${latencyMs}ms]`);
     }
   } catch (err) {
-    log("warn", `Transcription warm-up failed for ${baseUrl}: ${err instanceof Error ? err.message : err}`);
+    const latencyMs = Date.now() - t0;
+    log("warn", `Transcription warm-up failed for ${baseUrl} [${latencyMs}ms]: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -117,6 +120,7 @@ async function warmUpLLM(
   const url = `${baseUrl}/v1/chat/completions`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  const t0 = Date.now();
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -128,13 +132,15 @@ async function warmUpLLM(
       }),
       signal: AbortSignal.timeout(30000),
     });
+    const latencyMs = Date.now() - t0;
     if (response.ok) {
-      log("info", `LLM warm-up succeeded for ${baseUrl}`);
+      log("info", `LLM warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
     } else {
-      log("warn", `LLM warm-up returned ${response.status} for ${baseUrl}`);
+      log("warn", `LLM warm-up returned ${response.status} for ${baseUrl} [${latencyMs}ms]`);
     }
   } catch (err) {
-    log("warn", `LLM warm-up failed for ${baseUrl}: ${err instanceof Error ? err.message : err}`);
+    const latencyMs = Date.now() - t0;
+    log("warn", `LLM warm-up failed for ${baseUrl} [${latencyMs}ms]: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -228,9 +234,11 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
     // run health checks / startup commands concurrently on all service providers
     await Promise.allSettled(
       [...uniqueByUrl.entries()].map(async ([baseUrl, service]) => {
+        const hcT0 = Date.now();
         const models = await fetchModels(baseUrl, service.apiKey);
+        const hcMs = Date.now() - hcT0;
         if (models) {
-          log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s))`);
+          log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s)) [${hcMs}ms]`);
           // Warn if any configured model for this URL isn't in the list
           const ids = models.data.map((m) => m.id);
           if (ids.length > 0) {
@@ -245,7 +253,7 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
             }
           }
         } else {
-          log(service.startCommand ? "info" : "warn", `Health check failed for ${baseUrl}`);
+          log(service.startCommand ? "info" : "warn", `Health check failed for ${baseUrl} [${hcMs}ms]`);
           if (service.startCommand) {
             await tryAutoStart(baseUrl, service.startCommand, log);
             // be nice and give services another 0.1s to handle requests
