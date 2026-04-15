@@ -256,6 +256,8 @@ This is normal when using a local server — the model needs to be loaded into G
 
 This is actively maintained; your contributions and feedback are welcome.
 
+A diagram of the recording, processing, chunking, postprocessing pipeline workflow is available [here](pipeline.md).
+
 ### Building
 
 Cross-format building is supported with native system tools:
