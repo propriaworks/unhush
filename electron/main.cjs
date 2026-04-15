@@ -7,6 +7,7 @@ const {
   nativeImage,
   clipboard,
   globalShortcut,
+  dialog,
 } = require("electron");
 const localShortcut = require("electron-localshortcut");
 const path = require("path");
@@ -356,6 +357,47 @@ ipcMain.handle("update-shortcut", async (event, shortcut) => {
   return true;
 });
 
+// Warn once if /dev/uinput isn't accessible (AppImage users, or post-install udev not yet active).
+// Skipped when output mode is 'clipboard' since ydotool isn't needed in that case.
+function checkUinputAccess() {
+  const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
+  let settings = {};
+  try { settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8")); } catch (e) {}
+
+  const outputMode = settings.outputMode || "paste";
+  if (outputMode === "clipboard") return;
+
+  // Sentinel file so we only warn once
+  const warnedFlag = path.join(app.getPath("userData"), ".uinput-warned");
+  if (fs.existsSync(warnedFlag)) return;
+
+  try {
+    fs.accessSync("/dev/uinput", fs.constants.W_OK);
+    return; // accessible — nothing to do
+  } catch (e) {}
+
+  // Not accessible: show guidance
+  try { fs.writeFileSync(warnedFlag, ""); } catch (e) {}
+
+  dialog.showMessageBox({
+    type: "warning",
+    title: "ydotool setup needed",
+    message: "/dev/uinput is not accessible",
+    detail:
+      "Wisper uses ydotool to paste text, which requires write access to /dev/uinput.\n\n" +
+      "Run these two commands in a terminal:\n\n" +
+      "  echo 'KERNEL==\"uinput\", TAG+=\"uaccess\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"' " +
+      "| sudo tee /etc/udev/rules.d/80-uinput.rules\n\n" +
+      "  sudo udevadm control --reload-rules && sudo udevadm trigger\n\n" +
+      "On systemd-based systems this takes effect immediately.\n" +
+      "Alternatively, switch to Clipboard mode in Settings (paste manually with Ctrl+V).",
+    buttons: ["OK", "Open Settings"],
+    defaultId: 0,
+  }).then(({ response }) => {
+    if (response === 1) createSettingsWindow();
+  });
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -371,6 +413,7 @@ if (!gotTheLock) {
     Menu.setApplicationMenu(null);
     createWindow();
     createTray();
+    checkUinputAccess();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

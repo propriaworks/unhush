@@ -44,11 +44,22 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "icon": "assets/icon.png",
       "category": "Utility",
       "maintainer": "Tarak Shaw <taraksh01@gmail.com>"
+    },
+    "deb": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "depends": ["ydotool"]
+    },
+    "rpm": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "requires": ["ydotool"]
     },
     "files": [
       "dist/**/*",
