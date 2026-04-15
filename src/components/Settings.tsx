@@ -24,6 +24,7 @@ function Settings() {
   const [customModel, setCustomModel] = useState("");
   const [provider, setProvider] = useState<Provider>("groq");
   const [shortcut, setShortcut] = useState("Shift+Space");
+  const [shortcutMode, setShortcutMode] = useState<"native" | "gsettings" | "manual">("native");
   const [outputMethod, setOutputMethod] = useState<OutputMethod>("paste");
   const [showPassword, setShowPassword] = useState(false);
 
@@ -56,6 +57,7 @@ function Settings() {
     setLlmSystemPrompt(localStorage.getItem("wisper_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT);
     setCustomStartCmd(localStorage.getItem("wisper_custom_start_cmd") || "");
     setLlmCustomStartCmd(localStorage.getItem("wisper_llm_custom_start_cmd") || "");
+    window.electronAPI?.getShortcutMode().then(setShortcutMode);
   }, []);
 
   const currentKey = provider === "groq" ? groqKey : provider === "openai" ? openaiKey : customKey;
@@ -284,7 +286,8 @@ function Settings() {
               <select
                 value={shortcut}
                 onChange={(e) => handleShortcutChange(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer"
+                disabled={shortcutMode === "manual"}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {SHORTCUT_OPTIONS.map((opt) => (
                   <option key={opt} value={opt} className="bg-gray-800">
@@ -292,6 +295,16 @@ function Settings() {
                   </option>
                 ))}
               </select>
+              {shortcutMode === "manual" && (
+                <p className="text-white/40 text-xs mt-1">
+                  Configure the shortcut in your desktop environment's settings.
+                </p>
+              )}
+              {shortcutMode === "gsettings" && (
+                <p className="text-white/40 text-xs mt-1">
+                  Updates your GNOME keyboard shortcut automatically.
+                </p>
+              )}
             </div>
           </div>
         )}

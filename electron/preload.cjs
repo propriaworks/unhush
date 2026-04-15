@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Settings
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   updateShortcut: (shortcut) => ipcRenderer.invoke("update-shortcut", shortcut),
+  getShortcutMode: () => ipcRenderer.invoke("get-shortcut-mode"),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

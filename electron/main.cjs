@@ -9,7 +9,6 @@ const {
   globalShortcut,
   dialog,
 } = require("electron");
-const localShortcut = require("electron-localshortcut");
 const path = require("path");
 const { exec } = require("child_process");
 const waylandShortcut = require("./waylandShortcut.cjs");
@@ -49,18 +48,15 @@ if (isWayland) {
 
 async function registerShortcut(shortcut) {
   globalShortcut.unregisterAll();
-  if (isWayland && mainWindow) localShortcut.unregisterAll(mainWindow);
 
   try {
     await globalShortcut.register(shortcut, () => { toggleRecording(); });
   } catch (e) {}
 
-  if (isWayland) {
-    if (!globalShortcut.isRegistered(shortcut)) {
-      // Global Shortcuts Portal not available — fall back to window-local shortcut and prompt for DE setup
-      if (mainWindow) localShortcut.register(mainWindow, shortcut, () => { toggleRecording(); });
-      waylandShortcut.check(shortcut);
-    }
+  // On Wayland without portal support, globalShortcut does nothing.
+  // Prompt the user to configure a DE-level shortcut instead.
+  if (isWayland && waylandShortcut.needsFallback()) {
+    waylandShortcut.check(shortcut);
   }
 
   currentShortcut = shortcut;
@@ -365,6 +361,11 @@ ipcMain.on("set-recording-state", (event, state) => {
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
   await registerShortcut(shortcut);
   return true;
+});
+
+ipcMain.handle("get-shortcut-mode", () => {
+  if (!isWayland) return "native";
+  return waylandShortcut.shortcutMode();
 });
 
 // Warn once if /dev/uinput isn't accessible (AppImage users, or post-install udev not yet active).

@@ -54,12 +54,16 @@
     "deb": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
-      "depends": ["ydotool"]
+      "depends": [
+        "ydotool"
+      ]
     },
     "rpm": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
-      "requires": ["ydotool"]
+      "requires": [
+        "ydotool"
+      ]
     },
     "files": [
       "dist/**/*",
@@ -68,7 +72,6 @@
     ]
   },
   "dependencies": {
-    "@ricky0123/vad-web": "^0.0.30",
-    "electron-localshortcut": "^3.2.1"
+    "@ricky0123/vad-web": "^0.0.30"
   }
 }
