@@ -3,58 +3,57 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wisper 2.0 - Voice Dictation App for Linux | Speech to Text</title>
+    <title>Wisper — Voice Dictation App for Linux</title>
     <meta
       name="description"
-      content="Wisper 2.0 - Free voice dictation app for Linux. Type directly at cursor with AI-powered transcription. Works on Ubuntu, Debian, and all Linux distributions."
+      content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription. Works on Ubuntu, Debian, Fedora and all other Linux distributions."
     />
     <meta
       name="keywords"
-      content="voice dictation, speech to text, linux, ubuntu, whisper, transcription, voice typing, dictation software"
+      content="voice dictation, speech to text, linux, whisper, transcription, voice typing, dictation software, ubuntu, debian, fedora, arch, wisper, wispr flow, wisprflow"
     />
-    <meta name="author" content="Tarak Shaw" />
     <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://github.com/taraksh01/wisper" />
-    <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.ico" />
-    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png" />
+    <link rel="canonical" href="https://jtbr.github.io/wisper" />
+    <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.ico" />
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png" />
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://github.com/taraksh01/wisper" />
+    <meta property="og:url" content="https://jtbr.github.io/wisper" />
     <meta
       property="og:title"
-      content="Wisper 2.0 - Voice Dictation App for Linux"
+      content="Wisper — Voice Dictation App for Linux"
     />
     <meta
       property="og:description"
-      content="Wisper 2.0 - Type directly at cursor with AI-powered voice transcription."
+      content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription."
     />
     <meta
       property="og:image"
-      content="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
+      content="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
     />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://github.com/taraksh01/wisper" />
+    <meta name="twitter:url" content="https://jtbr.github.io/wisper" />
     <meta
       name="twitter:title"
-      content="Wisper 2.0 - Voice Dictation App for Linux"
+      content="Wisper — Voice Dictation App for Linux"
     />
     <meta
       name="twitter:description"
-      content="Wisper 2.0 - Type directly at cursor with AI-powered voice transcription."
+      content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription."
     />
     <meta
       name="twitter:image"
-      content="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
+      content="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
     />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="../assets/icon.ico" />
     <link
       rel="apple-touch-icon"
-      href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
+      href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
     />
 
     <!-- Fonts -->
@@ -79,10 +78,16 @@
           "priceCurrency": "USD"
         },
         "description": "Voice dictation app for Linux with AI-powered transcription",
-        "author": {
-          "@type": "Person",
-          "name": "Tarak Shaw"
-        }
+        "author": [
+          {
+            "@type": "Person",
+            "name": "Tarak Shaw"
+          },
+          {
+            "@type": "Person",
+            "name": "Justin Briggs"
+          }
+        ]
       }
     </script>
 
@@ -640,7 +645,9 @@
       }
 
       .download-btn {
-        display: block;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         width: 100%;
         padding: 0.875rem;
         background: linear-gradient(
@@ -653,6 +660,13 @@
         border-radius: var(--radius-sm);
         font-weight: 600;
         transition: all 0.2s;
+      }
+
+      .download-btn small {
+        font-size: 0.7em;
+        font-weight: 400;
+        opacity: 0.8;
+        margin-top: 0.2em;
       }
 
       .download-btn:hover {
@@ -689,7 +703,7 @@
           top: 0.75rem;
           width: calc(100% - 1.5rem);
         }
-        
+
         header.scrolled {
           top: 0.5rem;
         }
@@ -811,7 +825,7 @@
       .animate-on-scroll.delay-100 { transition-delay: 100ms; }
       .animate-on-scroll.delay-200 { transition-delay: 200ms; }
       .animate-on-scroll.delay-300 { transition-delay: 300ms; }
-      
+
       /* Header Scroll State */
       header.scrolled {
         background: rgba(10, 10, 15, 0.75);
@@ -829,14 +843,14 @@
 
       .feature-card:hover, .step-card:hover, .download-card:hover {
         transform: translateY(-5px) scale(1.01);
-        box-shadow: 
+        box-shadow:
           0 20px 40px -10px rgba(0, 0, 0, 0.5),
           0 0 30px -5px rgba(233, 84, 32, 0.15),
           inset 0 0 0 1px rgba(233, 84, 32, 0.2);
         border-color: rgba(233, 84, 32, 0.4);
         background: rgba(30, 30, 42, 0.7);
       }
-      
+
       /* Logo Pulse */
       .logo-icon {
         position: relative;
@@ -890,7 +904,7 @@
     <header>
       <div class="container">
         <nav>
-          <a href="https://taraksh01.github.io/wisper" class="logo">
+          <a href="https://jtbr.github.io/wisper" class="logo">
             <div class="logo-icon">
               <svg viewBox="0 0 24 24">
                 <path
@@ -909,7 +923,7 @@
             <li><a href="#download">Download</a></li>
             <li>
               <a
-                href="https://github.com/taraksh01/wisper"
+                href="https://github.com/jtbr/wisper"
                 target="_blank"
                 class="nav-cta"
                 >GitHub</a
@@ -954,12 +968,12 @@
                 points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
               />
             </svg>
-            Open Source & Free
+            Free & Open Source
           </div>
           <h1 class="animate-on-scroll delay-100">Voice Dictation<br />for <span>Linux</span></h1>
           <p class="animate-on-scroll delay-200">
-            Transform your speech into text instantly. AI-powered transcription
-            that works seamlessly across all your applications.
+            Fast, system-wide speech-to-text for Linux with
+            unlimited recording and advanced post-processing
           </p>
           <div class="hero-buttons animate-on-scroll delay-300">
             <a href="#download" class="btn btn-primary">
@@ -976,7 +990,7 @@
               Download Now
             </a>
             <a
-              href="https://github.com/taraksh01/wisper"
+              href="https://github.com/jtbr/wisper"
               target="_blank"
               class="btn btn-secondary"
             >
@@ -995,22 +1009,29 @@
         <div class="container">
           <div class="section-header">
             <h2>Powerful Features</h2>
-            <p>Everything you need for seamless voice dictation on Linux</p>
+            <p>A powerful, extensible voice dictation system for Linux —
+              now with local models, unlimited recording, and
+              optional LLM-based refinement.</p>
           </div>
           <div class="features-grid">
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+                  <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+                </svg>
+                <!-- lock icon
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
                   <rect x="3" y="11" width="18" height="11" rx="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
+                </svg>-->
               </div>
               <h3>Global Hotkey</h3>
               <p>
-                Press Shift+Space from anywhere to instantly start or stop
+                Press hotkey from anywhere to instantly start or stop
                 recording.
               </p>
             </article>
+
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
@@ -1023,10 +1044,37 @@
               </div>
               <h3>AI Transcription</h3>
               <p>
-                Powered by OpenAI Whisper via Groq or OpenAI for accurate
-                results.
+                Powered by OpenAI Whisper via Groq, OpenAI, or local endpoints
               </p>
             </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                </svg>
+              </div>
+              <h3>Privacy-First</h3>
+              <p>
+                Fully local pipelines supported
+              </p>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+                  <path
+                    d="M12 3a1 1 0 0 0-1 1 8 8 0 0 1-7 7 1 1 0 0 0 0 2 8 8 0 0 1 7 7 1 1 0 0 0 2 0 8 8 0 0 1 7-7 1 1 0 0 0 0-2 8 8 0 0 1-7-7 1 1 0 0 0-1-1Z" />
+                  <path d="M19 17a5 5 0 0 1-4 4 5 5 0 0 1 4 4 5 5 0 0 1 4-4 5 5 0 0 1-4-4Z" />
+                  <path d="M5 3a3 3 0 0 1-2 2 3 3 0 0 1 2 2 3 3 0 0 1 2-2 3 3 0 0 1-2-2Z" />
+                </svg>
+              </div>
+              <h3>LLM Post-processing</h3>
+              <p>
+                Clean up speech automatically
+              </p>
+            </article>
+
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
@@ -1034,11 +1082,25 @@
                   <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
                 </svg>
               </div>
-              <h3>Direct Text Input</h3>
+              <h3>Flexible Output</h3>
               <p>
-                Transcribed text is typed directly at your cursor. No copy-paste needed.
+                Transcribed text can be pasted or typed at cursor. Or copied to cliboard.
               </p>
             </article>
+
+            <article class="feature-card">
+              <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+                  <path
+                    d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z" />
+                </svg>
+              </div>
+              <h3>Unlimited Dictation</h3>
+              <p>
+                No time limits via VAD segmentation
+              </p>
+            </article>
+
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
@@ -1047,24 +1109,28 @@
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                 </svg>
               </div>
-              <h3>99+ Languages</h3>
+              <h3>Multilingual</h3>
               <p>
-                Automatic language detection. Speak in any language and get accurate transcriptions.
+                99+ languages with auto-detection
               </p>
             </article>
+
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  <line x1="4" y1="8" x2="4" y2="15" />
+                  <line x1="8" y1="2" x2="8" y2="20" />
+                  <line x1="12" y1="6" x2="12" y2="22" />
+                  <line x1="16" y1="2" x2="16" y2="16" />
+                  <line x1="20" y1="6" x2="20" y2="19" />
                 </svg>
               </div>
               <h3>Minimal UI</h3>
               <p>
-                Slim, transparent recording bar with real-time audio waveform
-                visualization.
+                Slim, transparent recording bar; lives in your system tray
               </p>
             </article>
+
             <article class="feature-card">
               <div class="feature-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
@@ -1073,24 +1139,12 @@
                   <path d="M9 21V9" />
                 </svg>
               </div>
-              <h3>System Tray</h3>
+              <h3>Wayland & X11</h3>
               <p>
-                Quick access from system tray. Toggle recording and access
-                settings.
+                Works everywhere on Linux
               </p>
             </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                </svg>
-              </div>
-              <h3>Privacy First</h3>
-              <p>
-                Records locally before sending to API. No data stored on
-                external servers.
-              </p>
-            </article>
+
           </div>
         </div>
       </section>
@@ -1169,31 +1223,40 @@
             <h2>Download</h2>
             <p>Available for all Linux distributions</p>
           </div>
+          <!-- DOWNLOAD-CARDS-START -->
           <div class="download-grid">
             <div class="download-card">
               <h3>AppImage</h3>
-              <p>
-                Universal package for all Linux distros. No installation
-                required.
-              </p>
+              <p>Universal package for all Linux distros. No installation required.</p>
               <a
-                href="https://github.com/taraksh01/wisper/releases/latest/download/Wisper-2.0.0.AppImage"
+                href="https://github.com/jtbr/wisper/releases/latest/download/Wisper-3.0.0.AppImage"
                 class="download-btn"
               >
-                Download .AppImage
+                Download .AppImage<small>v3.0.0</small>
               </a>
             </div>
             <div class="download-card">
-              <h3>Debian/Ubuntu</h3>
+              <h3>Debian / Ubuntu</h3>
               <p>Native .deb package for Debian-based distributions.</p>
               <a
-                href="https://github.com/taraksh01/wisper/releases/latest/download/wisper_2.0.0_amd64.deb"
+                href="https://github.com/jtbr/wisper/releases/latest/download/wisper_3.0.0_amd64.deb"
                 class="download-btn"
               >
-                Download .deb
+                Download .deb<small>v3.0.0</small>
+              </a>
+            </div>
+            <div class="download-card">
+              <h3>Fedora / RHEL</h3>
+              <p>Native .rpm package for Red Hat-based distributions.</p>
+              <a
+                href="https://github.com/jtbr/wisper/releases/latest/download/wisper-3.0.0.x86_64.rpm"
+                class="download-btn"
+              >
+                Download .rpm<small>v3.0.0</small>
               </a>
             </div>
           </div>
+          <!-- DOWNLOAD-CARDS-END -->
         </div>
       </section>
     </main>
@@ -1201,11 +1264,12 @@
     <footer>
       <div class="container">
         <p>
-          &copy; 2025 <a href="https://github.com/taraksh01">Tarak Shaw</a>.
-          Released under
-          <a href="https://github.com/taraksh01/wisper/blob/main/LICENSE"
-            >MIT License</a
-          >.
+          Originally created by Tarak Shaw.
+          This is a fork with extended functionality, actively maintained by Justin Briggs.
+        </p>
+        <p>
+          <a href="https://github.com/jtbr/wisper">GitHub Repository</a> | Released under
+          <a href="https://github.com/jtbr/wisper/blob/main/LICENSE">MIT License</a>
         </p>
       </div>
     </footer>
@@ -1228,12 +1292,12 @@
           if (entry.isIntersecting) {
             entry.target.classList.add('visible');
             observer.unobserve(entry.target);
-            
+
             // Clean up after animation to restore original transition speeds
             setTimeout(() => {
               entry.target.classList.remove('animate-on-scroll', 'visible');
               entry.target.style.transitionDelay = '';
-            }, 1000); 
+            }, 1000);
           }
         });
       }, observerOptions);

@@ -6,7 +6,7 @@
 
 Wisper is a fast, system-wide voice dictation application for Linux.
 
-Wisper provides seamless voice-to-text using AI transcription, allowing you to dictate anywhere and have text delivered instantly. It offers functionality comparable to *WisprFlow* (a commercial voice dictation app for Windows and macOS).
+Wisper provides seamless speech-to-text using AI transcription, allowing you to dictate anywhere and have text delivered instantly. It offers functionality comparable to *Wispr Flow* (a commercial voice dictation app for Windows and macOS).
 
 This is an independent, actively maintained fork of [taraksh01/wisper](https://github.com/taraksh01/wisper), focused on improving usability, robustness, and extending core functionality.
 
@@ -240,7 +240,11 @@ This is normal when using a local server — the model needs to be loaded into G
 - Check `/tmp/wisper.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
 
-## Building
+## Development
+
+This is actively maintained; your contributions and feedback are welcome.
+
+### Building
 
 If on ubuntu, `sudo apt install rpm` to support building the rpm package. If on fedora, `sudo dnf install dpkg fakeroot` to support building the deb package.
 
@@ -248,6 +252,18 @@ If on ubuntu, `sudo apt install rpm` to support building the rpm package. If on 
 # Production
 pnpm run build            # Build React app
 pnpm run package          # Create distributables (.AppImage, .deb, .rpm)
+```
+
+### Testing
+
+Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/jtbr/wisper/discussions/2), particularly with respect to the hotkey functionality.
+
+### Releases
+
+Update version in `package.json`, commit final changes, then tag it and push; CI/CD will be launched by github.
+
+```bash
+git tag v3.1 && git push origin v3.1
 ```
 
 ## Why this fork?
