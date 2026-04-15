@@ -45,7 +45,8 @@
       "target": [
         "AppImage",
         "deb",
-        "rpm"
+        "rpm",
+        "pacman"
       ],
       "icon": "assets/icon.png",
       "category": "Utility",
@@ -62,6 +63,13 @@
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
       "requires": [
+        "ydotool"
+      ]
+    },
+    "pacman": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "depends": [
         "ydotool"
       ]
     },

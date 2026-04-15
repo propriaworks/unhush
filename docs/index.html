@@ -536,6 +536,15 @@
         font-size: 0.875rem;
       }
 
+      .step-content p a {
+        color: var(--primary-light);
+        text-decoration: underline;
+      }
+
+      .step-content p a:hover {
+        color: var(--text);
+      }
+
       .api-links {
         display: flex;
         gap: 0.75rem;
@@ -667,6 +676,27 @@
         font-weight: 400;
         opacity: 0.8;
         margin-top: 0.2em;
+      }
+
+      .checksums-note {
+        margin-top: 1.25rem;
+        text-align: center;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
+      .checksums-note a {
+        color: var(--text-secondary);
+        text-decoration: underline;
+      }
+
+      .checksums-note a:hover {
+        color: var(--text);
+      }
+
+      .checksums-note code {
+        font-size: 0.9em;
+        color: var(--text-muted);
       }
 
       .download-btn:hover {
@@ -1161,8 +1191,11 @@
               <div class="step-content">
                 <h3>Download Wisper</h3>
                 <p>
-                  Get the AppImage (universal) or .deb package for Debian/Ubuntu
-                  from the download section below.
+                  Get the right package for your distro from the download section below:
+                  <strong>.AppImage</strong> (universal),
+                  <strong>.deb</strong> (Debian/Ubuntu/Mint),
+                  <strong>.rpm</strong> (Fedora/RHEL), or
+                  <strong>.pkg.tar.zst</strong> (Arch/Manjaro).
                 </p>
               </div>
             </div>
@@ -1172,16 +1205,18 @@
                 <h3>Install & Run</h3>
                 <p>
                   <strong>AppImage:</strong> Make executable and double-click<br />
-                  <strong>.deb:</strong> Install via Software Center or
-                  <code>sudo dpkg -i wisper_*.deb</code>
+                  <strong>.deb:</strong> <code>sudo dpkg -i wisper_*.deb</code><br />
+                  <strong>.rpm:</strong> <code>sudo rpm -i wisper-*.rpm</code><br />
+                  <strong>.pkg.tar.zst:</strong> <code>sudo pacman -U wisper-*.pkg.tar.zst</code>
                 </p>
               </div>
             </div>
             <div class="step-card">
               <div class="step-number">3</div>
               <div class="step-content">
-                <h3>Get Your API Key</h3>
-                <p>Choose a provider and get your free API key:</p>
+                <h3>Choose a Transcription Provider</h3>
+                <p>Pick a cloud provider and get an API key, or run a local server for total privacy
+                  (<a href="https://github.com/jtbr/wisper#speaches-custom-local-transcription---docker-setup" target="_blank" rel="noopener">more details</a>):</p>
                 <div class="api-links">
                   <a
                     href="https://console.groq.com/"
@@ -1200,6 +1235,15 @@
                   >
                     OpenAI Platform
                   </a>
+                  <a
+                    href="https://speaches.ai"
+                    target="_blank"
+                    rel="noopener"
+                    class="api-link"
+                  >
+                    Speaches
+                    <span class="badge">Local</span>
+                  </a>
                 </div>
               </div>
             </div>
@@ -1208,8 +1252,10 @@
               <div class="step-content">
                 <h3>Configure & Start</h3>
                 <p>
-                  Right-click system tray icon → Select <strong>Settings</strong> → Choose provider → Paste API key
-                  → Click <strong>Save Settings</strong> → <code>Shift+Space</code> to dictate!
+                  Right-click the tray icon → <strong>Settings</strong> → choose your provider and paste your API key → <strong>Save</strong>.
+                  Explore the other tabs to configure your hotkey, output mode (paste / type / clipboard),
+                  optional LLM formatting, and local server auto-start.
+                  Then press your hotkey to start dictating.
                 </p>
               </div>
             </div>
@@ -1236,7 +1282,7 @@
               </a>
             </div>
             <div class="download-card">
-              <h3>Debian / Ubuntu</h3>
+              <h3>Debian / Ubuntu / Mint</h3>
               <p>Native .deb package for Debian-based distributions.</p>
               <a
                 href="https://github.com/jtbr/wisper/releases/latest/download/wisper_3.0.0_amd64.deb"
@@ -1255,8 +1301,24 @@
                 Download .rpm<small>v3.0.0</small>
               </a>
             </div>
+            <div class="download-card">
+              <h3>Arch Linux / Manjaro</h3>
+              <p>Native .pkg.tar.zst package for Arch Linux and derivatives.</p>
+              <a
+                href="https://github.com/jtbr/wisper/releases/latest/download/wisper-3.0.0-1-x86_64.pkg.tar.zst"
+                class="download-btn"
+              >
+                Download .pkg.tar.zst<small>v3.0.0</small>
+              </a>
+            </div>
           </div>
           <!-- DOWNLOAD-CARDS-END -->
+          <p class="checksums-note">
+            Verify your download:
+            <a href="https://github.com/jtbr/wisper/releases/latest/download/SHA256SUMS.txt" target="_blank" rel="noopener">SHA256SUMS.txt</a>
+            &nbsp;·&nbsp;
+            <code>sha256sum -c SHA256SUMS.txt --ignore-missing</code>
+          </p>
         </div>
       </section>
     </main>

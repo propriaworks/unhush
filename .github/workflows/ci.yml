@@ -6,6 +6,13 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    # Manually trigger CI on any branch (for build testing) or tag (to re-release).
+    # Select the target from the branch/tag dropdown in the GitHub Actions UI.
+
+# Least-privilege default: jobs that need write access declare it explicitly
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same branch/PR to save minutes
 concurrency:
@@ -17,18 +24,22 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
         with:
           version: 9  # matches lockfileVersion 9.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '22'
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
+
+      - uses: google/osv-scanner-action@c51854704019a247608d928f370c98740469d4b5  # v2.3.5
+        with:
+          scan-args: --lockfile=pnpm-lock.yaml
 
       - run: pnpm exec tsc --noEmit
 
@@ -37,13 +48,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: typecheck
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -53,28 +64,69 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends rpm fakeroot
 
       # Electron downloads large binaries; cache them to avoid re-downloading each run
+      # Key is shared with arch-build: the Linux electron binary is identical on both runners
       - name: Cache Electron binary cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
-          key: electron-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: electron-${{ runner.os }}-
+          key: electron-linux-${{ hashFiles('package.json') }}
+          restore-keys: electron-linux-
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build & package
-        run: pnpm run package
+      - name: Build & package (AppImage / deb / rpm)
+        # Explicit targets: pacman is built separately in arch-build
+        run: pnpm run build && pnpm exec electron-builder --linux AppImage deb rpm
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: linux-packages
           path: |
             dist/*.AppImage
             dist/*.deb
             dist/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+  arch-build:
+    name: Build Arch Package (.pkg.tar.zst)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    needs: typecheck
+    steps:
+      # Install build tools first — checkout action requires git
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git nodejs npm fakeroot zstd
+          npm install -g pnpm@9
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # Share the electron binary cache with the ubuntu build job (Linux binary is identical)
+      - name: Cache Electron binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-linux-${{ hashFiles('package.json') }}
+          restore-keys: electron-linux-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build & package (pacman)
+        run: pnpm run build && pnpm exec electron-builder --linux pacman
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 7
 
@@ -87,12 +139,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           # Use a token with push rights so the commit can trigger Pages deployment
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '22'
           # No pnpm needed — script only uses built-in Node modules
@@ -110,27 +162,32 @@ jobs:
             git push
           )
 
-  # TODO: Add arch-build job here (runs-on: ubuntu-latest with an Arch container,
-  # or a self-hosted Arch runner) to produce a .pkg.tar.zst for pacman.
-  # The release job below would then also download the arch-packages artifact.
-
   release:
     name: Publish Release
-    # Only run when a version tag is pushed (e.g. v3.1)
+    # Runs on version tag pushes, or manual dispatch targeting a version tag
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, arch-build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download packages
-        uses: actions/download-artifact@v4
+      - name: Download Linux packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: linux-packages
           path: dist/
 
+      - name: Download Arch package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: arch-package
+          path: dist/
+
+      - name: Generate SHA256 checksums
+        run: sha256sum dist/*.AppImage dist/*.deb dist/*.rpm dist/*.pkg.tar.zst > dist/SHA256SUMS.txt
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: dist/*
           generate_release_notes: true

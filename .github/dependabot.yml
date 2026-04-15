@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Keep GitHub Actions up to date (security patches, new features)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # Keep npm/pnpm dependencies up to date
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Batch minor/patch bumps into one PR to reduce noise
+      dependencies:
+        update-types: [minor, patch]

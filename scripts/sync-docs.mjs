@@ -26,14 +26,17 @@ function filename(target) {
     case 'appimage': return `${productName}-${version}.AppImage`;
     case 'deb':      return `${pkgName}_${version}_amd64.deb`;
     case 'rpm':      return `${pkgName}-${version}.x86_64.rpm`;
+    // pkgrel is always 1 for electron-builder pacman packages
+    case 'pacman':   return `${pkgName}-${version}-1-x86_64.pkg.tar.zst`;
     default:         return null;
   }
 }
 
 const META = {
-  appimage: { title: 'AppImage',        desc: 'Universal package for all Linux distros. No installation required.', btn: 'Download .AppImage' },
-  deb:      { title: 'Debian / Ubuntu', desc: 'Native .deb package for Debian-based distributions.',                btn: 'Download .deb'      },
-  rpm:      { title: 'Fedora / RHEL',   desc: 'Native .rpm package for Red Hat-based distributions.',               btn: 'Download .rpm'      },
+  appimage: { title: 'AppImage',        desc: 'Universal package for all Linux distros. No installation required.', btn: 'Download .AppImage'    },
+  deb:      { title: 'Debian / Ubuntu / Mint', desc: 'Native .deb package for Debian-based distributions.',         btn: 'Download .deb'         },
+  rpm:      { title: 'Fedora / RHEL',          desc: 'Native .rpm package for Red Hat-based distributions.',        btn: 'Download .rpm'         },
+  pacman:   { title: 'Arch Linux / Manjaro',   desc: 'Native .pkg.tar.zst package for Arch Linux and derivatives.', btn: 'Download .pkg.tar.zst' },
 };
 
 const cards = targets

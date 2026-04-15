@@ -26,20 +26,32 @@ This is an independent, actively maintained fork of [taraksh01/wisper](https://g
 
 ## Requirements
 
-- Linux (Debian 10+ / Ubuntu 22.04+ / Fedora 32+) with native packages, or anything with AppImage and glibc 2.29+ (which includes Ubuntu 18.04+)
+- Linux (Debian 10+ / Ubuntu 22.04+ / Fedora 32+ / Arch Linux) with native packages, or anything with AppImage and glibc 2.29+ (which includes Ubuntu 18.04+)
 - Microphone access
 - Internet connection (for cloud API calls) or a local Whisper server (see below)
 - **ydotool** — Required for **Paste** (default) and **Type** output modes; not needed for **Clipboard** mode
-  - `.deb`/`.rpm` installs: ydotool is installed automatically as a package dependency
+  - `.deb` / `.rpm` / `.pkg.tar.zst` installs: ydotool is installed automatically as a package dependency
   - AppImage: install ydotool manually (see below)
 
 ## Installation
 
 ### As a package
 
-Download the latest `.AppImage`, `.deb`, or `.rpm` package from the [Releases](https://github.com/jtbr/wisper/releases) page, and run or install as usual for your platform.
+Download the latest release from the [Releases](https://github.com/jtbr/wisper/releases) page and install:
 
-The `.deb` and `.rpm` packages automatically:
+```bash
+sudo apt install ./wisper_*.deb          # Debian / Ubuntu / Mint
+sudo dnf install ./wisper-*.rpm          # Fedora / RHEL
+sudo pacman -U wisper-*.pkg.tar.zst      # Arch / Manjaro
+```
+
+To verify your download against the [SHA256 checksums](https://github.com/jtbr/wisper/releases/latest/download/SHA256SUMS.txt):
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+The `.deb`, `.rpm`, and `.pkg.tar.zst` packages automatically:
 - Install ydotool as a dependency
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
 
@@ -158,7 +170,7 @@ Wisper also sends a warm-up request to each custom endpoint on first use (and pe
 
 #### Speaches custom local transcription - Docker setup
 
-If you don't already have `speaches`, but you have `docker compose` you can set it to run automatically with zero install simply by adding `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` as the transcription start command (this `yaml` file assumes you have an Nvidia GPU with CDI support, adjust as necessary). The first time you're running you'll need to [download a Whisper STT model as described here](https://speaches.ai/usage/model-discovery/#__tabbed_1_2), for example `Systran/faster-distil-whisper-large-v3`. That's it!
+If you don't already have [`speaches`](https://speaches.ai), but you have `docker compose` you can set it to run automatically with zero install simply by adding `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` as the transcription start command (this `yaml` file assumes you have an Nvidia GPU with CDI support, adjust as necessary). The first time you're running you'll need to [download a Whisper STT model as described here](https://speaches.ai/usage/model-discovery/#__tabbed_1_2), for example `Systran/faster-distil-whisper-large-v3`. That's it!
 
 ### Settings Reference
 
@@ -187,9 +199,9 @@ Wisper logs to `/tmp/wisper.log`. When something goes wrong, check there first.
 If you're using **Paste** (default) or **Type** output mode, Wisper depends on ydotool. Switch to **Clipboard** mode in Settings to eliminate this dependency entirely (you will need to paste the result yourself).
 
 - Test manually: `ydotool type "hello"` — the word should appear in your terminal
-- Ensure ydotool is installed (`.deb`/`.rpm` installs it automatically; AppImage users need to install it manually)
+- Ensure ydotool is installed (`.deb`/`.rpm`/`.pkg.tar.zst` installs it automatically; AppImage users need to install it manually)
 - Ensure the daemon (`ydotoold`) is running — running it as a user systemd service is recommended (see [Install ydotool](#install-ydotool-appimage-only))
-- **`/dev/uinput` not accessible**: `.deb`/`.rpm` installs configure this automatically via a udev rule. AppImage users will see a one-time setup dialog on first use; follow the instructions shown, or run:
+- **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pkg.tar.zst` installs configure this automatically via a udev rule. AppImage users will see a one-time setup dialog on first use; follow the instructions shown, or run:
   ```bash
   echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
     | sudo tee /etc/udev/rules.d/80-uinput.rules
@@ -246,13 +258,21 @@ This is actively maintained; your contributions and feedback are welcome.
 
 ### Building
 
-If on ubuntu, `sudo apt install rpm` to support building the rpm package. If on fedora, `sudo dnf install dpkg fakeroot` to support building the deb package.
+Cross-format building is supported with native system tools:
+
+| Host | Extra setup | Builds |
+|------|-------------|--------|
+| Ubuntu / Debian | `sudo apt install rpm fakeroot` | AppImage, .deb, .rpm |
+| Fedora / RHEL | `sudo dnf install dpkg fakeroot` | AppImage, .deb, .rpm |
+| Arch Linux | *(none — base-devel sufficient)* | AppImage, .pkg.tar.zst |
 
 ```bash
 # Production
 pnpm run build            # Build React app
-pnpm run package          # Create distributables (.AppImage, .deb, .rpm)
+pnpm run package          # Create distributables for all targets supported on this host
 ```
+
+The `.pkg.tar.zst` package is built in CI using an Arch Linux container and is not cross-buildable from other distributions.
 
 ### Testing
 
@@ -260,11 +280,14 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 
 ### Releases
 
-Update version in `package.json`, commit final changes, then tag it and push; CI/CD will be launched by github.
+Update version in `package.json`, commit final changes, then tag it and push:
 
 ```bash
-git tag v3.1 && git push origin v3.1
+git tag v3.1.0 && git push origin v3.1.0
 ```
+
+CI/CD will be launched by github to build it, save release builds and update docs/index.html with version correct download links.
+To test, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to re-release, pick the tag instead).
 
 ## Why this fork?
 
@@ -277,10 +300,11 @@ This fork continues that work with a focus on making the project more practical,
 ### Key Improvements
 
 - Improved usability, configuration, and consistency
-- Enhanced logging and error visibility
+- Enhanced logging and error visibility+handling
 - Support for custom/local models, including startup and warmup
 - Support for unlimited dictation time (overcoming Whisper-model limitation)
 - Added LLM-based post-processing
+- Seamless installation and Wayland support
 
 ## License
 
