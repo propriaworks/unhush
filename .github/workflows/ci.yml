@@ -111,7 +111,7 @@ jobs:
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git nodejs npm fakeroot zstd
+          pacman -S --noconfirm git nodejs npm fakeroot zstd libxcrypt-compat
           npm install -g pnpm@9
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4

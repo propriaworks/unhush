@@ -288,8 +288,7 @@ Update version in `package.json`, commit final changes, then tag it and push:
 git tag v3.1.0 && git push origin v3.1.0
 ```
 
-CI/CD will be launched by github to build it, save release builds and update docs/index.html with version correct download links.
-To test, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to re-release, pick the tag instead).
+CI/CD will be launched by github to build it, save release builds and update docs/index.html with version correct download links (or `node scripts/sync-docs.mjs`). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
 
 ## Why this fork?
 
