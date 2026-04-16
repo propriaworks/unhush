@@ -46,7 +46,7 @@ function Settings() {
     setGroqKey(localStorage.getItem("wisper_groq_key") || "");
     setOpenaiKey(localStorage.getItem("wisper_openai_key") || "");
     setCustomKey(localStorage.getItem("wisper_custom_key") || "");
-    setCustomUrl(localStorage.getItem("wisper_custom_url") || "");
+    setCustomUrl(localStorage.getItem("wisper_custom_url") || "http://localhost:8000/v1/audio/transcriptions");
     setCustomModel(localStorage.getItem("wisper_custom_model") || "");
     setProvider((localStorage.getItem("wisper_provider") as Provider) || "groq");
     setShortcut(localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space");
