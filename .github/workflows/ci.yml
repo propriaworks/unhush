@@ -88,7 +88,7 @@ jobs:
 
       - name: Build & package (deb / rpm)
         # AppImage is built in arch-build to run both jobs in parallel
-        run: pnpm run build && pnpm exec electron-builder --linux deb rpm
+        run: pnpm run build && pnpm exec electron-builder --linux deb rpm --publish never
 
       - name: Upload packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -129,7 +129,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build & package (AppImage / pacman)
-        run: pnpm run build && pnpm exec electron-builder --linux AppImage pacman
+        run: pnpm run build && pnpm exec electron-builder --linux AppImage pacman --publish never
 
       - name: Upload Arch packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -200,6 +200,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           files: release/*
           generate_release_notes: true
