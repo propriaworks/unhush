@@ -91,7 +91,7 @@ jobs:
         run: pnpm run build && pnpm exec electron-builder --linux deb rpm --publish never
 
       - name: Upload packages
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
         with:
           name: linux-packages
           path: |
@@ -132,7 +132,7 @@ jobs:
         run: pnpm run build && pnpm exec electron-builder --linux AppImage pacman --publish never
 
       - name: Upload Arch packages
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
         with:
           name: arch-packages
           path: |
@@ -183,13 +183,13 @@ jobs:
       contents: write
     steps:
       - name: Download Linux packages
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v4
         with:
           name: linux-packages
           path: release/
 
       - name: Download Arch packages
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v4
         with:
           name: arch-packages
           path: release/
@@ -198,7 +198,7 @@ jobs:
         run: sha256sum release/*.AppImage release/*.deb release/*.rpm release/*.pacman > release/SHA256SUMS.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3
         with:
           files: release/*
           generate_release_notes: true
