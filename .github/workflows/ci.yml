@@ -195,7 +195,7 @@ jobs:
           path: release/
 
       - name: Generate SHA256 checksums
-        run: sha256sum release/*.AppImage release/*.deb release/*.rpm release/*.pacman > release/SHA256SUMS.txt
+        run: cd release && sha256sum *.AppImage *.deb *.rpm *.pacman > SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3
