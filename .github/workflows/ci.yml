@@ -104,7 +104,7 @@ jobs:
     name: Build Arch Packages (AppImage / .pacman)
     runs-on: ubuntu-latest
     container:
-      image: archlinux:latest
+      image: archlinux@sha256:9d95c7c95276ea44e5e87f4974672a91f46e38e91d60f5c342f94274f477aa40  # latest as of 2026-04-16
     needs: typecheck
     steps:
       # Install build tools first — checkout action requires git
