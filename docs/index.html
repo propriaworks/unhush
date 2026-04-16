@@ -1,1271 +1,1437 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wisper 2.0 - Voice Dictation App for Linux | Speech to Text</title>
-    <meta
-      name="description"
-      content="Wisper 2.0 - Free voice dictation app for Linux. Type directly at cursor with AI-powered transcription. Works on Ubuntu, Debian, and all Linux distributions."
-    />
-    <meta
-      name="keywords"
-      content="voice dictation, speech to text, linux, ubuntu, whisper, transcription, voice typing, dictation software"
-    />
-    <meta name="author" content="Tarak Shaw" />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://github.com/taraksh01/wisper" />
-    <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.ico" />
-    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png" />
-
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://github.com/taraksh01/wisper" />
-    <meta
-      property="og:title"
-      content="Wisper 2.0 - Voice Dictation App for Linux"
-    />
-    <meta
-      property="og:description"
-      content="Wisper 2.0 - Type directly at cursor with AI-powered voice transcription."
-    />
-    <meta
-      property="og:image"
-      content="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
-    />
-
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://github.com/taraksh01/wisper" />
-    <meta
-      name="twitter:title"
-      content="Wisper 2.0 - Voice Dictation App for Linux"
-    />
-    <meta
-      name="twitter:description"
-      content="Wisper 2.0 - Type directly at cursor with AI-powered voice transcription."
-    />
-    <meta
-      name="twitter:image"
-      content="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
-    />
-
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" href="../assets/icon.ico" />
-    <link
-      rel="apple-touch-icon"
-      href="https://raw.githubusercontent.com/taraksh01/wisper/main/assets/icon.png"
-    />
-
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
-
-    <!-- JSON-LD Structured Data -->
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Wisper",
-        "operatingSystem": "Linux",
-        "applicationCategory": "UtilitiesApplication",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        },
-        "description": "Voice dictation app for Linux with AI-powered transcription",
-        "author": {
-          "@type": "Person",
-          "name": "Tarak Shaw"
-        }
-      }
-    </script>
-
-    <style>
-      *,
-      *::before,
-      *::after {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-
-      :root {
-        --primary: #e95420;
-        --primary-dark: #c73d0f;
-        --primary-light: #ff7043;
-        --bg-dark: #0a0a0f;
-        --bg-card: #16161f;
-        --bg-card-hover: #1e1e2a;
-        --border: rgba(255, 255, 255, 0.08);
-        --text: #ffffff;
-        --text-secondary: rgba(255, 255, 255, 0.7);
-        --text-muted: rgba(255, 255, 255, 0.5);
-        --radius: 16px;
-        --radius-sm: 10px;
-      }
-
-      html {
-        scroll-behavior: smooth;
-      }
-
-      body {
-        font-family:
-          "Inter",
-          -apple-system,
-          BlinkMacSystemFont,
-          sans-serif;
-        background: var(--bg-dark);
-        color: var(--text);
-        line-height: 1.6;
-        -webkit-font-smoothing: antialiased;
-      }
-
-      .container {
-        width: 100%;
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 1.5rem;
-      }
-
-      /* Header */
-      header {
-        position: fixed;
-        top: 1.5rem;
-        left: 50%;
-        transform: translateX(-50%);
-        width: calc(100% - 2rem);
-        max-width: 900px;
-        z-index: 100;
-        background: rgba(10, 10, 15, 0.5);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 100px;
-        padding: 0 1.5rem;
-        transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-      }
-
-      nav {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.6rem 0;
-      }
-
-      .logo {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        text-decoration: none;
-        color: var(--text);
-        font-weight: 700;
-        font-size: 1.5rem;
-      }
-
-      .logo-icon {
-        width: 36px;
-        height: 36px;
-        background: linear-gradient(
-          135deg,
-          var(--primary),
-          var(--primary-light)
-        );
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-      }
-
-      .logo-icon svg {
-        width: 18px;
-        height: 18px;
-        fill: white;
-      }
-
-      .nav-links {
-        display: flex;
-        align-items: center;
-        gap: 2rem;
-        list-style: none;
-      }
-
-      .nav-links a {
-        color: var(--text-secondary);
-        text-decoration: none;
-        font-size: 0.95rem;
-        font-weight: 500;
-        transition: color 0.2s;
-      }
-
-      .nav-links a:hover {
-        color: var(--text);
-      }
-
-      .nav-cta {
-        background: var(--primary);
-        color: white !important;
-        padding: 0.5rem 1.25rem;
-        border-radius: var(--radius-sm);
-        transition:
-          background 0.2s,
-          transform 0.2s;
-      }
-
-      .nav-cta:hover {
-        background: var(--primary-dark);
-        transform: translateY(-1px);
-      }
-
-      .mobile-menu-btn {
-        display: none;
-        background: none;
-        border: none;
-        color: var(--text);
-        cursor: pointer;
-        padding: 0.5rem;
-      }
-
-      /* Hero */
-      .hero {
-        padding: 8rem 0 5rem;
-        text-align: center;
-        position: relative;
-        /* overflow: hidden; */
-      }
-
-      .hero::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 150%;
-        background: radial-gradient(
-          circle at 50% 300px,
-          rgba(233, 84, 32, 0.15) 0%,
-          transparent 70%
-        );
-        pointer-events: none;
-        z-index: -1;
-      }
-
-      .hero-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        background: rgba(233, 84, 32, 0.1);
-        border: 1px solid rgba(233, 84, 32, 0.3);
-        padding: 0.5rem 1rem;
-        border-radius: 100px;
-        font-size: 0.875rem;
-        color: var(--primary-light);
-        margin-bottom: 1.5rem;
-      }
-
-      .hero h1 {
-        font-size: clamp(2.5rem, 6vw, 4rem);
-        font-weight: 800;
-        line-height: 1.1;
-        margin-bottom: 1.5rem;
-        letter-spacing: -0.02em;
-      }
-
-      .hero h1 span {
-        background: linear-gradient(
-          135deg,
-          var(--primary),
-          var(--primary-light)
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-
-      .hero p {
-        font-size: clamp(1rem, 2vw, 1.25rem);
-        color: var(--text-secondary);
-        max-width: 600px;
-        margin: 0 auto 2rem;
-      }
-
-      .hero-buttons {
-        display: flex;
-        gap: 1rem;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.875rem 1.75rem;
-        border-radius: var(--radius-sm);
-        font-weight: 600;
-        font-size: 1rem;
-        text-decoration: none;
-        transition: all 0.2s;
-        cursor: pointer;
-        border: none;
-      }
-
-      .btn-primary {
-        background: linear-gradient(
-          135deg,
-          var(--primary),
-          var(--primary-dark)
-        );
-        color: white;
-        box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
-      }
-
-      .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 30px rgba(233, 84, 32, 0.4);
-      }
-
-      .btn-secondary {
-        background: var(--bg-card);
-        color: var(--text);
-        border: 1px solid var(--border);
-      }
-
-      .btn-secondary:hover {
-        background: var(--bg-card-hover);
-        border-color: rgba(255, 255, 255, 0.15);
-      }
-
-      .btn svg {
-        width: 20px;
-        height: 20px;
-      }
-
-      /* Features */
-      .features {
-        padding: 5rem 0;
-      }
-
-      .section-header {
-        text-align: center;
-        margin-bottom: 3rem;
-      }
-
-      .section-header h2 {
-        font-size: clamp(1.75rem, 4vw, 2.5rem);
-        font-weight: 700;
-        margin-bottom: 1rem;
-      }
-
-      .section-header p {
-        color: var(--text-secondary);
-        max-width: 600px;
-        margin: 0 auto;
-      }
-
-      .features-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 1.5rem;
-      }
-
-      .feature-card {
-        background: rgba(22, 22, 31, 0.4);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: var(--radius);
-        padding: 1.75rem;
-        transition: all 0.3s;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .feature-card::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        padding: 1px;
-        background: linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.1) 0%,
-          rgba(255, 255, 255, 0.02) 100%
-        );
-        -webkit-mask:
-          linear-gradient(#fff 0 0) content-box,
-          linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
-        pointer-events: none;
-      }
-
-      .feature-card:hover {
-        background: rgba(30, 30, 42, 0.6);
-        border-color: rgba(233, 84, 32, 0.3);
-        transform: translateY(-4px);
-      }
-
-      .feature-icon {
-        width: 48px;
-        height: 48px;
-        background: rgba(233, 84, 32, 0.15);
-        border: 1px solid rgba(233, 84, 32, 0.2);
-        box-shadow: 0 0 20px rgba(233, 84, 32, 0.1);
-        border-radius: 12px;
-        display: grid;
-        place-items: center;
-        margin-bottom: 1.25rem;
-      }
-
-      .feature-icon svg {
-        width: 24px;
-        height: 24px;
-        stroke: var(--primary);
-      }
-
-      .feature-card h3 {
-        font-size: 1.125rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-
-      .feature-card p {
-        color: var(--text-secondary);
-        font-size: 0.95rem;
-      }
-
-      /* Get Started */
-      .get-started {
-        padding: 5rem 0;
-        background: linear-gradient(
-          180deg,
-          var(--bg-dark) 0%,
-          rgba(22, 22, 31, 0.6) 50%,
-          rgba(22, 22, 31, 0.6) 100%
-        );
-      }
-
-      .steps-container {
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-        max-width: 800px;
-        margin: 0 auto;
-      }
-
-      .step-card {
-        display: flex;
-        gap: 1.5rem;
-        background: rgba(22, 22, 31, 0.4);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: var(--radius);
-        padding: 1.5rem;
-        transition: all 0.3s;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .step-card::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        padding: 1px;
-        background: linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.1) 0%,
-          rgba(255, 255, 255, 0.02) 100%
-        );
-        -webkit-mask:
-          linear-gradient(#fff 0 0) content-box,
-          linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
-        pointer-events: none;
-      }
-
-      .step-card:hover {
-        border-color: rgba(233, 84, 32, 0.3);
-        background: rgba(30, 30, 42, 0.6);
-      }
-
-      .step-number {
-        flex-shrink: 0;
-        width: 48px;
-        height: 48px;
-        background: linear-gradient(
-          135deg,
-          var(--primary),
-          var(--primary-dark)
-        );
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        font-weight: 700;
-        font-size: 1.25rem;
-      }
-
-      .step-content h3 {
-        font-size: 1.125rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-
-      .step-content p {
-        color: var(--text-secondary);
-        font-size: 0.95rem;
-        margin-bottom: 0.75rem;
-      }
-
-      .step-content code {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 0.125rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.875rem;
-      }
-
-      .api-links {
-        display: flex;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-        margin-top: 0.75rem;
-      }
-
-      .api-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        color: var(--text);
-        text-decoration: none;
-        font-size: 0.875rem;
-        font-weight: 500;
-        transition: all 0.2s;
-      }
-
-      .api-link:hover {
-        background: rgba(233, 84, 32, 0.1);
-        border-color: var(--primary);
-      }
-
-      .api-link.recommended {
-        background: rgba(233, 84, 32, 0.1);
-        border-color: rgba(233, 84, 32, 0.3);
-      }
-
-      .api-link .badge {
-        background: var(--primary);
-        color: white;
-        padding: 0.125rem 0.5rem;
-        border-radius: 100px;
-        font-size: 0.75rem;
-      }
-
-      /* Download */
-      .download {
-        padding: 5rem 0;
-        background: linear-gradient(
-          180deg,
-          rgba(22, 22, 31, 0.6) 0%,
-          var(--bg-dark) 100%
-        );
-      }
-
-      .download-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 1.5rem;
-        max-width: 700px;
-        margin: 0 auto;
-      }
-
-      .download-card {
-        background: rgba(22, 22, 31, 0.4);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: var(--radius);
-        padding: 2rem;
-        text-align: center;
-        transition: all 0.3s;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .download-card::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        padding: 1px;
-        background: linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.1) 0%,
-          rgba(255, 255, 255, 0.02) 100%
-        );
-        -webkit-mask:
-          linear-gradient(#fff 0 0) content-box,
-          linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
-        pointer-events: none;
-      }
-
-      .download-card:hover {
-        border-color: var(--primary);
-        transform: translateY(-4px);
-        background: rgba(30, 30, 42, 0.6);
-      }
-
-      .download-card h3 {
-        font-size: 1.25rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-
-      .download-card p {
-        color: var(--text-secondary);
-        font-size: 0.9rem;
-        margin-bottom: 1.5rem;
-      }
-
-      .download-btn {
-        display: block;
-        width: 100%;
-        padding: 0.875rem;
-        background: linear-gradient(
-          135deg,
-          var(--primary),
-          var(--primary-dark)
-        );
-        color: white;
-        text-decoration: none;
-        border-radius: var(--radius-sm);
-        font-weight: 600;
-        transition: all 0.2s;
-      }
-
-      .download-btn:hover {
-        transform: scale(1.02);
-        box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
-      }
-
-      /* Footer */
-      footer {
-        padding: 3rem 0;
-        background: var(--bg-dark);
-        border-top: 1px solid var(--border);
-        text-align: center;
-      }
-
-      footer p {
-        color: var(--text-muted);
-        font-size: 0.9rem;
-      }
-
-      footer a {
-        color: var(--text-secondary);
-        text-decoration: none;
-        transition: color 0.2s;
-      }
-
-      footer a:hover {
-        color: var(--primary);
-      }
-
-      /* Mobile Styles */
-      @media (max-width: 768px) {
-        header {
-          top: 0.75rem;
-          width: calc(100% - 1.5rem);
-        }
-        
-        header.scrolled {
-          top: 0.5rem;
-        }
-
-        .nav-links {
-          display: none;
-          position: absolute;
-          top: calc(100% + 0.5rem);
-          left: 0;
-          right: 0;
-          background: rgba(15, 15, 20, 0.95);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border: 1px solid var(--border);
-          border-radius: 16px;
-          flex-direction: column;
-          padding: 1rem;
-          gap: 0;
-          box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
-          overflow: hidden;
-        }
-
-        .nav-links.active {
-          display: flex;
-        }
-
-        .nav-links li {
-          width: 100%;
-        }
-
-        .nav-links a {
-          display: block;
-          padding: 0.75rem 0;
-          border-bottom: 1px solid var(--border);
-        }
-
-        .nav-links li:last-child a {
-          border-bottom: none;
-        }
-
-        .nav-cta {
-          margin-top: 0.5rem;
-          text-align: center;
-        }
-
-        .mobile-menu-btn {
-          display: block;
-        }
-
-        .hero {
-          padding: 7rem 0 4rem;
-        }
-
-        .hero-buttons {
-          flex-direction: column;
-          align-items: stretch;
-        }
-
-        .step-card {
-          flex-direction: column;
-          text-align: center;
-        }
-
-        .step-number {
-          margin: 0 auto;
-        }
-
-        .api-links {
-          justify-content: center;
-        }
-
-        .features,
-        .get-started,
-        .download {
-          padding: 4rem 0;
-        }
-      }
-
-      @media (max-width: 480px) {
-        .container {
-          padding: 0 1rem;
-        }
-
-        .feature-card,
-        .step-card,
-        .download-card {
-          padding: 1.25rem;
-        }
-      }
-
-      /* Animations & Micro-interactions */
-      @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-
-      @keyframes shimmer {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(100%); }
-      }
-
-      @keyframes pulse-glow {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4); }
-        70% { box-shadow: 0 0 0 10px rgba(233, 84, 32, 0); }
-      }
-
-      .animate-on-scroll {
-        opacity: 0;
-        transform: translateY(20px);
-        transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        will-change: opacity, transform;
-      }
-
-      .animate-on-scroll.visible {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      .animate-on-scroll.delay-100 { transition-delay: 100ms; }
-      .animate-on-scroll.delay-200 { transition-delay: 200ms; }
-      .animate-on-scroll.delay-300 { transition-delay: 300ms; }
-      
-      /* Header Scroll State */
-      header.scrolled {
-        background: rgba(10, 10, 15, 0.75);
-        box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.5);
-        border-color: rgba(255, 255, 255, 0.15);
-        top: 1rem;
-        backdrop-filter: blur(24px);
-        -webkit-backdrop-filter: blur(24px);
-      }
-
-      /* Enhanced Hover Effects */
-      .feature-card, .step-card, .download-card {
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      }
-
-      .feature-card:hover, .step-card:hover, .download-card:hover {
-        transform: translateY(-5px) scale(1.01);
-        box-shadow: 
-          0 20px 40px -10px rgba(0, 0, 0, 0.5),
-          0 0 30px -5px rgba(233, 84, 32, 0.15),
-          inset 0 0 0 1px rgba(233, 84, 32, 0.2);
-        border-color: rgba(233, 84, 32, 0.4);
-        background: rgba(30, 30, 42, 0.7);
-      }
-      
-      /* Logo Pulse */
-      .logo-icon {
-        position: relative;
-        overflow: hidden;
-      }
-      .logo-icon::after {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        border-radius: inherit;
-        box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4);
-        animation: pulse-glow 3s infinite;
-      }
-
-      /* Badge Shimmer */
-      .hero-badge {
-        position: relative;
-        overflow: hidden;
-      }
-      .hero-badge::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-        transform: translateX(-100%) skewX(-20deg);
-        animation: shimmer 3s infinite;
-      }
-
-      /* Nav Underline */
-      .nav-links a:not(.nav-cta) {
-        position: relative;
-      }
-      .nav-links a:not(.nav-cta)::after {
-        content: '';
-        position: absolute;
-        bottom: -2px; left: 0; width: 0; height: 2px;
-        background: var(--primary);
-        transition: width 0.3s ease;
-      }
-      .nav-links a:not(.nav-cta)::hover::after {
-        width: 100%;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .animate-on-scroll { opacity: 1; transform: none; transition: none; }
-        .logo-icon::after, .hero-badge::before { animation: none; }
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <div class="container">
-        <nav>
-          <a href="https://taraksh01.github.io/wisper" class="logo">
-            <div class="logo-icon">
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"
-                />
-                <path
-                  d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"
-                />
-              </svg>
-            </div>
-            Wisper
-          </a>
-          <ul class="nav-links" id="navLinks">
-            <li><a href="#features">Features</a></li>
-            <li><a href="#get-started">Get Started</a></li>
-            <li><a href="#download">Download</a></li>
-            <li>
-              <a
-                href="https://github.com/taraksh01/wisper"
-                target="_blank"
-                class="nav-cta"
-                >GitHub</a
-              >
-            </li>
-          </ul>
-          <button
-            class="mobile-menu-btn"
-            id="mobileMenuBtn"
-            aria-label="Toggle menu"
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
-        </nav>
-      </div>
-    </header>
-
-    <main>
-      <section class="hero">
-        <div class="container">
-          <div class="hero-badge animate-on-scroll">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polygon
-                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
-              />
-            </svg>
-            Open Source & Free
-          </div>
-          <h1 class="animate-on-scroll delay-100">Voice Dictation<br />for <span>Linux</span></h1>
-          <p class="animate-on-scroll delay-200">
-            Transform your speech into text instantly. AI-powered transcription
-            that works seamlessly across all your applications.
-          </p>
-          <div class="hero-buttons animate-on-scroll delay-300">
-            <a href="#download" class="btn btn-primary">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              Download Now
-            </a>
-            <a
-              href="https://github.com/taraksh01/wisper"
-              target="_blank"
-              class="btn btn-secondary"
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path
-                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
-                />
-              </svg>
-              View Source
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section class="features" id="features">
-        <div class="container">
-          <div class="section-header">
-            <h2>Powerful Features</h2>
-            <p>Everything you need for seamless voice dictation on Linux</p>
-          </div>
-          <div class="features-grid">
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-              </div>
-              <h3>Global Hotkey</h3>
-              <p>
-                Press Shift+Space from anywhere to instantly start or stop
-                recording.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path
-                    d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"
-                  />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" x2="12" y1="19" y2="22" />
-                </svg>
-              </div>
-              <h3>AI Transcription</h3>
-              <p>
-                Powered by OpenAI Whisper via Groq or OpenAI for accurate
-                results.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
-              </div>
-              <h3>Direct Text Input</h3>
-              <p>
-                Transcribed text is typed directly at your cursor. No copy-paste needed.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
-              </div>
-              <h3>99+ Languages</h3>
-              <p>
-                Automatic language detection. Speak in any language and get accurate transcriptions.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
-              </div>
-              <h3>Minimal UI</h3>
-              <p>
-                Slim, transparent recording bar with real-time audio waveform
-                visualization.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <rect width="18" height="18" x="3" y="3" rx="2" />
-                  <path d="M3 9h18" />
-                  <path d="M9 21V9" />
-                </svg>
-              </div>
-              <h3>System Tray</h3>
-              <p>
-                Quick access from system tray. Toggle recording and access
-                settings.
-              </p>
-            </article>
-            <article class="feature-card">
-              <div class="feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                </svg>
-              </div>
-              <h3>Privacy First</h3>
-              <p>
-                Records locally before sending to API. No data stored on
-                external servers.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="get-started" id="get-started">
-        <div class="container">
-          <div class="section-header">
-            <h2>Get Started</h2>
-            <p>Set up Wisper in under 5 minutes</p>
-          </div>
-          <div class="steps-container">
-            <div class="step-card">
-              <div class="step-number">1</div>
-              <div class="step-content">
-                <h3>Download Wisper</h3>
-                <p>
-                  Get the AppImage (universal) or .deb package for Debian/Ubuntu
-                  from the download section below.
-                </p>
-              </div>
-            </div>
-            <div class="step-card">
-              <div class="step-number">2</div>
-              <div class="step-content">
-                <h3>Install & Run</h3>
-                <p>
-                  <strong>AppImage:</strong> Make executable and double-click<br />
-                  <strong>.deb:</strong> Install via Software Center or
-                  <code>sudo dpkg -i wisper_*.deb</code>
-                </p>
-              </div>
-            </div>
-            <div class="step-card">
-              <div class="step-number">3</div>
-              <div class="step-content">
-                <h3>Get Your API Key</h3>
-                <p>Choose a provider and get your free API key:</p>
-                <div class="api-links">
-                  <a
-                    href="https://console.groq.com/"
-                    target="_blank"
-                    rel="noopener"
-                    class="api-link recommended"
-                  >
-                    Groq Console
-                    <span class="badge">Free</span>
-                  </a>
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noopener"
-                    class="api-link"
-                  >
-                    OpenAI Platform
-                  </a>
-                </div>
-              </div>
-            </div>
-            <div class="step-card">
-              <div class="step-number">4</div>
-              <div class="step-content">
-                <h3>Configure & Start</h3>
-                <p>
-                  Right-click system tray icon → Select <strong>Settings</strong> → Choose provider → Paste API key
-                  → Click <strong>Save Settings</strong> → <code>Shift+Space</code> to dictate!
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="download" id="download">
-        <div class="container">
-          <div class="section-header">
-            <h2>Download</h2>
-            <p>Available for all Linux distributions</p>
-          </div>
-          <div class="download-grid">
-            <div class="download-card">
-              <h3>AppImage</h3>
-              <p>
-                Universal package for all Linux distros. No installation
-                required.
-              </p>
-              <a
-                href="https://github.com/taraksh01/wisper/releases/latest/download/Wisper-2.0.0.AppImage"
-                class="download-btn"
-              >
-                Download .AppImage
-              </a>
-            </div>
-            <div class="download-card">
-              <h3>Debian/Ubuntu</h3>
-              <p>Native .deb package for Debian-based distributions.</p>
-              <a
-                href="https://github.com/taraksh01/wisper/releases/latest/download/wisper_2.0.0_amd64.deb"
-                class="download-btn"
-              >
-                Download .deb
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <div class="container">
-        <p>
-          &copy; 2025 <a href="https://github.com/taraksh01">Tarak Shaw</a>.
-          Released under
-          <a href="https://github.com/taraksh01/wisper/blob/main/LICENSE"
-            >MIT License</a
-          >.
-        </p>
-      </div>
-    </footer>
-
-    <script>
-      document
-        .getElementById("mobileMenuBtn")
-        .addEventListener("click", function () {
-          document.getElementById("navLinks").classList.toggle("active");
-        });
-
-      // Animation Observer
-      const observerOptions = {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
-      };
-
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
-            
-            // Clean up after animation to restore original transition speeds
-            setTimeout(() => {
-              entry.target.classList.remove('animate-on-scroll', 'visible');
-              entry.target.style.transitionDelay = '';
-            }, 1000); 
-          }
-        });
-      }, observerOptions);
-
-
-      // Initialize animations for manual elements
-      document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
-
-      // Add animations to grids automatically with stagger
-      const grids = [
-        '.features-grid .feature-card',
-        '.steps-container .step-card',
-        '.download-grid .download-card'
-      ];
-
-      grids.forEach(selector => {
-        document.querySelectorAll(selector).forEach((el, index) => {
-          el.classList.add('animate-on-scroll');
-          el.style.transitionDelay = `${index * 100}ms`;
-          observer.observe(el);
-        });
-      });
-
-      // Header Scroll Effect
-      const header = document.querySelector('header');
-      window.addEventListener('scroll', () => {
-        if (window.scrollY > 50) {
-          header.classList.add('scrolled');
-        } else {
-          header.classList.remove('scrolled');
-        }
-      });
-    </script>
-  </body>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Wisper — Voice input for Linux</title>
+		<meta
+			name="description"
+			content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription. Works on Ubuntu, Debian, Fedora, Arch and all other Linux distributions."
+		/>
+		<meta
+			name="keywords"
+			content="voice dictation, speech to text, linux, whisper, transcription, voice typing, dictation software, ubuntu, debian, fedora, arch, wisper, wispr flow, wisprflow"
+		/>
+		<meta name="robots" content="index, follow" />
+		<link rel="canonical" href="https://jtbr.github.io/wisper" />
+		<link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.ico" />
+		<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png" />
+
+		<!-- Open Graph / Facebook -->
+		<meta property="og:type" content="website" />
+		<meta property="og:url" content="https://jtbr.github.io/wisper" />
+		<meta
+			property="og:title"
+			content="Wisper — Voice Dictation App for Linux"
+		/>
+		<meta
+			property="og:description"
+			content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription."
+		/>
+		<meta
+			property="og:image"
+			content="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
+		/>
+
+		<!-- Twitter -->
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:url" content="https://jtbr.github.io/wisper" />
+		<meta
+			name="twitter:title"
+			content="Wisper — Voice Dictation App for Linux"
+		/>
+		<meta
+			name="twitter:description"
+			content="Wisper is a fast, system-wide speech-to-text application for Linux. Output directly at your cursor with AI-powered transcription."
+		/>
+		<meta
+			name="twitter:image"
+			content="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
+		/>
+
+		<!-- Favicon -->
+		<link rel="icon" type="image/png" href="../assets/icon.ico" />
+		<link
+			rel="apple-touch-icon"
+			href="https://raw.githubusercontent.com/jtbr/wisper/main/assets/icon.png"
+		/>
+
+		<!-- Fonts -->
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+			rel="stylesheet"
+		/>
+
+		<!-- JSON-LD Structured Data -->
+		<script type="application/ld+json">
+			{
+				"@context": "https://schema.org",
+				"@type": "SoftwareApplication",
+				"name": "Wisper",
+				"operatingSystem": "Linux",
+				"applicationCategory": "UtilitiesApplication",
+				"offers": {
+					"@type": "Offer",
+					"price": "0",
+					"priceCurrency": "USD"
+				},
+				"description": "Voice dictation app for Linux with AI-powered transcription",
+				"author": [
+					{
+						"@type": "Person",
+						"name": "Tarak Shaw"
+					},
+					{
+						"@type": "Person",
+						"name": "Justin Briggs"
+					}
+				]
+			}
+		</script>
+
+		<style>
+			*,
+			*::before,
+			*::after {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
+
+			:root {
+				--primary: #e95420;
+				--primary-dark: #c73d0f;
+				--primary-light: #ff7043;
+				--bg-dark: #0a0a0f;
+				--bg-card: #16161f;
+				--bg-card-hover: #1e1e2a;
+				--border: rgba(255, 255, 255, 0.08);
+				--text: #ffffff;
+				--text-secondary: rgba(255, 255, 255, 0.7);
+				--text-muted: rgba(255, 255, 255, 0.5);
+				--radius: 16px;
+				--radius-sm: 10px;
+			}
+
+			html {
+				scroll-behavior: smooth;
+			}
+
+			body {
+				font-family:
+					"Inter",
+					-apple-system,
+					BlinkMacSystemFont,
+					sans-serif;
+				background: var(--bg-dark);
+				color: var(--text);
+				line-height: 1.6;
+				-webkit-font-smoothing: antialiased;
+			}
+
+			.container {
+				width: 100%;
+				max-width: 1200px;
+				margin: 0 auto;
+				padding: 0 1.5rem;
+			}
+
+			/* Header */
+			header {
+				position: fixed;
+				top: 1.5rem;
+				left: 50%;
+				transform: translateX(-50%);
+				width: calc(100% - 2rem);
+				max-width: 900px;
+				z-index: 100;
+				background: rgba(10, 10, 15, 0.5);
+				backdrop-filter: blur(20px);
+				-webkit-backdrop-filter: blur(20px);
+				border: 1px solid rgba(255, 255, 255, 0.08);
+				border-radius: 100px;
+				padding: 0 1.5rem;
+				transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+			}
+
+			nav {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 0.6rem 0;
+			}
+
+			.logo {
+				display: flex;
+				align-items: center;
+				gap: 0.75rem;
+				text-decoration: none;
+				color: var(--text);
+				font-weight: 700;
+				font-size: 1.5rem;
+			}
+
+			.logo-icon {
+				width: 36px;
+				height: 36px;
+				background: linear-gradient(
+					135deg,
+					var(--primary),
+					var(--primary-light)
+				);
+				border-radius: 50%;
+				display: grid;
+				place-items: center;
+			}
+
+			.logo-icon svg {
+				width: 18px;
+				height: 18px;
+				fill: white;
+			}
+
+			.nav-links {
+				display: flex;
+				align-items: center;
+				gap: 2rem;
+				list-style: none;
+			}
+
+			.nav-links a {
+				color: var(--text-secondary);
+				text-decoration: none;
+				font-size: 0.95rem;
+				font-weight: 500;
+				transition: color 0.2s;
+			}
+
+			.nav-links a:hover {
+				color: var(--text);
+			}
+
+			.nav-cta {
+				background: var(--primary);
+				color: white !important;
+				padding: 0.5rem 1.25rem;
+				border-radius: var(--radius-sm);
+				transition:
+					background 0.2s,
+					transform 0.2s;
+			}
+
+			.nav-cta:hover {
+				background: var(--primary-dark);
+				transform: translateY(-1px);
+			}
+
+			.mobile-menu-btn {
+				display: none;
+				background: none;
+				border: none;
+				color: var(--text);
+				cursor: pointer;
+				padding: 0.5rem;
+			}
+
+			/* Hero */
+			.hero {
+				padding: 8rem 0 5rem;
+				text-align: center;
+				position: relative;
+				/* overflow: hidden; */
+			}
+
+			.hero::before {
+				content: "";
+				position: absolute;
+				top: 0;
+				left: 0;
+				width: 100%;
+				height: 150%;
+				background: radial-gradient(
+					circle at 50% 300px,
+					rgba(233, 84, 32, 0.15) 0%,
+					transparent 70%
+				);
+				pointer-events: none;
+				z-index: -1;
+			}
+
+			.hero-badge {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.5rem;
+				background: rgba(233, 84, 32, 0.1);
+				border: 1px solid rgba(233, 84, 32, 0.3);
+				padding: 0.5rem 1rem;
+				border-radius: 100px;
+				font-size: 0.875rem;
+				color: var(--primary-light);
+				margin-bottom: 1.5rem;
+			}
+
+			.hero h1 {
+				font-size: clamp(2.5rem, 6vw, 4rem);
+				font-weight: 800;
+				line-height: 1.1;
+				margin-bottom: 1.5rem;
+				letter-spacing: -0.02em;
+			}
+
+			.hero h1 span {
+				background: linear-gradient(
+					135deg,
+					var(--primary),
+					var(--primary-light)
+				);
+				-webkit-background-clip: text;
+				-webkit-text-fill-color: transparent;
+				background-clip: text;
+			}
+
+			.hero p {
+				font-size: clamp(1rem, 2vw, 1.25rem);
+				color: var(--text-secondary);
+				max-width: 600px;
+				margin: 0 auto 2rem;
+			}
+
+			.hero-buttons {
+				display: flex;
+				gap: 1rem;
+				justify-content: center;
+				flex-wrap: wrap;
+			}
+
+			.btn {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.5rem;
+				padding: 0.875rem 1.75rem;
+				border-radius: var(--radius-sm);
+				font-weight: 600;
+				font-size: 1rem;
+				text-decoration: none;
+				transition: all 0.2s;
+				cursor: pointer;
+				border: none;
+			}
+
+			.btn-primary {
+				background: linear-gradient(
+					135deg,
+					var(--primary),
+					var(--primary-dark)
+				);
+				color: white;
+				box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
+			}
+
+			.btn-primary:hover {
+				transform: translateY(-2px);
+				box-shadow: 0 6px 30px rgba(233, 84, 32, 0.4);
+			}
+
+			.btn-secondary {
+				background: var(--bg-card);
+				color: var(--text);
+				border: 1px solid var(--border);
+			}
+
+			.btn-secondary:hover {
+				background: var(--bg-card-hover);
+				border-color: rgba(255, 255, 255, 0.15);
+			}
+
+			.btn svg {
+				width: 20px;
+				height: 20px;
+			}
+
+			/* Features */
+			.features {
+				padding: 5rem 0;
+			}
+
+			.section-header {
+				text-align: center;
+				margin-bottom: 3rem;
+			}
+
+			.section-header h2 {
+				font-size: clamp(1.75rem, 4vw, 2.5rem);
+				font-weight: 700;
+				margin-bottom: 1rem;
+			}
+
+			.section-header p {
+				color: var(--text-secondary);
+				max-width: 600px;
+				margin: 0 auto;
+			}
+
+			.section-header p a {
+				color: var(--text-secondary);
+				text-decoration: underline;
+			}
+
+			.section-header p a:hover {
+				color: var(--text);
+			}
+
+			.features-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+				gap: 1.5rem;
+			}
+
+			.feature-card {
+				background: rgba(22, 22, 31, 0.4);
+				backdrop-filter: blur(12px);
+				-webkit-backdrop-filter: blur(12px);
+				border: 1px solid rgba(255, 255, 255, 0.08);
+				border-radius: var(--radius);
+				padding: 1.75rem;
+				transition: all 0.3s;
+				position: relative;
+				overflow: hidden;
+			}
+
+			.feature-card::before {
+				content: "";
+				position: absolute;
+				inset: 0;
+				border-radius: inherit;
+				padding: 1px;
+				background: linear-gradient(
+					180deg,
+					rgba(255, 255, 255, 0.1) 0%,
+					rgba(255, 255, 255, 0.02) 100%
+				);
+				-webkit-mask:
+					linear-gradient(#fff 0 0) content-box,
+					linear-gradient(#fff 0 0);
+				-webkit-mask-composite: xor;
+				mask-composite: exclude;
+				pointer-events: none;
+			}
+
+			.feature-card:hover {
+				background: rgba(30, 30, 42, 0.6);
+				border-color: rgba(233, 84, 32, 0.3);
+				transform: translateY(-4px);
+			}
+
+			.feature-icon {
+				width: 48px;
+				height: 48px;
+				background: rgba(233, 84, 32, 0.15);
+				border: 1px solid rgba(233, 84, 32, 0.2);
+				box-shadow: 0 0 20px rgba(233, 84, 32, 0.1);
+				border-radius: 12px;
+				display: grid;
+				place-items: center;
+				margin-bottom: 1.25rem;
+			}
+
+			.feature-icon svg {
+				width: 24px;
+				height: 24px;
+				stroke: var(--primary);
+			}
+
+			.feature-card h3 {
+				font-size: 1.125rem;
+				font-weight: 600;
+				margin-bottom: 0.5rem;
+			}
+
+			.feature-card p {
+				color: var(--text-secondary);
+				font-size: 0.95rem;
+			}
+
+			/* Get Started */
+			.demo {
+				padding: 4rem 0;
+			}
+
+			.demo-frame {
+				max-width: 860px;
+				margin: 0 auto;
+				border-radius: var(--radius);
+				overflow: hidden;
+				border: 1px solid var(--border);
+				box-shadow:
+					0 24px 64px rgba(0, 0, 0, 0.5),
+					0 0 0 1px rgba(255, 255, 255, 0.04),
+					0 0 40px rgba(233, 84, 32, 0.12);
+			}
+
+			.demo-frame img {
+				width: 100%;
+				height: auto;
+				display: block;
+			}
+
+			.get-started {
+				padding: 5rem 0;
+				background: linear-gradient(
+					180deg,
+					var(--bg-dark) 0%,
+					rgba(22, 22, 31, 0.6) 50%,
+					rgba(22, 22, 31, 0.6) 100%
+				);
+			}
+
+			.steps-container {
+				display: flex;
+				flex-direction: column;
+				gap: 1.5rem;
+				max-width: 800px;
+				margin: 0 auto;
+			}
+
+			.step-card {
+				display: flex;
+				gap: 1.5rem;
+				background: rgba(22, 22, 31, 0.4);
+				backdrop-filter: blur(12px);
+				-webkit-backdrop-filter: blur(12px);
+				border: 1px solid rgba(255, 255, 255, 0.08);
+				border-radius: var(--radius);
+				padding: 1.5rem;
+				transition: all 0.3s;
+				position: relative;
+				overflow: hidden;
+			}
+
+			.step-card::before {
+				content: "";
+				position: absolute;
+				inset: 0;
+				border-radius: inherit;
+				padding: 1px;
+				background: linear-gradient(
+					180deg,
+					rgba(255, 255, 255, 0.1) 0%,
+					rgba(255, 255, 255, 0.02) 100%
+				);
+				-webkit-mask:
+					linear-gradient(#fff 0 0) content-box,
+					linear-gradient(#fff 0 0);
+				-webkit-mask-composite: xor;
+				mask-composite: exclude;
+				pointer-events: none;
+			}
+
+			.step-card:hover {
+				border-color: rgba(233, 84, 32, 0.3);
+				background: rgba(30, 30, 42, 0.6);
+			}
+
+			.step-number {
+				flex-shrink: 0;
+				width: 48px;
+				height: 48px;
+				background: linear-gradient(
+					135deg,
+					var(--primary),
+					var(--primary-dark)
+				);
+				border-radius: 50%;
+				display: grid;
+				place-items: center;
+				font-weight: 700;
+				font-size: 1.25rem;
+			}
+
+			.step-content h3 {
+				font-size: 1.125rem;
+				font-weight: 600;
+				margin-bottom: 0.5rem;
+			}
+
+			.step-content p {
+				color: var(--text-secondary);
+				font-size: 0.95rem;
+				margin-bottom: 0.75rem;
+			}
+
+			.step-content code {
+				background: rgba(255, 255, 255, 0.1);
+				padding: 0.125rem 0.5rem;
+				border-radius: 4px;
+				font-size: 0.875rem;
+			}
+
+			.step-content p a {
+				color: var(--primary-light);
+				text-decoration: underline;
+			}
+
+			.step-content p a:hover {
+				color: var(--text);
+			}
+
+			.api-links {
+				display: flex;
+				gap: 0.75rem;
+				flex-wrap: wrap;
+				margin-top: 0.75rem;
+			}
+
+			.api-link {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.5rem;
+				padding: 0.5rem 1rem;
+				background: rgba(255, 255, 255, 0.05);
+				border: 1px solid var(--border);
+				border-radius: var(--radius-sm);
+				color: var(--text);
+				text-decoration: none;
+				font-size: 0.875rem;
+				font-weight: 500;
+				transition: all 0.2s;
+			}
+
+			.api-link:hover {
+				background: rgba(233, 84, 32, 0.1);
+				border-color: var(--primary);
+			}
+
+			.api-link.recommended {
+				background: rgba(233, 84, 32, 0.1);
+				border-color: rgba(233, 84, 32, 0.3);
+			}
+
+			.api-link .badge {
+				background: var(--primary);
+				color: white;
+				padding: 0.125rem 0.5rem;
+				border-radius: 100px;
+				font-size: 0.75rem;
+			}
+
+			/* Download */
+			.download {
+				padding: 5rem 0;
+				background: linear-gradient(
+					180deg,
+					rgba(22, 22, 31, 0.6) 0%,
+					var(--bg-dark) 100%
+				);
+			}
+
+			.download-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+				gap: 1.5rem;
+				max-width: 700px;
+				margin: 0 auto;
+			}
+
+			.download-card {
+				background: rgba(22, 22, 31, 0.4);
+				backdrop-filter: blur(12px);
+				-webkit-backdrop-filter: blur(12px);
+				border: 1px solid rgba(255, 255, 255, 0.08);
+				border-radius: var(--radius);
+				padding: 2rem;
+				text-align: center;
+				transition: all 0.3s;
+				position: relative;
+				overflow: hidden;
+			}
+
+			.download-card::before {
+				content: "";
+				position: absolute;
+				inset: 0;
+				border-radius: inherit;
+				padding: 1px;
+				background: linear-gradient(
+					180deg,
+					rgba(255, 255, 255, 0.1) 0%,
+					rgba(255, 255, 255, 0.02) 100%
+				);
+				-webkit-mask:
+					linear-gradient(#fff 0 0) content-box,
+					linear-gradient(#fff 0 0);
+				-webkit-mask-composite: xor;
+				mask-composite: exclude;
+				pointer-events: none;
+			}
+
+			.download-card:hover {
+				border-color: var(--primary);
+				transform: translateY(-4px);
+				background: rgba(30, 30, 42, 0.6);
+			}
+
+			.download-card h3 {
+				font-size: 1.25rem;
+				font-weight: 600;
+				margin-bottom: 0.5rem;
+			}
+
+			.download-card p {
+				color: var(--text-secondary);
+				font-size: 0.9rem;
+				margin-bottom: 1.5rem;
+			}
+
+			.download-btn {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				width: 100%;
+				padding: 0.875rem;
+				background: linear-gradient(
+					135deg,
+					var(--primary),
+					var(--primary-dark)
+				);
+				color: white;
+				text-decoration: none;
+				border-radius: var(--radius-sm);
+				font-weight: 600;
+				transition: all 0.2s;
+			}
+
+			.download-btn small {
+				font-size: 0.7em;
+				font-weight: 400;
+				opacity: 0.8;
+				margin-top: 0.2em;
+			}
+
+			.checksums-note {
+				margin-top: 1.25rem;
+				text-align: center;
+				font-size: 0.85rem;
+				color: var(--text-muted);
+			}
+
+			.checksums-note a {
+				color: var(--text-secondary);
+				text-decoration: underline;
+			}
+
+			.checksums-note a:hover {
+				color: var(--text);
+			}
+
+			.checksums-note code {
+				font-size: 0.9em;
+				color: var(--text-muted);
+			}
+
+			.download-btn:hover {
+				transform: scale(1.02);
+				box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
+			}
+
+			/* Footer */
+			footer {
+				padding: 3rem 0;
+				background: var(--bg-dark);
+				border-top: 1px solid var(--border);
+				text-align: center;
+			}
+
+			footer p {
+				color: var(--text-muted);
+				font-size: 0.9rem;
+			}
+
+			footer a {
+				color: var(--text-secondary);
+				text-decoration: none;
+				transition: color 0.2s;
+			}
+
+			footer a:hover {
+				color: var(--primary);
+			}
+
+			/* Mobile Styles */
+			@media (max-width: 768px) {
+				header {
+					top: 0.75rem;
+					width: calc(100% - 1.5rem);
+				}
+
+				header.scrolled {
+					top: 0.5rem;
+				}
+
+				.nav-links {
+					display: none;
+					position: absolute;
+					top: calc(100% + 0.5rem);
+					left: 0;
+					right: 0;
+					background: rgba(15, 15, 20, 0.95);
+					backdrop-filter: blur(20px);
+					-webkit-backdrop-filter: blur(20px);
+					border: 1px solid var(--border);
+					border-radius: 16px;
+					flex-direction: column;
+					padding: 1rem;
+					gap: 0;
+					box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
+					overflow: hidden;
+				}
+
+				.nav-links.active {
+					display: flex;
+				}
+
+				.nav-links li {
+					width: 100%;
+				}
+
+				.nav-links a {
+					display: block;
+					padding: 0.75rem 0;
+					border-bottom: 1px solid var(--border);
+				}
+
+				.nav-links li:last-child a {
+					border-bottom: none;
+				}
+
+				.nav-cta {
+					margin-top: 0.5rem;
+					text-align: center;
+				}
+
+				.mobile-menu-btn {
+					display: block;
+				}
+
+				.hero {
+					padding: 7rem 0 4rem;
+				}
+
+				.hero-buttons {
+					flex-direction: column;
+					align-items: stretch;
+				}
+
+				.step-card {
+					flex-direction: column;
+					text-align: center;
+				}
+
+				.step-number {
+					margin: 0 auto;
+				}
+
+				.api-links {
+					justify-content: center;
+				}
+
+				.features,
+				.get-started,
+				.download {
+					padding: 4rem 0;
+				}
+			}
+
+			@media (max-width: 480px) {
+				.container {
+					padding: 0 1rem;
+				}
+
+				.feature-card,
+				.step-card,
+				.download-card {
+					padding: 1.25rem;
+				}
+			}
+
+			/* Animations & Micro-interactions */
+			@keyframes fadeInUp {
+				from { opacity: 0; transform: translateY(20px); }
+				to { opacity: 1; transform: translateY(0); }
+			}
+
+			@keyframes shimmer {
+				0% { transform: translateX(-100%); }
+				100% { transform: translateX(100%); }
+			}
+
+			@keyframes pulse-glow {
+				0%, 100% { box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4); }
+				70% { box-shadow: 0 0 0 10px rgba(233, 84, 32, 0); }
+			}
+
+			.animate-on-scroll {
+				opacity: 0;
+				transform: translateY(20px);
+				transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1) !important;
+				will-change: opacity, transform;
+			}
+
+			.animate-on-scroll.visible {
+				opacity: 1;
+				transform: translateY(0);
+			}
+
+			.animate-on-scroll.delay-100 { transition-delay: 100ms; }
+			.animate-on-scroll.delay-200 { transition-delay: 200ms; }
+			.animate-on-scroll.delay-300 { transition-delay: 300ms; }
+
+			/* Header Scroll State */
+			header.scrolled {
+				background: rgba(10, 10, 15, 0.75);
+				box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.5);
+				border-color: rgba(255, 255, 255, 0.15);
+				top: 1rem;
+				backdrop-filter: blur(24px);
+				-webkit-backdrop-filter: blur(24px);
+			}
+
+			/* Enhanced Hover Effects */
+			.feature-card, .step-card, .download-card {
+				transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+			}
+
+			.feature-card:hover, .step-card:hover, .download-card:hover {
+				transform: translateY(-5px) scale(1.01);
+				box-shadow:
+					0 20px 40px -10px rgba(0, 0, 0, 0.5),
+					0 0 30px -5px rgba(233, 84, 32, 0.15),
+					inset 0 0 0 1px rgba(233, 84, 32, 0.2);
+				border-color: rgba(233, 84, 32, 0.4);
+				background: rgba(30, 30, 42, 0.7);
+			}
+
+			/* Logo Pulse */
+			.logo-icon {
+				position: relative;
+				overflow: hidden;
+			}
+			.logo-icon::after {
+				content: '';
+				position: absolute;
+				top: 0; left: 0; right: 0; bottom: 0;
+				border-radius: inherit;
+				box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4);
+				animation: pulse-glow 3s infinite;
+			}
+
+			/* Badge Shimmer */
+			.hero-badge {
+				position: relative;
+				overflow: hidden;
+			}
+			.hero-badge::before {
+				content: '';
+				position: absolute;
+				top: 0; left: 0; width: 100%; height: 100%;
+				background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+				transform: translateX(-100%) skewX(-20deg);
+				animation: shimmer 3s infinite;
+			}
+
+			/* Nav Underline */
+			.nav-links a:not(.nav-cta) {
+				position: relative;
+			}
+			.nav-links a:not(.nav-cta)::after {
+				content: '';
+				position: absolute;
+				bottom: -2px; left: 0; width: 0; height: 2px;
+				background: var(--primary);
+				transition: width 0.3s ease;
+			}
+			.nav-links a:not(.nav-cta)::hover::after {
+				width: 100%;
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				.animate-on-scroll { opacity: 1; transform: none; transition: none; }
+				.logo-icon::after, .hero-badge::before { animation: none; }
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<div class="container">
+				<nav>
+					<a href="https://jtbr.github.io/wisper" class="logo">
+						<div class="logo-icon">
+							<svg viewBox="0 0 24 24">
+								<path
+									d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"
+								/>
+								<path
+									d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"
+								/>
+							</svg>
+						</div>
+						Wisper
+					</a>
+					<ul class="nav-links" id="navLinks">
+						<li><a href="#features">Features</a></li>
+						<li><a href="#get-started">Get Started</a></li>
+						<li><a href="#download">Download</a></li>
+						<li>
+							<a
+								href="https://github.com/jtbr/wisper"
+								target="_blank"
+								class="nav-cta"
+								>GitHub</a
+							>
+						</li>
+					</ul>
+					<button
+						class="mobile-menu-btn"
+						id="mobileMenuBtn"
+						aria-label="Toggle menu"
+					>
+						<svg
+							width="24"
+							height="24"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<line x1="3" y1="6" x2="21" y2="6" />
+							<line x1="3" y1="12" x2="21" y2="12" />
+							<line x1="3" y1="18" x2="21" y2="18" />
+						</svg>
+					</button>
+				</nav>
+			</div>
+		</header>
+
+		<main>
+			<section class="hero">
+				<div class="container">
+					<div class="hero-badge animate-on-scroll">
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<polygon
+								points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+							/>
+						</svg>
+						Free & Open Source
+					</div>
+					<h1 class="animate-on-scroll delay-100">Voice Dictation<br />for <span>Linux</span></h1>
+					<p class="animate-on-scroll delay-200">
+						Fast, system-wide speech-to-text for Linux with
+						unlimited recording and advanced post-processing
+					</p>
+					<div class="hero-buttons animate-on-scroll delay-300">
+						<a href="#download" class="btn btn-primary">
+							<svg
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+								<polyline points="7 10 12 15 17 10" />
+								<line x1="12" y1="15" x2="12" y2="3" />
+							</svg>
+							Download Now
+						</a>
+						<a
+							href="https://github.com/jtbr/wisper"
+							target="_blank"
+							class="btn btn-secondary"
+						>
+							<svg viewBox="0 0 24 24" fill="currentColor">
+								<path
+									d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+								/>
+							</svg>
+							View Source
+						</a>
+					</div>
+				</div>
+			</section>
+
+			<section class="features" id="features">
+				<div class="container">
+					<div class="section-header">
+						<h2>Powerful Features</h2>
+						<p>A powerful, extensible voice dictation system for Linux —
+							now with local models, unlimited recording, and
+							optional LLM-based refinement.</p>
+					</div>
+					<div class="features-grid">
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+								</svg>
+								<!-- lock icon
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<rect x="3" y="11" width="18" height="11" rx="2" />
+									<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+								</svg>-->
+							</div>
+							<h3>Global Hotkey</h3>
+							<p>
+								Press hotkey from anywhere to instantly start or stop
+								recording.
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path
+										d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"
+									/>
+									<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+									<line x1="12" x2="12" y1="19" y2="22" />
+								</svg>
+							</div>
+							<h3>AI Transcription</h3>
+							<p>
+								Powered by OpenAI Whisper via Groq, OpenAI, or local endpoints
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+								</svg>
+							</div>
+							<h3>Privacy-First</h3>
+							<p>
+								Fully local pipelines supported
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path
+										d="M12 3a1 1 0 0 0-1 1 8 8 0 0 1-7 7 1 1 0 0 0 0 2 8 8 0 0 1 7 7 1 1 0 0 0 2 0 8 8 0 0 1 7-7 1 1 0 0 0 0-2 8 8 0 0 1-7-7 1 1 0 0 0-1-1Z" />
+									<path d="M19 17a5 5 0 0 1-4 4 5 5 0 0 1 4 4 5 5 0 0 1 4-4 5 5 0 0 1-4-4Z" />
+									<path d="M5 3a3 3 0 0 1-2 2 3 3 0 0 1 2 2 3 3 0 0 1 2-2 3 3 0 0 1-2-2Z" />
+								</svg>
+							</div>
+							<h3>LLM Post-processing</h3>
+							<p>
+								Clean up speech automatically
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path d="M12 20h9" />
+									<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+								</svg>
+							</div>
+							<h3>Flexible Output</h3>
+							<p>
+								Transcribed text can be pasted to or typed at the cursor, or copied to cliboard.
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<path
+										d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z" />
+								</svg>
+							</div>
+							<h3>Unlimited Dictation</h3>
+							<p>
+								No time limits via VAD segmentation
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<circle cx="12" cy="12" r="10" />
+									<line x1="2" y1="12" x2="22" y2="12" />
+									<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+								</svg>
+							</div>
+							<h3>Multilingual</h3>
+							<p>
+								99+ languages with auto-detection
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<line x1="4" y1="8" x2="4" y2="15" />
+									<line x1="8" y1="2" x2="8" y2="20" />
+									<line x1="12" y1="6" x2="12" y2="22" />
+									<line x1="16" y1="2" x2="16" y2="16" />
+									<line x1="20" y1="6" x2="20" y2="19" />
+								</svg>
+							</div>
+							<h3>Minimal UI</h3>
+							<p>
+								Slim, transparent recording bar; lives in your system tray
+							</p>
+						</article>
+
+						<article class="feature-card">
+							<div class="feature-icon">
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+									<rect width="18" height="18" x="3" y="3" rx="2" />
+									<path d="M3 9h18" />
+									<path d="M9 21V9" />
+								</svg>
+							</div>
+							<h3>Wayland & X11</h3>
+							<p>
+								Works everywhere on Linux
+							</p>
+						</article>
+
+					</div>
+				</div>
+			</section>
+
+			<section class="demo">
+				<div class="container">
+					<div class="section-header">
+						<h2>Press to speak. Press to send, anywhere.</h2>
+					</div>
+					<div class="demo-frame">
+						<img
+							src="https://raw.githubusercontent.com/jtbr/wisper/main/assets/demo.gif"
+							alt="Wisper in action: recording audio and delivering transcribed text"
+							width="1280" height="720" loading="lazy"
+						/>
+					</div>
+				</div>
+			</section>
+
+			<section class="get-started" id="get-started">
+				<div class="container">
+					<div class="section-header">
+						<h2>Get Started</h2>
+						<p>Set up Wisper in under 5 minutes</p>
+					</div>
+					<div class="steps-container">
+						<div class="step-card">
+							<div class="step-number">1</div>
+							<div class="step-content">
+								<h3>Download Wisper</h3>
+								<p>
+									Get the right package for your distro from the download section below:
+									<strong>.AppImage</strong> (universal),
+									<strong>.deb</strong> (Debian/Ubuntu/Mint),
+									<strong>.rpm</strong> (Fedora/RHEL), or
+									<strong>.pacman</strong> (Arch/Manjaro).
+								</p>
+							</div>
+						</div>
+						<div class="step-card">
+							<div class="step-number">2</div>
+							<div class="step-content">
+								<h3>Install & Run</h3>
+								<p>
+									<strong>AppImage:</strong> Make executable and double-click<br />
+									<strong>.deb:</strong> <code>sudo dpkg -i wisper_*.deb</code><br />
+									<strong>.rpm:</strong> <code>sudo rpm -i wisper-*.rpm</code><br />
+									<strong>.pacman:</strong> <code>sudo pacman -U wisper-*.pacman</code>
+								</p>
+							</div>
+						</div>
+						<div class="step-card">
+							<div class="step-number">3</div>
+							<div class="step-content">
+								<h3>Choose a Transcription Provider</h3>
+								<p>Pick a cloud provider and get an API key, or run a local server for total privacy
+									(<a href="https://github.com/jtbr/wisper/blob/main/local-models.md" target="_blank" rel="noopener">more details</a>):</p>
+								<div class="api-links">
+									<a
+										href="https://console.groq.com/keys"
+										target="_blank"
+										rel="noopener"
+										class="api-link recommended"
+									>
+										Groq Console
+										<span class="badge">Free</span>
+									</a>
+									<a
+										href="https://platform.openai.com/api-keys"
+										target="_blank"
+										rel="noopener"
+										class="api-link"
+									>
+										OpenAI Platform
+									</a>
+									<a
+										href="https://speaches.ai"
+										target="_blank"
+										rel="noopener"
+										class="api-link"
+									>
+										Speaches
+										<span class="badge">Local</span>
+									</a>
+								</div>
+							</div>
+						</div>
+						<div class="step-card">
+							<div class="step-number">4</div>
+							<div class="step-content">
+								<h3>Configure & Start</h3>
+								<p>
+									Right-click the tray icon → <strong>Settings</strong> → choose your provider and paste your API key → <strong>Save</strong>.
+									Explore the other tabs to configure your hotkey, output mode (paste / type / clipboard),
+									optional LLM formatting, and local server auto-start.
+									Then press your hotkey to start dictating.
+								</p>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="download" id="download">
+				<div class="container">
+					<div class="section-header">
+						<h2>Download</h2>
+						<p>Available for all Linux distributions &nbsp;·&nbsp;
+							<a href="https://github.com/jtbr/wisper/releases" target="_blank" rel="noopener">all releases on GitHub</a>
+						</p>
+					</div>
+					<!-- DOWNLOAD-CARDS-START -->
+				<div class="download-grid">
+						<div class="download-card">
+							<h3>AppImage</h3>
+							<p>Universal package for all Linux distros. No installation required.</p>
+							<a href="https://github.com/jtbr/wisper/releases/latest/download/Wisper-3.0.0.AppImage"
+								class="download-btn">
+								Download .AppImage<small>v3.0.0</small>
+							</a>
+						</div>
+						<div class="download-card">
+							<h3>Debian / Ubuntu / Mint</h3>
+							<p>Native .deb package for Debian-based distributions.</p>
+							<a href="https://github.com/jtbr/wisper/releases/latest/download/wisper_3.0.0_amd64.deb"
+								class="download-btn">
+								Download .deb<small>v3.0.0</small>
+							</a>
+						</div>
+						<div class="download-card">
+							<h3>Fedora / RHEL</h3>
+							<p>Native .rpm package for Red Hat-based distributions.</p>
+							<a href="https://github.com/jtbr/wisper/releases/latest/download/wisper-3.0.0.x86_64.rpm"
+								class="download-btn">
+								Download .rpm<small>v3.0.0</small>
+							</a>
+						</div>
+						<div class="download-card">
+							<h3>Arch Linux / Manjaro</h3>
+							<p>Native .pacman package for Arch Linux and derivatives.</p>
+							<a href="https://github.com/jtbr/wisper/releases/latest/download/wisper-3.0.0.pacman"
+								class="download-btn">
+								Download .pacman<small>v3.0.0</small>
+							</a>
+						</div>
+				</div>
+          <!-- DOWNLOAD-CARDS-END -->
+					<p class="checksums-note">
+						Verify your download:
+						<a href="https://github.com/jtbr/wisper/releases/latest/download/SHA256SUMS.txt" target="_blank" rel="noopener">SHA256SUMS.txt</a>
+						&nbsp;·&nbsp;
+						<code>sha256sum -c SHA256SUMS.txt --ignore-missing</code>
+					</p>
+				</div>
+			</section>
+		</main>
+
+		<footer>
+			<div class="container">
+				<p>
+					Originally created by Tarak Shaw.
+					This is a fork with extended functionality, actively maintained by Justin Briggs.
+				</p>
+				<p>
+					<a href="https://github.com/jtbr/wisper">GitHub Repository</a> | Released under
+					<a href="https://github.com/jtbr/wisper/blob/main/LICENSE">MIT License</a>
+				</p>
+			</div>
+		</footer>
+
+		<script>
+			document
+				.getElementById("mobileMenuBtn")
+				.addEventListener("click", function () {
+					document.getElementById("navLinks").classList.toggle("active");
+				});
+
+			// Animation Observer
+			const observerOptions = {
+				threshold: 0.1,
+				rootMargin: '0px 0px -50px 0px'
+			};
+
+			const observer = new IntersectionObserver((entries) => {
+				entries.forEach(entry => {
+					if (entry.isIntersecting) {
+						entry.target.classList.add('visible');
+						observer.unobserve(entry.target);
+
+						// Clean up after animation to restore original transition speeds
+						setTimeout(() => {
+							entry.target.classList.remove('animate-on-scroll', 'visible');
+							entry.target.style.transitionDelay = '';
+						}, 1000);
+					}
+				});
+			}, observerOptions);
+
+
+			// Initialize animations for manual elements
+			document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
+
+			// Add animations to grids automatically with stagger
+			const grids = [
+				'.features-grid .feature-card',
+				'.steps-container .step-card',
+				'.download-grid .download-card'
+			];
+
+			grids.forEach(selector => {
+				document.querySelectorAll(selector).forEach((el, index) => {
+					el.classList.add('animate-on-scroll');
+					el.style.transitionDelay = `${index * 100}ms`;
+					observer.observe(el);
+				});
+			});
+
+			// Header Scroll Effect
+			const header = document.querySelector('header');
+			window.addEventListener('scroll', () => {
+				if (window.scrollY > 50) {
+					header.classList.add('scrolled');
+				} else {
+					header.classList.remove('scrolled');
+				}
+			});
+		</script>
+	</body>
 </html>

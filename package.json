@@ -1,16 +1,18 @@
 {
   "name": "wisper",
-  "version": "2.0.0",
-  "description": "WisprFlow-like voice dictation app for Ubuntu",
+  "version": "3.0.0",
+  "description": "Voice input for Linux",
   "main": "electron/main.cjs",
-  "homepage": "https://github.com/taraksh01/wisper",
+  "homepage": "https://github.com/jtbr/wisper",
   "type": "module",
   "scripts": {
+    "copy-vad-assets": "bash scripts/copy-vad-assets.sh",
     "dev": "vite",
+    "prebuild": "pnpm run copy-vad-assets",
     "build": "tsc && vite build",
     "electron": "electron . --no-sandbox",
-    "electron:dev": "concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron . --no-sandbox\"",
-    "package": "pnpm run build && electron-builder --linux"
+    "electron:dev": "pnpm run copy-vad-assets && trap 'exit 0' INT TERM; concurrently --kill-others --success first 'vite' 'wait-on http://localhost:5173 && electron . --no-sandbox'",
+    "package": "pnpm run build && electron-builder --linux AppImage deb rpm"
   },
   "keywords": [
     "voice",
@@ -18,23 +20,24 @@
     "whisper",
     "speech-to-text"
   ],
-  "author": "Tarak Shaw",
+  "author": "Justin Briggs",
   "license": "MIT",
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.18",
-    "@types/node": "^25.2.3",
+    "@ricky0123/vad-web": "^0.0.30",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "concurrently": "^9.2.1",
-    "electron": "40.4.1",
-    "electron-builder": "^26.7.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "tailwindcss": "^4.1.18",
+    "electron": "40.8.5",
+    "electron-builder": "^26.8.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1",
-    "wait-on": "^9.0.4"
+    "vite": "^7.3.2",
+    "wait-on": "^9.0.5"
   },
   "build": {
     "appId": "com.wisper.voice",
@@ -42,19 +45,44 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm",
+        "pacman"
       ],
       "icon": "assets/icon.png",
       "category": "Utility",
-      "maintainer": "Tarak Shaw <taraksh01@gmail.com>"
+      "maintainer": "Justin Briggs <jtbr@users.noreply.github.com>"
+    },
+    "deb": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "depends": [
+        "ydotool"
+      ]
+    },
+    "rpm": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "depends": [
+        "ydotool"
+      ]
+    },
+    "pacman": {
+      "afterInstall": "scripts/postinstall.sh",
+      "afterRemove": "scripts/postremove.sh",
+      "depends": [
+        "ydotool"
+      ]
+    },
+    "directories": {
+      "output": "release"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "assets/**/*"
-    ]
+      "assets/icon.png"
+    ],
+    "afterPack": "scripts/strip-locales.cjs"
   },
-  "dependencies": {
-    "electron-localshortcut": "^3.2.1"
-  }
+  "dependencies": {}
 }

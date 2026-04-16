@@ -1,130 +1,476 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { SegmentAccumulator } from "../audio/SegmentAccumulator";
+import { WhisperQueue } from "../audio/WhisperQueue";
+import {
+  getTranscriptionConfig,
+  validateTranscriptionConfig,
+  transcribeAudioBlob,
+} from "../audio/transcriptionApi";
+import { VAD_CONFIG } from "../audio/vadConfig";
 
-interface AudioRecorderState {
+interface UseAudioRecorderReturn {
   isRecording: boolean;
   audioLevel: number;
-}
-
-interface UseAudioRecorderReturn extends AudioRecorderState {
-  startRecording: () => Promise<void>;
-  stopRecording: () => Promise<Blob | null>;
+  transcriptionProgress: { completed: number; total: number } | null;
+  fatalTranscriptionError: Error | null;
+  startRecording: (readyPromise?: Promise<void>) => Promise<void>;
+  stopRecording: (separator?: string) => Promise<string | null>;
+  saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
+  playErrorSound: () => void;
 }
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [transcriptionProgress, setTranscriptionProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
+  const [fatalTranscriptionError, setFatalTranscriptionError] = useState<Error | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
+  const isMonitoringRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const resolveStopRef = useRef<((blob: Blob | null) => void) | null>(null);
+  const streamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+  // VAD pipeline refs
+  const vadRef = useRef<any>(null); // MicVAD instance
+  const segmentAccumulatorRef = useRef<SegmentAccumulator | null>(null);
+  const whisperQueueRef = useRef<WhisperQueue | null>(null);
 
-      // Set up audio analyser for waveform
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
+  // MediaRecorder fallback refs
+  const vadAvailableRef = useRef(true);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mimeTypeRef = useRef<string>("");
 
-      // Start monitoring audio level
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const updateLevel = () => {
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          setAudioLevel(avg / 255);
-          animationFrameRef.current = requestAnimationFrame(updateLevel);
-        }
-      };
-      updateLevel();
+  // Debug audio saving
+  const debugSessionRef = useRef<string | null>(null);
+  const debugSegmentTranscriptsRef = useRef<Map<number, { text: string; durationSec: number; latencyMs?: number }>>(new Map());
 
-      // Detect best available MIME type
-      let mimeType = "audio/webm;codecs=opus";
+  // Create AudioContext and AnalyserNode once on mount
+  useEffect(() => {
+    const audioContext = new AudioContext();
+    audioContextRef.current = audioContext;
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyserRef.current = analyser;
+
+    // Cache MIME type for fallback MediaRecorder
+    let mimeType = "audio/webm;codecs=opus";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "audio/webm";
       if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = "audio/webm";
+        mimeType = "audio/ogg;codecs=opus";
         if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = "audio/ogg;codecs=opus";
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = "";
-          }
+          mimeType = "";
         }
       }
+    }
+    mimeTypeRef.current = mimeType;
 
-      const mediaRecorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
+    return () => {
+      isMonitoringRef.current = false;
+      audioContext.close();
+    };
+  }, []);
 
-      audioChunksRef.current = [];
+  const playErrorSound = useCallback((): void => {
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "square";
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(43, now);
+    gain.gain.setValueAtTime(0.06, now);
+    gain.gain.setValueAtTime(0.06, now + 0.10);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }, []);
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+  const playChime = useCallback((frequency: number): Promise<void> => {
+    const ctx = audioContextRef.current;
+    if (!ctx) return Promise.resolve();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = frequency;
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.start(now);
+    osc.stop(now + 0.18);
+    return new Promise<void>((resolve) => { osc.onended = () => resolve(); });
+  }, []);
+
+  const startAudioLevelMonitoring = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    isMonitoringRef.current = true;
+    const updateLevel = () => {
+      if (isMonitoringRef.current && analyserRef.current) {
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        setAudioLevel(avg / 255);
+        animationFrameRef.current = requestAnimationFrame(updateLevel);
+      }
+    };
+    updateLevel();
+  }, []);
+
+  const stopAudioLevelMonitoring = useCallback(() => {
+    isMonitoringRef.current = false;
+    cancelAnimationFrame(animationFrameRef.current);
+    setAudioLevel(0);
+  }, []);
+
+  const cleanupStream = useCallback(() => {
+    streamSourceRef.current?.disconnect();
+    streamSourceRef.current = null;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const wlog = useCallback((level: "info" | "warn" | "error", message: string) => {
+    window.electronAPI?.log(level, message);
+  }, []);
+
+  const saveDebugBlob = useCallback(async (blob: Blob, filename: string) => {
+    const session = debugSessionRef.current;
+    if (!session || !window.electronAPI?.saveDebugAudio) return;
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const savedPath = await window.electronAPI.saveDebugAudio(
+        arrayBuffer, blob.type, session, filename,
+      );
+      if (savedPath) console.log("Debug audio saved:", savedPath);
+    } catch (err) {
+      console.warn("Failed to save debug audio:", err);
+    }
+  }, []);
+
+  const startRecording = useCallback(async (readyPromise?: Promise<void>) => {
+    // check transcription Config and fail early for obvious errors
+    const config = getTranscriptionConfig();
+    const validationError = validateTranscriptionConfig(config);
+    if (validationError) throw new Error(validationError);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          // noiseSuppression: false,  // Keep noise suppression (on by default)
+          autoGainControl: false,
+        },
+      });
+      streamRef.current = stream;
+
+      const audioContext = audioContextRef.current!;
+      const analyser = analyserRef.current!;
+
+      // AudioContext may be suspended; resume before playing chime or connecting source
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      // Connect stream to the persistent AnalyserNode
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      streamSourceRef.current = source;
+
+      // Check if debug audio saving is enabled
+      const debugAudio = localStorage.getItem("wisper_debug_audio") === "true";
+      if (debugAudio) {
+        debugSessionRef.current = new Date().toISOString().replace(/[:.]/g, "-");
+      } else {
+        debugSessionRef.current = null;
+      }
+
+      // Get transcription config early so WhisperQueue is ready
+      const config = getTranscriptionConfig();
+      const whisperQueue = new WhisperQueue(config);
+      if (readyPromise) whisperQueue.setReadyPromise(readyPromise);
+      whisperQueue.onProgress = (completed, total) => {
+        setTranscriptionProgress({ completed, total });
       };
+      whisperQueue.onLog = wlog;
+      whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
+      if (debugAudio) {
+        debugSegmentTranscriptsRef.current = new Map();
+        whisperQueue.onSegmentTranscribed = (idx, text, latencyMs) => {
+          const existing = debugSegmentTranscriptsRef.current.get(idx);
+          debugSegmentTranscriptsRef.current.set(idx, { text, durationSec: existing?.durationSec ?? 0, latencyMs });
+        };
+      }
+      whisperQueueRef.current = whisperQueue;
 
-      mediaRecorder.onstop = () => {
-        const actualMimeType = mediaRecorder.mimeType || "audio/webm";
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: actualMimeType,
+      // Try VAD pipeline using MicVAD with our existing stream and AudioContext
+      let vadInitialized = false;
+      let accumulateFrames = false; // gate: don't accumulate audio until chime finishes
+      try {
+        const t0 = Date.now();
+        const { MicVAD } = await import("@ricky0123/vad-web");
+
+        const accumulator = new SegmentAccumulator((wavBlob, segmentIndex, durationSec) => {
+          whisperQueueRef.current?.enqueue(wavBlob, segmentIndex);
+          if (debugSessionRef.current) {
+            debugSegmentTranscriptsRef.current.set(segmentIndex, { text: "", durationSec });
+            const segmentName = `segment-${String(segmentIndex).padStart(3, "0")}.wav`;
+            saveDebugBlob(wavBlob, segmentName);
+          }
+        });
+        if (debugAudio) accumulator.enableDebug();
+        accumulator.onLog = wlog;
+        segmentAccumulatorRef.current = accumulator;
+
+        let firstFrameResolve: (() => void) | null = null;
+        const firstFrameReady = new Promise<void>((resolve) => {
+          firstFrameResolve = resolve;
+        });
+        // wlog("info", `VAD: loading model (audioCtx state=${audioContext.state})`);
+        const vad = await MicVAD.new({
+          model: "v5",
+          baseAssetPath: "./vad/",
+          onnxWASMBasePath: new URL("./vad/", window.location.href).href,
+          audioContext,
+          getStream: () => Promise.resolve(stream),
+          pauseStream: () => Promise.resolve(),   // we handle stream lifecycle ourselves
+          resumeStream: () => Promise.resolve(stream),
+          startOnLoad: false,
+          positiveSpeechThreshold: VAD_CONFIG.positiveSpeechThreshold,
+          negativeSpeechThreshold: VAD_CONFIG.negativeSpeechThreshold,
+          onFrameProcessed: (
+            probabilities: { isSpeech: number },
+            frame: Float32Array,
+          ) => {
+            if (firstFrameResolve) {
+              // Mic hardware sends silent frames during init — skip until real audio arrives
+              let maxAbs = 0;
+              for (let i = 0; i < frame.length; i++) {
+                const abs = Math.abs(frame[i]);
+                if (abs > maxAbs) maxAbs = abs;
+              }
+              if (maxAbs > 0.0001) {
+                // wlog("info", `VAD: first non-silent frame at +${Date.now() - t0}ms (peak=${maxAbs.toFixed(6)})`);
+                firstFrameResolve();
+                firstFrameResolve = null;
+              } else {
+                return; // discard silent frame from mic init
+              }
+            }
+            if (!accumulateFrames) return; // discard frames during chime
+            segmentAccumulatorRef.current?.addFrame(
+              probabilities.isSpeech,
+              frame,
+            );
+          },
+          onSpeechStart: () => {},
+          onSpeechEnd: () => {},
+          onVADMisfire: () => {},
+          onSpeechRealStart: () => {},
         });
 
-        if (resolveStopRef.current) {
-          resolveStopRef.current(audioBlob);
-          resolveStopRef.current = null;
-        }
-      };
+        // wlog("info", `VAD: model loaded at +${Date.now() - t0}ms, starting audio pipeline`);
+        await vad.start();
+        // wlog("info", `VAD: pipeline started at +${Date.now() - t0}ms (audioCtx state=${audioContext.state}), waiting for first frame`);
+        vadRef.current = vad;
+        vadAvailableRef.current = true;
+        vadInitialized = true;
 
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(100);
-      setIsRecording(true);
+        // Wait for first real audio frame to confirm mic is active (2s timeout fallback)
+        const timedOut = await Promise.race([
+          firstFrameReady.then(() => false),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 2000)),
+        ]);
+        if (timedOut) {
+          wlog("warn", `VAD: timed out waiting for first frame after ${Date.now() - t0}ms`);
+        }
+        // else {
+        //   wlog("info", `VAD: ready at +${Date.now() - t0}ms`);
+        // }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        wlog("warn", `VAD initialization failed, falling back to MediaRecorder: ${msg}`);
+        console.warn("VAD initialization failed, falling back to MediaRecorder:", err);
+        vadAvailableRef.current = false;
+      }
+
+      // Fallback: use MediaRecorder if VAD failed
+      if (!vadInitialized) {
+        const mimeType = mimeTypeRef.current;
+        const mediaRecorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+
+        audioChunksRef.current = [];
+
+      // Resolve when the first encoded chunk arrives — proves full pipeline readiness.
+        const firstChunkReady = new Promise<void>((resolve) => {
+          let resolved = false;
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
+              if (!resolved) {
+                resolved = true;
+                resolve();
+              }
+            }
+          };
+        });
+
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start(100);
+
+        // Wait for first encoded audio chunk to confirm pipeline readiness (2s timeout)
+        await Promise.race([
+          firstChunkReady,
+          new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        ]);
+      }
+
+      startAudioLevelMonitoring();
+
+      // wlog("info", `Recording: playing chime and setting isRecording(true) (audioCtx state=${audioContextRef.current?.state})`);
+      const chimePromise = playChime(880);
+      setIsRecording(true);  // turn red as chime plays
+
+      await chimePromise;    // wait for chime to finish
+
+      if (!vadInitialized) {
+        // Keep header chunk for MediaRecorder fallback
+        audioChunksRef.current = audioChunksRef.current.slice(0, 1);
+      }
+      accumulateFrames = true; // open gate: start accumulating audio
+
     } catch (err) {
       console.error("Failed to start recording:", err);
       throw err;
     }
-  }, []);
+  }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog]);
 
-  const stopRecording = useCallback((): Promise<Blob | null> => {
-    return new Promise((resolve) => {
-      if (mediaRecorderRef.current && isRecording) {
-        resolveStopRef.current = resolve;
+  const stopRecording = useCallback(async (separator = " "): Promise<string | null> => {
+    if (!isRecording) {
+      return null;
+    }
 
-        mediaRecorderRef.current.stop();
-        setIsRecording(false);
-        setAudioLevel(0);
-        cancelAnimationFrame(animationFrameRef.current);
-        analyserRef.current = null;
+    playChime(660);
+    stopAudioLevelMonitoring();
+    setIsRecording(false);
+    // Disable auto-stop callback — from here, rejectFinalize surfaces errors instead
+    if (whisperQueueRef.current) whisperQueueRef.current.onFatalError = null;
 
-        // Stop all tracks
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
+    // config was validated at recording start
+    const config = getTranscriptionConfig();
+
+    try {
+      let transcript: string;
+
+      if (vadAvailableRef.current && vadRef.current) {
+        // VAD pipeline: pause VAD, flush remaining segments, finalize queue
+        await vadRef.current.pause();
+        await vadRef.current.destroy();
+        vadRef.current = null;
+
+        const accumulator = segmentAccumulatorRef.current!;
+        accumulator.flushRemaining();
+        const totalSegments = accumulator.totalSegments;
+
+        // Debug: save full recording WAV (all frames across all segments)
+        const fullWav = accumulator.getFullRecordingWav();
+        if (fullWav) saveDebugBlob(fullWav, "full-recording.wav");
+
+        segmentAccumulatorRef.current = null;
+
+        if (totalSegments === 0) {
+          // No speech detected at all
+          cleanupStream();
+          whisperQueueRef.current = null;
+          setTranscriptionProgress(null);
+          return null;
         }
 
-        // Close AudioContext
-        if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
+        const queue = whisperQueueRef.current!;
+        setTranscriptionProgress({ completed: 0, total: totalSegments });
+        transcript = await queue.finalize(totalSegments, separator);
+
+        if (debugSessionRef.current) {
+          const lines: string[] = [];
+          [...debugSegmentTranscriptsRef.current.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .forEach(([idx, { text, durationSec, latencyMs }]) => {
+              const timing = latencyMs !== undefined ? `${durationSec.toFixed(1)}s, ${latencyMs}ms latency` : `${durationSec.toFixed(1)}s`;
+              lines.push(`=== Segment ${idx} (${timing}) ===\n${text}\n`);
+            });
+          lines.push(`=== Full concatenated ===\n${transcript}`);
+          saveDebugBlob(new Blob([lines.join("\n")], { type: "text/plain" }), "transcript.txt");
         }
       } else {
-        resolve(null);
+        // MediaRecorder fallback: get blob, transcribe directly
+        const mediaRecorder = mediaRecorderRef.current;
+        if (!mediaRecorder) {
+          cleanupStream();
+          return null;
+        }
+
+        const audioBlob = await new Promise<Blob>((resolve) => {
+          mediaRecorder.onstop = () => {
+            const actualMimeType = mediaRecorder.mimeType || "audio/webm";
+            resolve(
+              new Blob(audioChunksRef.current, { type: actualMimeType }),
+            );
+          };
+          mediaRecorder.stop();
+        });
+        mediaRecorderRef.current = null;
+
+        // Debug: save fallback recording blob
+        const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
+        saveDebugBlob(audioBlob, `full-recording.${ext}`);
+
+        setTranscriptionProgress({ completed: 0, total: 1 });
+        transcript = await transcribeAudioBlob(audioBlob, config);
+        setTranscriptionProgress({ completed: 1, total: 1 });
+
+        if (debugSessionRef.current) {
+          saveDebugBlob(new Blob([transcript], { type: "text/plain" }), "transcript.txt");
+        }
       }
-    });
-  }, [isRecording]);
+
+      cleanupStream();
+      whisperQueueRef.current = null;
+      setTranscriptionProgress(null);
+      return transcript || null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      wlog("error", `Transcription failed: ${msg}`);
+      console.error("Transcription failed:", err);
+      cleanupStream();
+      whisperQueueRef.current = null;
+      setTranscriptionProgress(null);
+      throw err;
+    }
+  }, [isRecording, playChime, stopAudioLevelMonitoring, cleanupStream, saveDebugBlob, wlog]);
 
   return {
     isRecording,
     audioLevel,
+    transcriptionProgress,
+    fatalTranscriptionError,
     startRecording,
     stopRecording,
+    saveDebugBlob,
+    playErrorSound,
   };
 }

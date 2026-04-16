@@ -1,107 +1,124 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
+import { getLLMConfig, makeUserPrompt, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
+import { ensureCustomServices } from "../audio/customModelService";
 
 function RecordingBar() {
+  const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { isRecording, audioLevel, startRecording, stopRecording } =
-    useAudioRecorder();
+  const {
+    isRecording,
+    audioLevel,
+    fatalTranscriptionError,
+    startRecording,
+    stopRecording,
+    saveDebugBlob,
+    playErrorSound,
+  } = useAudioRecorder();
 
-  const getApiKey = () => localStorage.getItem("wisper_api_key") || "";
+  useEffect(() => {
+    if (fatalTranscriptionError && isRecording) handleStopRecording();
+  }, [fatalTranscriptionError]);
 
-  const transcribeAudio = async (audioBlob: Blob) => {
-    const apiKey = getApiKey();
-    const provider = localStorage.getItem("wisper_provider") || "groq";
-
-    if (!apiKey) {
-      setError("No API key. Open Settings from tray.");
+  const handleStartRecording = useCallback(async () => {
+    try {
+      setError(null);
+      const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
+      await startRecording(readyPromise);
+      if (window.electronAPI) {
+        window.electronAPI.setRecordingState(true);
+      }
+    } catch (err) {
+      playErrorSound();
+      setError(err instanceof Error ? err.message : "Failed to access microphone");
       setTimeout(() => {
         if (window.electronAPI) {
+          setOverlayVisible(false);
           window.electronAPI.hideWindow();
         }
-      }, 2000);
-      return;
+      }, 3500);
+    }
+  }, [startRecording, playErrorSound]);
+
+  const handleStopRecording = useCallback(async () => {
+    if (window.electronAPI) {
+      window.electronAPI.setRecordingState(false);
     }
 
     setIsTranscribing(true);
 
     try {
-      const formData = new FormData();
-      const extension = audioBlob.type.includes("ogg") ? "ogg" : "webm";
-      formData.append("file", audioBlob, `recording.${extension}`);
-      formData.append("response_format", "text");
+      const llmConfig = getLLMConfig();
+      const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
 
-      let apiUrl: string;
-      let model: string;
-
-      if (provider === "groq") {
-        apiUrl = "https://api.groq.com/openai/v1/audio/transcriptions";
-        model = "whisper-large-v3-turbo";
-      } else {
-        apiUrl = "https://api.openai.com/v1/audio/transcriptions";
-        model = "whisper-1";
-      }
-
-      formData.append("model", model);
-
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`,
-        );
-      }
-
-      const text = await response.text();
-      const trimmedText = text.trim();
-
-      if (trimmedText && window.electronAPI) {
+      if (transcript && window.electronAPI) {
+        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
+        if (finalTranscript && llmConfig && !transcript.startsWith("[Error")) {
+          let llmStatus = "error";
+          let llmLatencyMs: number | undefined;
+          const llmResult = await postProcessTranscript(transcript, llmConfig).catch((err) => {
+            console.error("LLM post-processing failed, using raw transcript:", err);
+            window.electronAPI.log(
+              "error",
+              `LLM post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+          const llmOutput = llmResult?.content;
+          if (llmResult !== undefined) {
+            llmLatencyMs = llmResult.latencyMs;
+            if (llmOutput!.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
+              window.electronAPI.log("warn",
+                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
+              llmStatus = "rejected_over_length";
+            } else {
+              llmStatus = "ok";
+              finalTranscript = llmOutput!;
+            }
+          }
+          if (localStorage.getItem("wisper_debug_audio") === "true") {
+            const payload = JSON.stringify(
+              {
+                model: llmConfig.model,
+                ...(llmLatencyMs !== undefined ? { latency_ms: llmLatencyMs } : {}),
+                system_prompt: llmConfig.systemPrompt,
+                whisper_transcript: transcript,
+                input: makeUserPrompt(transcript, llmConfig),
+                output: llmOutput || "",
+                status: llmStatus,
+                ...(llmStatus !== "ok" ? { returned_transcript: finalTranscript } : {}),
+              },
+              null,
+              2,
+            );
+            saveDebugBlob(
+              new Blob([payload], { type: "application/json" }),
+              "llm-pass.json",
+            );
+          }
+        }
+        setOverlayVisible(false);
         window.electronAPI.hideWindow();
-        window.electronAPI.pasteToCursor(trimmedText);
+        const outputMethod = (localStorage.getItem("wisper_output_method") || "paste") as OutputMethod;
+        window.electronAPI.outputText(finalTranscript, outputMethod);
       } else if (window.electronAPI) {
+        setOverlayVisible(false);
         window.electronAPI.hideWindow();
       }
     } catch (err) {
       console.error("Transcription failed:", err);
+      playErrorSound();
       setError(err instanceof Error ? err.message : "Transcription failed");
       setTimeout(() => {
         if (window.electronAPI) {
+          setOverlayVisible(false);
           window.electronAPI.hideWindow();
         }
-      }, 2000);
+      }, 3500);
     } finally {
       setIsTranscribing(false);
-    }
-  };
-
-  const handleStartRecording = useCallback(async () => {
-    try {
-      setError(null);
-      await startRecording();
-      if (window.electronAPI) {
-        window.electronAPI.setRecordingState(true);
-      }
-    } catch (err) {
-      setError("Failed to access microphone");
-    }
-  }, [startRecording]);
-
-  const handleStopRecording = useCallback(async () => {
-    const audioBlob = await stopRecording();
-    if (window.electronAPI) {
-      window.electronAPI.setRecordingState(false);
-    }
-    if (audioBlob) {
-      await transcribeAudio(audioBlob);
     }
   }, [stopRecording]);
 
@@ -109,12 +126,17 @@ function RecordingBar() {
   useEffect(() => {
     if (window.electronAPI) {
       window.electronAPI.onStartRecording(() => {
+        setOverlayVisible(true);
         handleStartRecording();
       });
 
       window.electronAPI.onStopRecording(() => {
         handleStopRecording();
       });
+
+      const savedShortcut =
+        localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space";
+      window.electronAPI.updateShortcut(savedShortcut);
 
       return () => {
         window.electronAPI.removeAllListeners("start-recording");
@@ -128,14 +150,14 @@ function RecordingBar() {
       return (
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-          <span className="text-red-300 text-sm font-medium">{error}</span>
+          <span className="text-red-300 text-sm font-medium whitespace-pre-wrap">{error}</span>
         </div>
       );
     }
 
     if (isTranscribing) {
       return (
-        <div className="flex items-center gap-1.5 h-6">
+        <div className="flex items-center gap-1.5 h-8">
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite]" style={{ height: '40%' }} />
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ height: '80%' }} />
           <span className="w-1.5 bg-primary-500 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '60%' }} />
@@ -149,19 +171,19 @@ function RecordingBar() {
       return <Waveform audioLevel={audioLevel} isRecording={isRecording} />;
     }
 
-    return (
-      <div className="flex items-center gap-2 text-white/40">
-        <div className="w-6 h-6 rounded-full border-2 border-white/20 flex items-center justify-center">
-          <div className="w-2 h-2 rounded-full bg-white/40" />
-        </div>
-        <span className="text-xs font-medium">Press Shift+Space to record</span>
-      </div>
-    );
+    return <Waveform audioLevel={0} isRecording={false} />;
   };
 
   return (
-    <div className="w-full h-full flex items-center justify-center px-4">
-      {renderContent()}
+    <div className="w-full h-full flex items-center justify-center">
+      {overlayVisible && (
+        <div
+          className="flex items-center justify-center px-6 h-20 min-w-[198px] rounded-full ring-1 ring-white/10 shadow-xl"
+          style={{ background: "rgba(14, 14, 22, 0.60)" }}
+        >
+          {renderContent()}
+        </div>
+      )}
     </div>
   );
 }
