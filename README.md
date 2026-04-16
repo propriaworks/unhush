@@ -298,7 +298,7 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 
 ### Releases
 
-Update version in `package.json`, commit final changes, then tag it and push:
+Update version in `package.json`, commit final changes, then **from the main branch** tag it and push the tag:
 
 ```bash
 git tag v3.1.0 && git push origin v3.1.0
