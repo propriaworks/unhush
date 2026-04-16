@@ -112,14 +112,13 @@ function toggleRecording() {
   }
 }
 
-function createWindow() {
+function createWindow(offsetFromBottom) {
   const { screen } = require("electron");
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.workAreaSize;
+  const { x: areaX, y: areaY, width, height } = screen.getPrimaryDisplay().workArea;
   const winWidth = 340;
   const winHeight = 90;
-  const x = Math.round((width - winWidth) / 2);
-  const y = Math.round(height - winHeight - 20);
+  const x = Math.round(areaX + (width - winWidth) / 2);
+  const y = Math.round(areaY + height - winHeight - offsetFromBottom);
 
   mainWindow = new BrowserWindow({
     width: winWidth,
@@ -157,9 +156,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Window is shown once at startup (transparent + click-through).
-  // All subsequent visibility changes are handled via setIgnoreMouseEvents
-  // to avoid OS window-manager sounds on every recording toggle.
+
   // Window is shown once at startup (transparent + click-through + not on top).
   // All subsequent visibility changes use setIgnoreMouseEvents / setAlwaysOnTop
   // to avoid OS window-manager sounds on every recording toggle.
@@ -441,9 +438,34 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
-    createWindow();
+    const offsetFromBottom = 45; /* window bottom from desktop bottom) */
+    createWindow(offsetFromBottom);
     createTray();
     checkUinputAccess();
+
+    // Reposition the recording bar whenever the primary display's work area changes
+    // (resolution change, taskbar resize, monitor added/removed, etc.)
+    let repositionTimer = null;
+    function repositionMainWindow() {
+      clearTimeout(repositionTimer);
+      // Debounced: display events fire mid-reconfiguration; the DE may not have
+      // re-registered its panel struts yet, so workArea is transiently the full
+      // screen bounds. Waiting 500ms lets it settle before we reposition.
+      repositionTimer = setTimeout(() => {
+        if (!mainWindow) return;
+        const { screen } = require("electron");
+        const { x: areaX, y: areaY, width, height } = screen.getPrimaryDisplay().workArea;
+        const [winWidth, winHeight] = mainWindow.getSize();
+        mainWindow.setPosition(
+          Math.round(areaX + (width - winWidth) / 2),
+          Math.round(areaY + height - winHeight - offsetFromBottom)
+        );
+      }, 500);
+    }
+    const { screen } = require("electron");
+    screen.on("display-added", repositionMainWindow);
+    screen.on("display-removed", repositionMainWindow);
+    screen.on("display-metrics-changed", repositionMainWindow);
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
