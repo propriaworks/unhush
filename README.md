@@ -21,7 +21,7 @@ This is an independent, actively maintained fork of [taraksh01/wisper](https://g
 - **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
 - **Wayland & X11 Support** - Works on both display servers
-- **Privacy First** - Records locally before sending to API. Both the transcription and formatting endpoints can be local (e.g. [`speaches`](https://speaches.ai) for Whisper, [`ollama`](https://ollama.com) for LLM) for *total privacy*
+- **Privacy First** - Records locally before sending to API. Both the transcription and formatting endpoints can be local for *total privacy* — see [Using Local Models](local-models.md)
 - **Auto-start & Warm-up** - Wisper can start local servers automatically on first use and pre-load models into GPU memory to reduce first-request latency
 
 ## Requirements
@@ -42,7 +42,7 @@ Download the latest release from the [Releases](https://github.com/jtbr/wisper/r
 ```bash
 sudo apt install ./wisper_*.deb          # Debian / Ubuntu / Mint
 sudo dnf install ./wisper-*.rpm          # Fedora / RHEL
-sudo pacman -U wisper-*.pkg.tar.zst      # Arch / Manjaro
+sudo pacman -U wisper-*.pkg.tar.zst      # Arch / Manjaro / etc
 ```
 
 To verify your download against the [SHA256 checksums](https://github.com/jtbr/wisper/releases/latest/download/SHA256SUMS.txt):
@@ -55,13 +55,15 @@ The `.deb`, `.rpm`, and `.pkg.tar.zst` packages automatically:
 - Install ydotool as a dependency
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
 
-#### Additional steps for AppImage only
+### AppImage
 
-[`ydotool`](https://github.com/ReimuNotMoe/ydotool) sends transcribed text to the active input field, so is normally required, unless you want to paste manually using the clipboard. AppImage users need to install it themselves; it's normally available via platform package managers.
+Download and run the AppImage, no installation needed (after making it executable).
+
+Wisper uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcribed text to the active input field, so is normally required, unless you want to instead manually paste using the clipboard. AppImage users need to install it themselves; it's normally available via platform package managers.
 
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
-At startup, Wisper will show a one-time dialog with setup instructions if `/dev/uinput` isn't accessible.
+`ydotool` needs write access to `/dev/uinput`. At startup, Wisper will show a one-time dialog with setup instructions if it isn't already accessible.
 
 ### From Source
 
@@ -73,13 +75,13 @@ cd wisper
 # Install dependencies
 pnpm install
 
-# Run in development
+# Run in development mode
 pnpm run electron:dev
 ```
 
-### Running `ydotoold` as a service
+### Running `ydotoold` as a service (optional, recommended)
 
-This is recommended — it improves responsiveness and avoids the small startup delay on each dictation. If your package manager doesn't provide a service config (Ubuntu's doesn't), get the `systemd` config [here](https://github.com/ReimuNotMoe/ydotool/raw/refs/heads/master/Daemon/systemd/ydotoold.service.in). Save it as `$HOME/.config/systemd/user/ydotoold.service`, edit `ExecStart` to point to `which ydotoold`, then run once:
+Using the `ydotoold` daemon improves responsiveness and avoids the small startup delay on each dictation. If your package manager doesn't provide a service config (Ubuntu's doesn't), get the `systemd` config [here](https://github.com/ReimuNotMoe/ydotool/raw/refs/heads/master/Daemon/systemd/ydotoold.service.in). Save it as `$HOME/.config/systemd/user/ydotoold.service`, edit `ExecStart` to point to `which ydotoold`, then run once:
 
 ```sh
 systemctl --user daemon-reload
@@ -95,12 +97,12 @@ systemctl --user enable --now ydotoold
    - **Groq**: Free, fast Whisper models (recommended)
    - **OpenAI**: Official Whisper API
    - **Custom**: Any OpenAI transcription-API-compatible endpoint (e.g. locally-served)
-3. Enter your API key (optional for custom)
+3. Enter your API key from [Groq](https://console.groq.com/keys) or [OpenAI](https://platform.openai.com/api-keys) (optional for custom)
 4. Optionally configure a **Formatting** (LLM) provider for post-processing
 5. On the **Usability** tab, choose your **Output** method (default: **Paste**):
    - **Paste**: Text is pasted instantly via clipboard — works in terminals and GUI apps, atomic, no cursor-move corruption
    - **Type**: Characters typed one-by-one via ydotool — slower, lets you watch text appear as it's written
-   - **Clipboard**: Text is copied to clipboard only — paste manually with Ctrl+V; no ydotool required
+   - **Clipboard**: Text is copied to clipboard only — paste manually with Ctrl+V; no `ydotool` required
 6. On the **Usability** tab, choose Wisper's *hotkey* (`Ctrl+Alt+Space` by default)
 
 ### Recording
@@ -113,7 +115,7 @@ systemctl --user enable --now ydotoold
 ### System Tray
 
 - **Left-click**: Toggle recording (same as hotkey-press)
-- **Right-click**: Open menu (Settings, Quit)
+- **Right-click**: Open menu (Settings, Copy last transcript, Quit)
 
 ## Wayland Setup
 
@@ -124,17 +126,17 @@ Global shortcut handling on X11 works seemlessly. On Wayland it depends on your 
 | **KDE Plasma** | Works automatically via the XDG GlobalShortcuts portal. On first launch, KDE shows a dialog to confirm the shortcut binding. |
 | **GNOME 48+** (Ubuntu 25.04+, Fedora 42+) | Works automatically via the portal, same as KDE. |
 | **GNOME < 48** (Ubuntu 24.04 LTS) | On first launch, Wisper automatically configures a desktop keyboard shortcut via `gsettings`. |
-| **Other compositors** (Sway, Hyprland, etc.) | On first launch, Wisper shows a one-time dialog with instructions to add a custom shortcut in your compositor's config. |
+| **Other compositors** (Sway, Hyprland, etc.) | On first launch, Wisper shows a one-time dialog with instructions to manually add a custom shortcut using your compositor's config. |
 
 ### Manual shortcut setup
 
-**Note**: Running Wisper again while it's already running will *toggle recording*. This is what the keyboard shortcut calls — no matter how Wisper was installed, the shortcut just runs `wisper` (or the AppImage path) again.
+**Note**: Running Wisper again while it's already running will ***toggle** recording*. This is what the keyboard shortcut calls — no matter how Wisper was installed, the shortcut just runs `wisper` (or the AppImage path) again.
 
 If you need to configure the shortcut yourself, add a custom keyboard shortcut in your Desktop Evironment's settings with the command:
 
 - **Package install**: `wisper`
-- **AppImage**: `/path/to/Wisper.AppImage --no-sandbox`
-- **Development**: `pnpm run electron /path/to/wisper --no-sandbox`
+- **AppImage**: `/path/to/Wisper.AppImage` (add `--no-sandbox` if Wisper fails to start)
+- **Development**: `pnpm run -C /path/to/wisperrepo electron:dev`
 
 ## Auto-starting Wisper
 
@@ -167,9 +169,9 @@ To have Wisper start automatically when you log in:
   systemctl --user enable --now wisper
   ```
 
-- **AppImage**: use Desktop Environment or systemd approaches, substituting `/path/to/Wisper.AppImage --no-sandbox` as the command.
+- **AppImage**: use Desktop Environment or systemd approaches, substituting `/path/to/Wisper.AppImage` as the command (add `--no-sandbox` if Wisper fails to start).
 
-## Configuration
+## Detailed Configuration
 
 ### Transcription
 
@@ -177,9 +179,9 @@ To have Wisper start automatically when you log in:
 |----------|-------|------|-------------|
 | **Groq** (Recommended) | `whisper-large-v3-turbo` | Free tier | [console.groq.com](https://console.groq.com/keys) |
 | **OpenAI** | `whisper-1` | Paid | [platform.openai.com](https://platform.openai.com/api-keys) |
-| **Custom** | Any OpenAI-compatible ASR endpoint | Free if local | — |
+| **Custom** | Any OpenAI-compatible transcriptions endpoint | Free if local | — |
 
-For the **Custom** provider, set the full endpoint URL (e.g. `http://localhost:8000/v1/audio/transcriptions`) and the model name as the server expects it. [`speaches`](https://speaches.ai) is a good self-hosted option.
+For the **Custom** provider, set the full endpoint URL (e.g. `http://localhost:8000/v1/audio/transcriptions`) and the model name as the server expects it. See [Using Local Models](local-models.md) for setup guides and recommended options.
 
 ### LLM Formatting (optional)
 
@@ -191,17 +193,7 @@ After transcription, Wisper can send the raw transcript to an LLM to clean it up
 | **OpenAI** | `gpt-4.1-mini` | Paid | Uses your OpenAI API key from the transcription tab |
 | **Custom** | — | Free if local | Default URL: `http://localhost:11434/v1/chat/completions` ([ollama](https://ollama.com)) |
 
-For the **Custom** provider, it's best to use a model with at least 8B parameters to work reasonably well and avoid problems. If you can't run that locally and don't want to use another service, you can disable LLM formatting altogether. The results are still mostly pretty good.
-
-### Local / Custom Servers
-
-For both the transcription and LLM providers, the optional **Start Command** field (under Custom settings) lets Wisper auto-start the server when it isn't running. On first recording, Wisper health-checks each configured custom endpoint. If the check fails and a start command is set, it runs that command and waits up to 15 seconds for the server to respond before proceeding.
-
-Wisper also sends a *warm-up* request to each custom endpoint on first use (and periodically thereafter, if it hasn't been used for 5 minutes [by default]) to pre-load the model into GPU memory. This avoids the long first-request delay that occurs when models are loaded on demand.
-
-#### Speaches custom local transcription - Docker setup
-
-If you don't already have [`speaches`](https://speaches.ai), but you have `docker compose` you can set it to run automatically with zero install simply by adding `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` as the transcription start command (this `yaml` file assumes you have an Nvidia GPU with CDI support; adjust as necessary). The first time it runs you'll need to open the [speaches web interface](http://localhost:9000) and [download a Whisper STT model as described here](https://speaches.ai/usage/model-discovery/#__tabbed_1_2), for example `Systran/faster-distil-whisper-large-v3`. That's it!
+For the **Custom** provider, see [Using Local Models](local-models.md) for setup, model recommendations, and auto-start configuration.
 
 ### Settings Reference
 
@@ -265,16 +257,9 @@ When transcription fails, Wisper plays a buzzer sound, displays the error messag
 | `Bad endpoint URL` | Custom URL is wrong — it must include the full path, e.g. `/v1/audio/transcriptions` |
 | `Whisper server error` | Server returned 5xx — check the server's own logs |
 
-### Custom server: health check or warm-up failing
+### Custom server: health check, warm-up, or slow first transcription
 
-- Check `/tmp/wisper.log` for `Health check failed` or `warm-up` entries
-- Confirm the server is running: `curl http://localhost:8080/v1/models`
-- Confirm the model name in Settings matches exactly what the server reports in the models list
-- If auto-start is configured, check that the command works when run manually in a terminal
-
-### Transcription is slow on first recording
-
-This is normal when using a local server — the model needs to be loaded into GPU memory. Wisper sends a warm-up request on first use to trigger this early. If warm-up isn't helping, check `/tmp/wisper.log` for warm-up errors.
+See [Using Local Models — Troubleshooting](local-models.md#troubleshooting).
 
 ### LLM formatting not working
 
