@@ -213,6 +213,28 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`) |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
 
+### Advanced Settings
+
+These settings are not exposed in the UI. Set them by adding keys to `~/.config/wisper/settings.json` (create the file if it doesn't exist). Keys use the setting name without the `wisper_` prefix:
+
+```json
+{
+  "debug_audio": "true",
+  "warmup_interval_sec": "600"
+}
+```
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `debug_audio` | Save each recording's audio segments and transcripts to `/tmp/wisper-debug/` for inspection | `false` |
+| `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `300` |
+| `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `300` |
+| `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |
+| `llm_excess_length_floor` | Minimum character headroom above input length regardless of multiplier | `20` |
+| `llm_final_instructions` | Instruction appended to the user message sent to the LLM, after the transcript | `"Output the cleaned transcript only. No commentary, no explanations, no preamble."` |
+
+Settings in this file are loaded at startup and take precedence over any previously saved values.
+
 ## Troubleshooting
 
 Wisper logs to `/tmp/wisper.log`. When something goes wrong, check there first.
@@ -268,6 +290,25 @@ See [Using Local Models — Troubleshooting](docs/local-models.md#troubleshootin
 - Check `/tmp/wisper.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
 
+### Diagnosing transcription quality or pipeline issues
+
+Enable debug audio to capture each recording session in detail:
+
+```json
+// ~/.config/wisper/settings.json
+{ "debug_audio": "true" }
+```
+
+Then after each recording, Wisper writes to `/tmp/wisper-debug/<timestamp>/`:
+
+| File | Contents |
+|------|----------|
+| `full-recording.wav` | Complete raw audio for the session |
+| `segment-NNN.wav` | Individual VAD-segmented audio chunks sent to Whisper |
+| `transcript.txt` | Per-segment transcription with timing and latency |
+| `llm-pass.json` | LLM formatting input/output, status, and latency (if LLM enabled) |
+
+
 ## Development
 
 This is actively maintained; your contributions and feedback are welcome.
@@ -298,13 +339,14 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 
 ### Releases
 
-Update version in `package.json`, commit final changes, then **from the main branch** tag it and push the tag:
+Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally push the commit, tag it and push the tag:
 
 ```bash
+git commit -m "bump version"
 git tag v3.1.0 && git push origin v3.1.0
 ```
 
-CI/CD will be launched by github to build it, save release builds and update docs/index.html with version correct download links (or `node scripts/sync-docs.mjs`). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
+CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
 
 ## Why this fork?
 

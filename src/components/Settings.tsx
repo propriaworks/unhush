@@ -46,7 +46,7 @@ function Settings() {
     setGroqKey(localStorage.getItem("wisper_groq_key") || "");
     setOpenaiKey(localStorage.getItem("wisper_openai_key") || "");
     setCustomKey(localStorage.getItem("wisper_custom_key") || "");
-    setCustomUrl(localStorage.getItem("wisper_custom_url") || "");
+    setCustomUrl(localStorage.getItem("wisper_custom_url") || "http://localhost:8000/v1/audio/transcriptions");
     setCustomModel(localStorage.getItem("wisper_custom_model") || "");
     setProvider((localStorage.getItem("wisper_provider") as Provider) || "groq");
     setShortcut(localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space");
@@ -236,7 +236,7 @@ function Settings() {
                       type="text"
                       value={customModel}
                       onChange={persist(setCustomModel, "wisper_custom_model")}
-                      placeholder="whisper-1"
+                      placeholder="Systran/faster-whisper-large-v3"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
                   </div>

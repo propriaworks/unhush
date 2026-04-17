@@ -14,6 +14,7 @@ const { exec } = require("child_process");
 const waylandShortcut = require("./waylandShortcut.cjs");
 const fs = require("fs");
 const os = require("os");
+const crypto = require("crypto");
 
 let mainWindow = null;
 let settingsWindow = null;
@@ -314,12 +315,17 @@ ipcMain.handle("output-text", async (event, text, method) => {
         await doPaste();
         break;
       case "type": {
-        const tempFile = '/tmp/wisper-text.txt';
-        fs.writeFileSync(tempFile, text);
-        await new Promise(resolve => setTimeout(resolve, 250));
-        const timeout = Math.max(5000, text.length * 50);
-        // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-        execSync(`ydotool type --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+        // Use a random temp filename to prevent symlink race attacks on a predictable path
+        const tempFile = path.join(os.tmpdir(), `wisper-${crypto.randomBytes(8).toString('hex')}.txt`);
+        try {
+          fs.writeFileSync(tempFile, text);
+          await new Promise(resolve => setTimeout(resolve, 250));
+          const timeout = Math.max(5000, text.length * 50);
+          // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
+          execSync(`ydotool type --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+        } finally {
+          try { fs.unlinkSync(tempFile); } catch {}
+        }
         break;
       }
       case "clipboard":
@@ -483,9 +489,13 @@ ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, 
     let extension, filePath;
     if (subdir && filename) {
       // New style: save to /tmp/wisper-debug/{subdir}/{filename}
-      const debugDir = path.join("/tmp/wisper-debug", subdir);
+      // Validate that both subdir and filename stay within the debug root (prevent path traversal)
+      const BASE_DEBUG_DIR = "/tmp/wisper-debug";
+      const debugDir = path.resolve(path.join(BASE_DEBUG_DIR, subdir));
+      if (!debugDir.startsWith(BASE_DEBUG_DIR + path.sep) && debugDir !== BASE_DEBUG_DIR)
+        throw new Error("Path traversal attempt in subdir");
       fs.mkdirSync(debugDir, { recursive: true });
-      filePath = path.join(debugDir, filename);
+      filePath = path.join(debugDir, path.basename(filename)); // basename prevents traversal via filename
     } else {
       // Legacy style: auto-generate filename from timestamp
       extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
