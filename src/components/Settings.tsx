@@ -236,7 +236,7 @@ function Settings() {
                       type="text"
                       value={customModel}
                       onChange={persist(setCustomModel, "wisper_custom_model")}
-                      placeholder="whisper-1"
+                      placeholder="Systran/faster-whisper-large-v3"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
                   </div>

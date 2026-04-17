@@ -10,7 +10,7 @@ Running Wisper entirely locally gives you:
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
-Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa.
+Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on and Nvidia GPU.
 
 ---
 
@@ -18,17 +18,13 @@ Both the transcription (speech-to-text) and LLM formatting steps can be run loca
 
 [**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Wisper and need not be configured.
 
-### Setup
+### Speaches Setup
 
-You need Docker Engine with the Compose plugin. The quickest way on any Linux distro:
+**Using Docker (simplest approach)**
 
-```bash
-curl -fsSL https://get.docker.com | sh
-```
+You'll need Docker Engine with the Compose plugin. If you don't already have them, the quickest way on any Linux dist is `curl -fsSL https://get.docker.com | sh`. Or follow the [distro-specific instructions](https://docs.docker.com/engine/install/) (this covers both the Engine and the Compose plugin).
 
-Or follow the [distro-specific instructions](https://docs.docker.com/engine/install/) (each page covers both Engine and the Compose plugin).
-
-Then start speaches once to pull the image (pick the line matching your hardware):
+Start speaches once to pull the image (pick the line matching your hardware):
 
 ```bash
 # Nvidia GPU with CDI support (most Nvidia users on recent systems):
@@ -40,10 +36,6 @@ docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cud
 # CPU only (other GPUs are not supported)
 docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cpu.yaml up --detach
 ```
-
-Then open the [speaches web interface at localhost:8000](http://localhost:8000) and [download a Whisper model](https://speaches.ai/usage/model-discovery/#__tabbed_1_2). A good default is `Systran/faster-distil-whisper-large-v3`.
-
-After that, Wisper can start speaches automatically via the Start Command (see below) — you won't need to run the above manually again.
 
 **Without Docker:** speaches can also be run from source using `uv` — see the [speaches installation docs](https://speaches.ai/installation/):
 
@@ -58,24 +50,47 @@ uvicorn --factory --host 0.0.0.0 speaches.main:create_app
 
 Install `uv` via `curl -LsSf https://astral.sh/uv/install.sh | sh` if you don't have it.
 
+### Download a Whisper Text-to-Speech model for Speaches
+
+Pick a model from the table below. A good multilingual default is `Systran/faster-whisper-large-v3` if you have the GPU and memory.
+
+Then download (replacing the model name as needed) using either of these two approaches:
+
+```bash
+# the curl API approach:
+curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-large-v3
+
+# the speaches-cli apprach (if you have `uv` installed):
+SPEACHES_BASE_URL="http://localhost:8000" uvx speaches-cli model download Systran/faster-whisper-large-v3
+```
+
+The download may take a few minutes. After that, Wisper can start speaches automatically via the Start Command (see below) — you won't need to run speaches manually again.
+
+
 ### Wisper settings (Transcription tab)
 
 | Setting | Value |
 |---------|-------|
 | Provider | **Custom** |
 | API URL | `http://localhost:8000/v1/audio/transcriptions` |
-| Model name | Exact model name as it appears in speaches (e.g. `Systran/faster-distil-whisper-large-v3`) |
-| Start Command | *(optional)* `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` |
+| Model name | Exact model name as downloaded (e.g. `Systran/faster-whisper-large-v3`) |
+| Start Command | *(optional)* eg: `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` |
 
-Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above). Docker Compose caches the repo locally after the first run, so this is fast and works offline after that. Wisper runs the command automatically if speaches isn't responding when you try to record.
+Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above). Docker Compose caches the repo locally after the first run, so this is fast and works offline after that. Wisper runs the command automatically if speaches isn't up and responding when you try to record.
 
 ### Recommended models
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `Systran/faster-distil-whisper-large-v3` | ~1.5 GB | Best accuracy/speed balance; good default |
-| `Systran/faster-whisper-large-v3` | ~3 GB | Highest accuracy |
-| `Systran/faster-distil-whisper-small.en` | ~150 MB | Very fast; English only |
+| Model | Size | Language | Notes |
+|-------|------|----------|-------|
+| `Systran/faster-whisper-large-v3` | ~3 GB | Multilingual | Best accuracy; recommended default |
+| `Systran/faster-whisper-medium` | ~1.5 GB | Multilingual | Good balance of speed and accuracy |
+| `Systran/faster-whisper-small` | ~470 MB | Multilingual | Fast; lower accuracy |
+| `Systran/faster-distil-whisper-large-v3` | ~1.5 GB | **English only** | Fast and accurate, but English only |
+| `Systran/faster-distil-whisper-small.en` | ~150 MB | **English only** | Very fast; English only |
+
+- **Note:** `distil-whisper` models are English-only — they will transcribe non-English speech as English regardless of input language. Use a non-distilled model for multilingual use.
+
+- To list all models available for download: `SPEACHES_BASE_URL="http://localhost:8000" uvx speaches-cli registry ls --task automatic-speech-recognition | jq '.data[].id' | sort` (requires `uv` and `jq`)
 
 ---
 

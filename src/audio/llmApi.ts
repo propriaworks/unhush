@@ -25,20 +25,22 @@ export const LLM_DEFAULT_SYSTEM_PROMPT =
 The goal is to accurately convey what the speaker actually said, not to improve it.
 
 Rules (in priority order):
-1. NEVER add, remove, or change the meaning of any content.
+1. NEVER add, remove, or change the meaning of any content
 2. Fix punctuation, capitalization, and grammar
 3. Fix obvious mishearings: wrong homophones, misspelled proper nouns
-4. Remove filler words: um, uh, like, you know, so yeah, etc.
-5. Resolve verbal corrections: "the red — or rather the blue one" → "the blue one"
-6. Convert spoken symbols when unambiguous: "slash help" → "/help", "dot com" → ".com", "hashtag" → "#"
-7. Remove all <split_point/> markers — these are (arbitrary) transcription boundaries, not content
-8. Even if text starts / ends abruptly or seems incomplete, leave it as-is; it may merely be a part of a larger whole`
+4. Output results in the original language; do not translate
+5. Remove filler words: um, uh, like, you know, so yeah, etc
+6. Resolve verbal corrections: "the red — or rather the blue one" → "the blue one"
+7. Convert spoken symbols when unambiguous, including into unicode: "slash help" → "/help", "dot com" → ".com", "hashtag" → "#"
+8. Remove all <split_point/> markers — these are (arbitrary) transcription boundaries, not content
+9. Even if text starts / ends abruptly or seems incomplete, leave it as-is; it may merely be a part of a larger whole`
 // Optional additions to consider:
-// #9. Write numbers, dates, and times in their conventional written form
+// #10. Write numbers, dates, and times in their conventional written form
 //   - This can have unintended consequences even when done right (eg, a pin code or phone number written with a comma to look like a number)
-// Modify #6 to include things like "wink emoji"
+// Modify #7 to include things like "wink emoji" → 😉
+//   - But even large models seem to have poor mappings into unicode chars
 // Formatting such as lists into markdown or as bullets (e.g.)
-// #7 explain that text around the transcription boundaries may need to be smoothly joined
+// #8 explain that text around the transcription boundaries may need to be smoothly joined
 
 
 export const LLM_FINAL_INSTRUCTIONS = // placed after the xml-enclosed transcript
