@@ -308,6 +308,7 @@ Then after each recording, Wisper writes to `/tmp/wisper-debug/<timestamp>/`:
 | `transcript.txt` | Per-segment transcription with timing and latency |
 | `llm-pass.json` | LLM formatting input/output, status, and latency (if LLM enabled) |
 
+
 ## Development
 
 This is actively maintained; your contributions and feedback are welcome.
@@ -338,13 +339,14 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 
 ### Releases
 
-Update version in `package.json`, commit final changes, then **from the main branch** tag it and push the tag:
+Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally push the commit, tag it and push the tag:
 
 ```bash
+git commit -m "bump version"
 git tag v3.1.0 && git push origin v3.1.0
 ```
 
-CI/CD will be launched by github to build it, save release builds and update docs/index.html with version correct download links (or `node scripts/sync-docs.mjs`). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
+CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
 
 ## Why this fork?
 
