@@ -329,7 +329,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
           await new Promise(resolve => setTimeout(resolve, 250));
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execSync(`ydotool type --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore' });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }

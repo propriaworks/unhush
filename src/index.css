@@ -22,7 +22,7 @@
   --color-dark-300: #11111b;
   --color-dark-400: #0a0a0f;
 
-  --animate-pulse-ring: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-pulse-ring: pulse-ring 1.33s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-wave: wave 1s ease-in-out infinite;
   --animate-fade-in: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 
