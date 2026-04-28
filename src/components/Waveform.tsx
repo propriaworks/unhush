@@ -36,7 +36,7 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
 
-      const primaryColor = "#e95420";
+      const primaryColor = "#2e5bff";
 
       const speakingThreshold = 0.01;
       const isSpeaking = isRecording && audioLevel > speakingThreshold;

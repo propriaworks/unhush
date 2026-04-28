@@ -11,25 +11,25 @@
       <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
     </filter>
   </defs>
-  
+
   <!-- Main Container with Shadow -->
   <g filter="url(#shadow)">
-    <!-- Ubuntu Orange Background Circle -->
-    <circle cx="256" cy="256" r="240" fill="#E95420"/>
+    <!-- Electric Cobalt Background Circle -->
+    <circle cx="256" cy="256" r="240" fill="#2E5BFF"/>
   </g>
-  
+
   <!-- Microphone Glyph -->
   <g transform="translate(128, 128) scale(0.5)">
     <!-- Capsule -->
     <rect x="176" y="64" width="160" height="256" rx="80" fill="white"/>
-    
+
     <!-- Base Cup -->
-    <path d="M128 256v32c0 70.7 57.3 128 128 128s128-57.3 128-128v-32" 
+    <path d="M128 256v32c0 70.7 57.3 128 128 128s128-57.3 128-128v-32"
           stroke="white" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
-          
+
     <!-- Stem -->
     <path d="M256 416v96" stroke="white" stroke-width="48" stroke-linecap="round"/>
-    
+
     <!-- Foot -->
     <path d="M176 512h160" stroke="white" stroke-width="48" stroke-linecap="round"/>
   </g>

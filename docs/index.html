@@ -101,9 +101,15 @@
 			}
 
 			:root {
+				/*
 				--primary: #e95420;
 				--primary-dark: #c73d0f;
 				--primary-light: #ff7043;
+				*/
+				--primary: #2E5BFF;
+				--primary-dark: #1A3DBE;
+				--primary-light: #6B8AFF;
+				--primary-rgb: 46, 91, 255;
 				--bg-dark: #0a0a0f;
 				--bg-card: #16161f;
 				--bg-card-hover: #1e1e2a;
@@ -252,7 +258,7 @@
 				height: 150%;
 				background: radial-gradient(
 					circle at 50% 300px,
-					rgba(233, 84, 32, 0.15) 0%,
+					rgba(var(--primary-rgb), 0.15) 0%,
 					transparent 70%
 				);
 				pointer-events: none;
@@ -263,8 +269,8 @@
 				display: inline-flex;
 				align-items: center;
 				gap: 0.5rem;
-				background: rgba(233, 84, 32, 0.1);
-				border: 1px solid rgba(233, 84, 32, 0.3);
+				background: rgba(var(--primary-rgb), 0.1);
+				border: 1px solid rgba(var(--primary-rgb), 0.3);
 				padding: 0.5rem 1rem;
 				border-radius: 100px;
 				font-size: 0.875rem;
@@ -326,12 +332,12 @@
 					var(--primary-dark)
 				);
 				color: white;
-				box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
+				box-shadow: 0 4px 20px rgba(var(--primary-rgb), 0.3);
 			}
 
 			.btn-primary:hover {
 				transform: translateY(-2px);
-				box-shadow: 0 6px 30px rgba(233, 84, 32, 0.4);
+				box-shadow: 0 6px 30px rgba(var(--primary-rgb), 0.4);
 			}
 
 			.btn-secondary {
@@ -431,16 +437,16 @@
 
 			.feature-card:hover {
 				background: rgba(30, 30, 42, 0.6);
-				border-color: rgba(233, 84, 32, 0.3);
+				border-color: rgba(var(--primary-rgb), 0.3);
 				transform: translateY(-4px);
 			}
 
 			.feature-icon {
 				width: 48px;
 				height: 48px;
-				background: rgba(233, 84, 32, 0.15);
-				border: 1px solid rgba(233, 84, 32, 0.2);
-				box-shadow: 0 0 20px rgba(233, 84, 32, 0.1);
+				background: rgba(var(--primary-rgb), 0.15);
+				border: 1px solid rgba(var(--primary-rgb), 0.2);
+				box-shadow: 0 0 20px rgba(var(--primary-rgb), 0.1);
 				border-radius: 12px;
 				display: grid;
 				place-items: center;
@@ -478,7 +484,7 @@
 				box-shadow:
 					0 24px 64px rgba(0, 0, 0, 0.5),
 					0 0 0 1px rgba(255, 255, 255, 0.04),
-					0 0 40px rgba(233, 84, 32, 0.12);
+					0 0 40px rgba(var(--primary-rgb), 0.12);
 			}
 
 			.demo-frame img {
@@ -539,7 +545,7 @@
 			}
 
 			.step-card:hover {
-				border-color: rgba(233, 84, 32, 0.3);
+				border-color: rgba(var(--primary-rgb), 0.3);
 				background: rgba(30, 30, 42, 0.6);
 			}
 
@@ -601,13 +607,13 @@
 			}
 
 			.api-link:hover {
-				background: rgba(233, 84, 32, 0.1);
+				background: rgba(var(--primary-rgb), 0.1);
 				border-color: var(--primary);
 			}
 
 			.api-link.recommended {
-				background: rgba(233, 84, 32, 0.1);
-				border-color: rgba(233, 84, 32, 0.3);
+				background: rgba(var(--primary-rgb), 0.1);
+				border-color: rgba(var(--primary-rgb), 0.3);
 			}
 
 			.api-link .badge {
@@ -725,7 +731,7 @@
 
 			.download-btn:hover {
 				transform: scale(1.02);
-				box-shadow: 0 4px 20px rgba(233, 84, 32, 0.3);
+				box-shadow: 0 4px 20px rgba(var(--primary-rgb), 0.3);
 			}
 
 			/* Footer */
@@ -860,8 +866,8 @@
 			}
 
 			@keyframes pulse-glow {
-				0%, 100% { box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4); }
-				70% { box-shadow: 0 0 0 10px rgba(233, 84, 32, 0); }
+				0%, 100% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.4); }
+				70% { box-shadow: 0 0 0 10px rgba(var(--primary-rgb), 0); }
 			}
 
 			.animate-on-scroll {
@@ -899,9 +905,9 @@
 				transform: translateY(-5px) scale(1.01);
 				box-shadow:
 					0 20px 40px -10px rgba(0, 0, 0, 0.5),
-					0 0 30px -5px rgba(233, 84, 32, 0.15),
-					inset 0 0 0 1px rgba(233, 84, 32, 0.2);
-				border-color: rgba(233, 84, 32, 0.4);
+					0 0 30px -5px rgba(var(--primary-rgb), 0.15),
+					inset 0 0 0 1px rgba(var(--primary-rgb), 0.2);
+				border-color: rgba(var(--primary-rgb), 0.4);
 				background: rgba(30, 30, 42, 0.7);
 			}
 
@@ -915,7 +921,7 @@
 				position: absolute;
 				top: 0; left: 0; right: 0; bottom: 0;
 				border-radius: inherit;
-				box-shadow: 0 0 0 0 rgba(233, 84, 32, 0.4);
+				box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.4);
 				animation: pulse-glow 3s infinite;
 			}
 
@@ -1024,7 +1030,7 @@
 						</svg>
 						Free & Open Source
 					</div>
-					<h1 class="animate-on-scroll delay-100">Voice Dictation<br />for <span>Linux</span></h1>
+					<h1 class="animate-on-scroll delay-100">Voice Input<br />for <span>Linux</span></h1>
 					<p class="animate-on-scroll delay-200">
 						Fast, system-wide speech-to-text for Linux with
 						unlimited recording and advanced post-processing
