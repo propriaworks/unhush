@@ -26,10 +26,17 @@ let lastTranscript = null;
 const isDev = !app.isPackaged;
 const appIcon = path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
 
-const LOG_FILE = '/tmp/wisper.log';
+let logFile = null;
 function log(level, message) {
-  const line = `[${new Date().toISOString()}] ${level.toUpperCase()}: ${message}\n`;
-  fs.appendFileSync(LOG_FILE, line);
+  if (!logFile) {
+    // shouldn't happen — log() is only called after app is ready
+    console.error(`[pre-ready log] ${level.toUpperCase()}: ${message}`);
+    return;
+  }
+  const now = new Date();
+  const localISO = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1);
+  const line = `[${localISO}] ${level.toUpperCase()}: ${message}\n`;
+  fs.appendFileSync(logFile, line);
   if (isDev) console.log(line.trimEnd());
 }
 waylandShortcut.init(log);
@@ -445,6 +452,10 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    const logDir = app.getPath('logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logFile = path.join(logDir, 'wisper.log');
+
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
@@ -499,7 +510,8 @@ ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, 
     } else {
       // Legacy style: auto-generate filename from timestamp
       extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const now = new Date();
+      const timestamp = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1).replace(/[:.]/g, "-");
       const debugDir = "/tmp/wisper-debug";
       fs.mkdirSync(debugDir, { recursive: true });
       filePath = path.join(debugDir, `recording-${timestamp}.${extension}`);

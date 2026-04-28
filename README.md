@@ -237,7 +237,7 @@ Settings in this file are loaded at startup and take precedence over any previou
 
 ## Troubleshooting
 
-Wisper logs to `/tmp/wisper.log`. When something goes wrong, check there first.
+Wisper logs to `~/.config/Wisper/logs/wisper.log` (Linux). When something goes wrong, check there first.
 
 ### Text not being typed / ydotool not working
 
@@ -287,7 +287,7 @@ See [Using Local Models — Troubleshooting](docs/local-models.md#troubleshootin
 
 - Ensure the Formatting provider is set (not "Off") in the Formatting tab
 - For Custom: verify the API URL points to a `/v1/chat/completions` endpoint and the model name is correct
-- Check `/tmp/wisper.log` for `LLM post-processing failed` errors
+- Check `~/.config/Wisper/logs/wisper.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
 
 ### Diagnosing transcription quality or pipeline issues
@@ -339,11 +339,11 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 
 ### Releases
 
-Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally push the commit, tag it and push the tag:
+Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally tag it, and push the commit along with the tag:
 
 ```bash
 git commit -m "bump version"
-git tag v3.1.0 && git push origin v3.1.0
+git tag v3.1.0 && git push origin main v3.1.0
 ```
 
 CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
