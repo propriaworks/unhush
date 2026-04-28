@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { LLM_DEFAULT_CUSTOM_URL, LLM_DEFAULT_MODELS, LLM_DEFAULT_SYSTEM_PROMPT } from "../audio/llmApi";
+import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
 
 type Provider = "groq" | "openai" | "custom";
 type LLMProvider = "none" | "groq" | "openai" | "custom";
@@ -46,7 +47,7 @@ function Settings() {
     setGroqKey(localStorage.getItem("wisper_groq_key") || "");
     setOpenaiKey(localStorage.getItem("wisper_openai_key") || "");
     setCustomKey(localStorage.getItem("wisper_custom_key") || "");
-    setCustomUrl(localStorage.getItem("wisper_custom_url") || "http://localhost:8000/v1/audio/transcriptions");
+    setCustomUrl(localStorage.getItem("wisper_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL);
     setCustomModel(localStorage.getItem("wisper_custom_model") || "");
     setProvider((localStorage.getItem("wisper_provider") as Provider) || "groq");
     setShortcut(localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space");

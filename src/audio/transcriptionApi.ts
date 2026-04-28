@@ -1,3 +1,5 @@
+export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000/v1/audio/transcriptions";
+
 export interface TranscriptionConfig {
   apiUrl: string;
   apiKey: string;
@@ -22,7 +24,7 @@ export function getTranscriptionConfig(): TranscriptionConfig {
   } else {
     return {
       apiKey: localStorage.getItem("wisper_custom_key") || "",
-      apiUrl: localStorage.getItem("wisper_custom_url") || "",
+      apiUrl: localStorage.getItem("wisper_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL,
       model: localStorage.getItem("wisper_custom_model") || "",
     };
   }
