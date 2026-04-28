@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
@@ -8,6 +8,8 @@ function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isStartingRef = useRef(false);   // true while startRecording() is in flight
+  const deferredStopRef = useRef(false); // stop requested before startup finished
 
   const {
     isRecording,
@@ -23,27 +25,12 @@ function RecordingBar() {
     if (fatalTranscriptionError && isRecording) handleStopRecording();
   }, [fatalTranscriptionError]);
 
-  const handleStartRecording = useCallback(async () => {
-    try {
-      setError(null);
-      const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
-      await startRecording(readyPromise);
-      if (window.electronAPI) {
-        window.electronAPI.setRecordingState(true);
-      }
-    } catch (err) {
-      playErrorSound();
-      setError(err instanceof Error ? err.message : "Failed to access microphone");
-      setTimeout(() => {
-        if (window.electronAPI) {
-          setOverlayVisible(false);
-          window.electronAPI.hideWindow();
-        }
-      }, 3500);
-    }
-  }, [startRecording, playErrorSound]);
-
   const handleStopRecording = useCallback(async () => {
+    if (isStartingRef.current) {
+      // Startup still in progress — defer; handleStartRecording will call us when ready
+      deferredStopRef.current = true;
+      return;
+    }
     if (window.electronAPI) {
       window.electronAPI.setRecordingState(false);
     }
@@ -121,6 +108,36 @@ function RecordingBar() {
       setIsTranscribing(false);
     }
   }, [stopRecording]);
+
+  const handleStartRecording = useCallback(async () => {
+    deferredStopRef.current = false;
+    isStartingRef.current = true;
+    try {
+      setError(null);
+      const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
+      await startRecording(readyPromise);
+      isStartingRef.current = false; // must be before handleStopRecording guard check
+      if (deferredStopRef.current) {
+        // Stop was requested while we were starting up — honour it now
+        handleStopRecording();
+        return;
+      }
+      if (window.electronAPI) {
+        window.electronAPI.setRecordingState(true);
+      }
+    } catch (err) {
+      playErrorSound();
+      setError(err instanceof Error ? err.message : "Failed to access microphone");
+      setTimeout(() => {
+        if (window.electronAPI) {
+          setOverlayVisible(false);
+          window.electronAPI.hideWindow();
+        }
+      }, 3500);
+    } finally {
+      isStartingRef.current = false;
+    }
+  }, [startRecording, playErrorSound, handleStopRecording]);
 
   // Listen for Electron events
   useEffect(() => {
