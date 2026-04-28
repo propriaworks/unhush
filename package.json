@@ -24,7 +24,7 @@
   "license": "MIT",
   "devDependencies": {
     "@ricky0123/vad-web": "^0.0.30",
-    "@tailwindcss/vite": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -34,7 +34,7 @@
     "electron-builder": "^26.8.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "tailwindcss": "^4.2.2",
+    "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
     "vite": "^7.3.2",
     "wait-on": "^9.0.5"
