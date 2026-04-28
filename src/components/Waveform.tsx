@@ -33,10 +33,18 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
       prevBarsRef.current = new Array(barCount).fill(2);
     }
 
+    // Coordinated gradient anchored to full canvas height — each bar reveals
+    // its slice, so the highlight band appears continuous across all bars.
+    // Appears as chrome cylinder lit from straight ahead.
+    const metalGradient = ctx.createLinearGradient(0, 0, 0, height);
+    metalGradient.addColorStop(0,    "#1a3dbe"); // shadow at top edge
+    metalGradient.addColorStop(0.35, "#2e5bff"); // primary rising
+    metalGradient.addColorStop(0.5,  "#a0b4ff"); // specular at bar centers
+    metalGradient.addColorStop(0.65, "#2e5bff"); // primary falling
+    metalGradient.addColorStop(1,    "#1a3dbe"); // shadow at bottom edge
+
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
-
-      const primaryColor = "#2e5bff";
 
       const speakingThreshold = 0.01;
       const isSpeaking = isRecording && audioLevel > speakingThreshold;
@@ -80,7 +88,7 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
         const x = startX + i * (barWidth + gap);
         const y = centerY - smoothedHeight / 2;
 
-        ctx.fillStyle = isRecording ? primaryColor : "rgba(255, 255, 255, 0.25)";
+        ctx.fillStyle = isRecording ? metalGradient : "rgba(255, 255, 255, 0.25)";
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(x, y, barWidth, smoothedHeight, 10);
