@@ -15,7 +15,8 @@
 		<meta name="robots" content="index, follow" />
 		<link rel="canonical" href="https://unhush.propriaworks.com" />
 		<link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.ico" />
-		<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.png" />
+		<link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.svg" />
+		<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.png" />
 
 		<!-- Open Graph / Facebook -->
 		<meta property="og:type" content="website" />
@@ -30,7 +31,7 @@
 		/>
 		<meta
 			property="og:image"
-			content="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.png"
+			content="https://unhush.propriaworks.com/mic_button_fullmetallic.png"
 		/>
 
 		<!-- Twitter -->
@@ -46,14 +47,7 @@
 		/>
 		<meta
 			name="twitter:image"
-			content="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.png"
-		/>
-
-		<!-- Favicon -->
-		<link rel="icon" type="image/png" href="../assets/icon.ico" />
-		<link
-			rel="apple-touch-icon"
-			href="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/icon.png"
+			content="https://unhush.propriaworks.com/mic_button_fullmetallic.png"
 		/>
 
 		<!-- Fonts -->
@@ -72,22 +66,33 @@
 				"name": "Unhush",
 				"operatingSystem": "Linux",
 				"applicationCategory": "UtilitiesApplication",
+				"applicationSubCategory": "Voice Dictation",
 				"offers": {
 					"@type": "Offer",
 					"price": "0",
 					"priceCurrency": "USD"
 				},
 				"description": "Voice input app for Linux with AI-powered transcription",
-				"author": [
-					{
-						"@type": "Person",
-						"name": "Tarak Shaw"
-					},
-					{
+				"author": {
 						"@type": "Person",
 						"name": "Justin Briggs"
+				},
+				"url": "https://unhush.propriaworks.com",
+				"publisher": {
+					"@type": "Organization",
+					"name": "Propria Works",
+					"url": "https://propriaworks.com"
+				},
+				"isBasedOn": {
+					"@type": "SoftwareApplication",
+					"name": "Wisper",
+					"applicationCategory": "UtilitiesApplication",
+					"url": "https://github.com/taraksh01/wisper",
+					"author": {
+						"@type": "Person",
+						"name": "Tarak Shaw"
 					}
-				]
+				}
 			}
 		</script>
 
@@ -101,11 +106,6 @@
 			}
 
 			:root {
-				/*
-				--primary: #e95420;
-				--primary-dark: #c73d0f;
-				--primary-light: #ff7043;
-				*/
 				--primary: #2E5BFF;
 				--primary-dark: #1A3DBE;
 				--primary-light: #6B8AFF;
@@ -119,22 +119,6 @@
 				--text-muted: rgba(255, 255, 255, 0.5);
 				--radius: 16px;
 				--radius-sm: 10px;
-/*
-				#1B3022 or #2D4739 brand greens
-
-				#2E5BFF Electric cobalt
-				#1A3DBE darker
-				#6B8AFF lighter
-        (on #12141D cool charcoal rather than warm black)
-
-				#00D084 Copper sulfide
-				#FFB000 Cyber amber
-				#FF3B30 Solar crimson
-
-				#0055FF International Cobalt
-				#008080 #00A3A3 Royal Teal
-				#6C5CE7 Electric Violet
-				*/
 			}
 
 			html {

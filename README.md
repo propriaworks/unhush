@@ -1,4 +1,4 @@
-# Unhush
+# [<img alt="Unhush" src="docs/mic_button_fullmetallic.png" width="40" height="40" align="top" style="margin-right: 8px" />](https://unhush.propriaworks.com) Unhush
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-actively--maintained-brightgreen)]()
@@ -357,6 +357,11 @@ Some aspects of Wayland and many Linux distributions have not been tested direct
 <details>
 <summary>Developer notes</summary>
 
+Run `pnpm install` to install dependencies.
+`pnpm up --latest` updates dependencies to their latest versions.
+
+Before committing check typescript with `pnpm tsc` .
+
 ### Building
 
 Cross-format building is supported with native system tools:
@@ -369,8 +374,8 @@ Cross-format building is supported with native system tools:
 
 ```bash
 # Production
-pnpm run build            # Build React app
-pnpm run package          # Create distributables for all targets supported on this host
+pnpm run build       # Build React app
+pnpm run package     # Create distributables for all targets supported on this host
 ```
 
 The `.pacman` package is built in CI using an Arch Linux container and is not cross-buildable from other distributions.
