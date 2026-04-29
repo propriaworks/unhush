@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { LLM_DEFAULT_CUSTOM_URL, LLM_DEFAULT_MODELS, LLM_DEFAULT_SYSTEM_PROMPT } from "../audio/llmApi";
+import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
 
 type Provider = "groq" | "openai" | "custom";
 type LLMProvider = "none" | "groq" | "openai" | "custom";
@@ -43,23 +44,23 @@ function Settings() {
   const [llmCustomStartCmd, setLlmCustomStartCmd] = useState("");
 
   useEffect(() => {
-    setGroqKey(localStorage.getItem("wisper_groq_key") || "");
-    setOpenaiKey(localStorage.getItem("wisper_openai_key") || "");
-    setCustomKey(localStorage.getItem("wisper_custom_key") || "");
-    setCustomUrl(localStorage.getItem("wisper_custom_url") || "http://localhost:8000/v1/audio/transcriptions");
-    setCustomModel(localStorage.getItem("wisper_custom_model") || "");
-    setProvider((localStorage.getItem("wisper_provider") as Provider) || "groq");
-    setShortcut(localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space");
-    setOutputMethod((localStorage.getItem("wisper_output_method") as OutputMethod) || "paste");
-    setLlmProvider((localStorage.getItem("wisper_llm_provider") as LLMProvider) || "none");
-    setLlmModelGroq(localStorage.getItem("wisper_llm_model_groq") || LLM_DEFAULT_MODELS.groq);
-    setLlmModelOpenai(localStorage.getItem("wisper_llm_model_openai") || LLM_DEFAULT_MODELS.openai);
-    setLlmModelCustom(localStorage.getItem("wisper_llm_model_custom") || "");
-    setLlmCustomUrl(localStorage.getItem("wisper_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL);
-    setLlmCustomKey(localStorage.getItem("wisper_llm_custom_key") || "");
-    setLlmSystemPrompt(localStorage.getItem("wisper_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT);
-    setCustomStartCmd(localStorage.getItem("wisper_custom_start_cmd") || "");
-    setLlmCustomStartCmd(localStorage.getItem("wisper_llm_custom_start_cmd") || "");
+    setGroqKey(localStorage.getItem("unhush_groq_key") || "");
+    setOpenaiKey(localStorage.getItem("unhush_openai_key") || "");
+    setCustomKey(localStorage.getItem("unhush_custom_key") || "");
+    setCustomUrl(localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL);
+    setCustomModel(localStorage.getItem("unhush_custom_model") || "");
+    setProvider((localStorage.getItem("unhush_provider") as Provider) || "groq");
+    setShortcut(localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space");
+    setOutputMethod((localStorage.getItem("unhush_output_method") as OutputMethod) || "paste");
+    setLlmProvider((localStorage.getItem("unhush_llm_provider") as LLMProvider) || "none");
+    setLlmModelGroq(localStorage.getItem("unhush_llm_model_groq") || LLM_DEFAULT_MODELS.groq);
+    setLlmModelOpenai(localStorage.getItem("unhush_llm_model_openai") || LLM_DEFAULT_MODELS.openai);
+    setLlmModelCustom(localStorage.getItem("unhush_llm_model_custom") || "");
+    setLlmCustomUrl(localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL);
+    setLlmCustomKey(localStorage.getItem("unhush_llm_custom_key") || "");
+    setLlmSystemPrompt(localStorage.getItem("unhush_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT);
+    setCustomStartCmd(localStorage.getItem("unhush_custom_start_cmd") || "");
+    setLlmCustomStartCmd(localStorage.getItem("unhush_llm_custom_start_cmd") || "");
     window.electronAPI?.getShortcutMode().then(setShortcutMode);
 
     const handleNavigateTab = (_event: unknown, newTab: string) => {
@@ -73,7 +74,7 @@ function Settings() {
 
   const currentKey = provider === "groq" ? groqKey : provider === "openai" ? openaiKey : customKey;
   const setCurrentKey = provider === "groq" ? setGroqKey : provider === "openai" ? setOpenaiKey : setCustomKey;
-  const currentKeyStorageKey = provider === "groq" ? "wisper_groq_key" : provider === "openai" ? "wisper_openai_key" : "wisper_custom_key";
+  const currentKeyStorageKey = provider === "groq" ? "unhush_groq_key" : provider === "openai" ? "unhush_openai_key" : "unhush_custom_key";
 
   const currentLlmModel =
     llmProvider === "groq" ? llmModelGroq :
@@ -83,7 +84,7 @@ function Settings() {
     llmProvider === "groq" ? setLlmModelGroq :
     llmProvider === "openai" ? setLlmModelOpenai :
     llmProvider === "custom" ? setLlmModelCustom : (() => {});
-  const currentLlmModelStorageKey = `wisper_llm_model_${llmProvider}`;
+  const currentLlmModelStorageKey = `unhush_llm_model_${llmProvider}`;
 
   // Helper: update React state + persist to localStorage in one step
   const persist = (setter: (v: string) => void, key: string) =>
@@ -94,22 +95,22 @@ function Settings() {
 
   const handleProviderChange = (newProvider: Provider) => {
     setProvider(newProvider);
-    localStorage.setItem("wisper_provider", newProvider);
+    localStorage.setItem("unhush_provider", newProvider);
   };
 
   const handleLlmProviderChange = (newProvider: LLMProvider) => {
     setLlmProvider(newProvider);
-    localStorage.setItem("wisper_llm_provider", newProvider);
+    localStorage.setItem("unhush_llm_provider", newProvider);
   };
 
   const handleOutputMethodChange = (method: OutputMethod) => {
     setOutputMethod(method);
-    localStorage.setItem("wisper_output_method", method);
+    localStorage.setItem("unhush_output_method", method);
   };
 
   const handleShortcutChange = (newShortcut: string) => {
     setShortcut(newShortcut);
-    localStorage.setItem("wisper_shortcut", newShortcut);
+    localStorage.setItem("unhush_shortcut", newShortcut);
     window.electronAPI?.updateShortcut(newShortcut);
   };
 
@@ -123,8 +124,8 @@ function Settings() {
             </svg>
           </div>
           <div className="text-left">
-            <h1 className="text-base font-semibold">Wisper</h1>
-            <p className="text-white/50 text-xs">Voice dictation for Linux</p>
+            <h1 className="text-base font-semibold">Unhush</h1>
+            <p className="text-white/50 text-xs">Voice input for Linux</p>
           </div>
         </div>
 
@@ -225,7 +226,7 @@ function Settings() {
                     <input
                       type="text"
                       value={customUrl}
-                      onChange={persist(setCustomUrl, "wisper_custom_url")}
+                      onChange={persist(setCustomUrl, "unhush_custom_url")}
                       placeholder="https://localhost:8000/v1/audio/transcriptions"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -235,7 +236,7 @@ function Settings() {
                     <input
                       type="text"
                       value={customModel}
-                      onChange={persist(setCustomModel, "wisper_custom_model")}
+                      onChange={persist(setCustomModel, "unhush_custom_model")}
                       placeholder="Systran/faster-whisper-large-v3"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -247,7 +248,7 @@ function Settings() {
                     <input
                       type="text"
                       value={customStartCmd}
-                      onChange={persist(setCustomStartCmd, "wisper_custom_start_cmd")}
+                      onChange={persist(setCustomStartCmd, "unhush_custom_start_cmd")}
                       placeholder="docker compose -f speaches-compose.yaml up --detach"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -371,7 +372,7 @@ function Settings() {
                         <input
                           type="text"
                           value={llmCustomUrl}
-                          onChange={persist(setLlmCustomUrl, "wisper_llm_custom_url")}
+                          onChange={persist(setLlmCustomUrl, "unhush_llm_custom_url")}
                           placeholder="http://localhost:11434/v1/chat/completions"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
@@ -381,7 +382,7 @@ function Settings() {
                         <input
                           type="password"
                           value={llmCustomKey}
-                          onChange={persist(setLlmCustomKey, "wisper_llm_custom_key")}
+                          onChange={persist(setLlmCustomKey, "unhush_llm_custom_key")}
                           placeholder="Bearer token (if required)"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
@@ -393,7 +394,7 @@ function Settings() {
                         <input
                           type="text"
                           value={llmCustomStartCmd}
-                          onChange={persist(setLlmCustomStartCmd, "wisper_llm_custom_start_cmd")}
+                          onChange={persist(setLlmCustomStartCmd, "unhush_llm_custom_start_cmd")}
                           placeholder="ollama serve"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
@@ -410,7 +411,7 @@ function Settings() {
                 <label className="block text-white/70 text-xs font-medium mb-2">System Prompt</label>
                 <textarea
                   value={llmSystemPrompt}
-                  onChange={persist(setLlmSystemPrompt, "wisper_llm_system_prompt")}
+                  onChange={persist(setLlmSystemPrompt, "unhush_llm_system_prompt")}
                   rows={4}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500 resize-y"
                 />

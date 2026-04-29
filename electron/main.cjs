@@ -24,12 +24,19 @@ let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 
 const isDev = !app.isPackaged;
-const appIcon = path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
+const appIcon = path.join(__dirname, "../assets/icon.png"); //path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
 
-const LOG_FILE = '/tmp/wisper.log';
+let logFile = null;
 function log(level, message) {
-  const line = `[${new Date().toISOString()}] ${level.toUpperCase()}: ${message}\n`;
-  fs.appendFileSync(LOG_FILE, line);
+  if (!logFile) {
+    // shouldn't happen — log() is only called after app is ready
+    console.error(`[pre-ready log] ${level.toUpperCase()}: ${message}`);
+    return;
+  }
+  const now = new Date();
+  const localISO = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1);
+  const line = `[${localISO}] ${level.toUpperCase()}: ${message}\n`;
+  fs.appendFileSync(logFile, line);
   if (isDev) console.log(line.trimEnd());
 }
 waylandShortcut.init(log);
@@ -174,7 +181,7 @@ function createWindow(offsetFromBottom) {
     try {
       const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
       for (const [key, value] of Object.entries(cfg)) {
-        const lsKey = `wisper_${key}`;
+        const lsKey = `unhush_${key}`;
         const lsValue = typeof value === "string" ? value : JSON.stringify(value);
         mainWindow.webContents.executeJavaScript(
           `localStorage.setItem(${JSON.stringify(lsKey)}, ${JSON.stringify(lsValue)})`
@@ -210,7 +217,7 @@ function createSettingsWindow(tab = null) {
       sandbox: false,
     },
     icon: appIcon,
-    title: "Wisper Settings",
+    title: "Unhush Settings",
   });
 
   if (isDev) {
@@ -238,7 +245,7 @@ function createTray() {
   const trayIcon = icon.resize({ width: 22, height: 22 });
   tray = new Tray(trayIcon);
 
-  tray.setToolTip("Wisper - Voice Dictation");
+  tray.setToolTip("Unhush - Voice Dictation");
   updateTrayMenu();
 
   tray.on("click", () => {
@@ -316,13 +323,13 @@ ipcMain.handle("output-text", async (event, text, method) => {
         break;
       case "type": {
         // Use a random temp filename to prevent symlink race attacks on a predictable path
-        const tempFile = path.join(os.tmpdir(), `wisper-${crypto.randomBytes(8).toString('hex')}.txt`);
+        const tempFile = path.join(os.tmpdir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
         try {
           fs.writeFileSync(tempFile, text);
           await new Promise(resolve => setTimeout(resolve, 250));
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execSync(`ydotool type --key-delay 15 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore' });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }
@@ -407,7 +414,7 @@ function checkUinputAccess() {
     title: "Setup needed for ydotool",
     message: "/dev/uinput is not accessible",
     detail:
-      "Wisper uses ydotool to paste text, which requires\nwrite access to /dev/uinput.\n\n" +
+      "Unhush uses ydotool to paste text, which requires\nwrite access to /dev/uinput.\n\n" +
       "To give permission, run these two commands in a\nterminal (click 'Copy commands' to copy them):\n\n" +
       `~~~~\n${udevCmd}\n\n` +
       `${reloadCmd}\n~~~~\n\n` +
@@ -425,11 +432,11 @@ function checkUinputAccess() {
 }
 
 // Single-instance toggle: on Wayland without portal support (GNOME < 48, wlroots compositors),
-// the global hotkey is a manual desktop env. keyboard shortcut that simply re-launches Wisper.
+// the global hotkey is a manual desktop env. keyboard shortcut that simply re-launches Unhush.
 // The new instance fails to acquire the lock, logs the toggle, and quits immediately.
 // The running instance receives "second-instance" and toggles recording.
 // On X11 and portal-capable Wayland (KDE, GNOME 48+) this path is not used for the hotkey,
-// but re-running Wisper manually will still toggle recording as a convenient fallback.
+// but re-running Unhush manually will still toggle recording as a convenient fallback.
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -445,6 +452,10 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    const logDir = app.getPath('logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logFile = path.join(logDir, 'unhush.log');
+
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
@@ -488,9 +499,9 @@ ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, 
   try {
     let extension, filePath;
     if (subdir && filename) {
-      // New style: save to /tmp/wisper-debug/{subdir}/{filename}
+      // New style: save to /tmp/unhush-debug/{subdir}/{filename}
       // Validate that both subdir and filename stay within the debug root (prevent path traversal)
-      const BASE_DEBUG_DIR = "/tmp/wisper-debug";
+      const BASE_DEBUG_DIR = "/tmp/unhush-debug";
       const debugDir = path.resolve(path.join(BASE_DEBUG_DIR, subdir));
       if (!debugDir.startsWith(BASE_DEBUG_DIR + path.sep) && debugDir !== BASE_DEBUG_DIR)
         throw new Error("Path traversal attempt in subdir");
@@ -499,8 +510,9 @@ ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, 
     } else {
       // Legacy style: auto-generate filename from timestamp
       extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const debugDir = "/tmp/wisper-debug";
+      const now = new Date();
+      const timestamp = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1).replace(/[:.]/g, "-");
+      const debugDir = "/tmp/unhush-debug";
       fs.mkdirSync(debugDir, { recursive: true });
       filePath = path.join(debugDir, `recording-${timestamp}.${extension}`);
     }

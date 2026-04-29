@@ -62,7 +62,7 @@ function electronToXkb(shortcut) {
   return mods.join('') + key;
 }
 
-const GNOME_BINDING_PATH = '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wisper/';
+const GNOME_BINDING_PATH = '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/unhush/';
 const GNOME_CUSTOM_SCHEMA = `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${GNOME_BINDING_PATH}`;
 const GNOME_MEDIA_SCHEMA = 'org.gnome.settings-daemon.plugins.media-keys';
 
@@ -85,13 +85,13 @@ function setupGnomeShortcut(shortcut, execPath) {
   const flagFile = path.join(app.getPath('userData'), '.wayland-gnome-configured');
   const xkbBinding = electronToXkb(shortcut);
   try {
-    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'name', 'Wisper Toggle');
+    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'name', 'Unhush Toggle');
     gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'command', execPath);
     gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'binding', xkbBinding);
 
     // Add our path to the keybindings list if not already present
     const existing = gsettingsRun('get', GNOME_MEDIA_SCHEMA, 'custom-keybindings');
-    if (!existing.includes('wisper')) {
+    if (!existing.includes('unhush')) {
       const paths = existing === '@as []' ? [] :
         existing.slice(1, -1).split(',').map(p => p.trim().replace(/'/g, '')).filter(Boolean);
       paths.push(GNOME_BINDING_PATH);
@@ -151,7 +151,7 @@ function check(shortcut) {
 
 // Returns how the global shortcut is managed on the current platform:
 //   'native'   — globalShortcut works directly (X11, KDE, GNOME 48+)
-//   'gsettings' — managed via GNOME custom keybindings (GNOME < 48); Wisper keeps it in sync
+//   'gsettings' — managed via GNOME custom keybindings (GNOME < 48); Unhush keeps it in sync
 //   'manual'   — user must configure their compositor manually (wlroots etc.)
 function shortcutMode() {
   if (!needsFallback()) return 'native';

@@ -191,9 +191,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       streamSourceRef.current = source;
 
       // Check if debug audio saving is enabled
-      const debugAudio = localStorage.getItem("wisper_debug_audio") === "true";
+      const debugAudio = localStorage.getItem("unhush_debug_audio") === "true";
       if (debugAudio) {
-        debugSessionRef.current = new Date().toISOString().replace(/[:.]/g, "-");
+        const now = new Date();
+        // shift epoch by local offset so toISOString() prints local time digits (not UTC)
+        const localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1);
+        debugSessionRef.current = localISO.replace(/[:.]/g, "-");
       } else {
         debugSessionRef.current = null;
       }

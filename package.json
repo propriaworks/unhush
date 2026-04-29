@@ -1,9 +1,9 @@
 {
-  "name": "wisper",
-  "version": "3.0.1",
+  "name": "unhush",
+  "version": "3.0.2",
   "description": "Voice input for Linux",
   "main": "electron/main.cjs",
-  "homepage": "https://github.com/jtbr/wisper",
+  "homepage": "https://unhush.propriaworks.com",
   "type": "module",
   "scripts": {
     "copy-vad-assets": "bash scripts/copy-vad-assets.sh",
@@ -40,8 +40,8 @@
     "wait-on": "^9.0.5"
   },
   "build": {
-    "appId": "com.wisper.voice",
-    "productName": "Wisper",
+    "appId": "com.propriaworks.unhush",
+    "productName": "Unhush",
     "linux": {
       "target": [
         "AppImage",

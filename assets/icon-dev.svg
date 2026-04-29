@@ -12,9 +12,10 @@
     </filter>
   </defs>
   
-  <!-- Dev Blue Background Circle -->
+  <!-- Main Container with Shadow -->
   <g filter="url(#shadow)">
-    <circle cx="256" cy="256" r="240" fill="#2196F3"/>
+    <!-- Ubuntu Orange Background Circle -->
+    <circle cx="256" cy="256" r="240" fill="#E95420"/>
   </g>
   
   <!-- Microphone Glyph -->
