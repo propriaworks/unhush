@@ -65,7 +65,7 @@ function RecordingBar() {
               finalTranscript = llmOutput!;
             }
           }
-          if (localStorage.getItem("wisper_debug_audio") === "true") {
+          if (localStorage.getItem("unhush_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
                 model: llmConfig.model,
@@ -88,7 +88,7 @@ function RecordingBar() {
         }
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
-        const outputMethod = (localStorage.getItem("wisper_output_method") || "paste") as OutputMethod;
+        const outputMethod = (localStorage.getItem("unhush_output_method") || "paste") as OutputMethod;
         window.electronAPI.outputText(finalTranscript, outputMethod);
       } else if (window.electronAPI) {
         setOverlayVisible(false);
@@ -152,7 +152,7 @@ function RecordingBar() {
       });
 
       const savedShortcut =
-        localStorage.getItem("wisper_shortcut") || "Ctrl+Alt+Space";
+        localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space";
       window.electronAPI.updateShortcut(savedShortcut);
 
       return () => {

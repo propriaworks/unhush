@@ -7,31 +7,31 @@ export interface TranscriptionConfig {
 }
 
 export function getTranscriptionConfig(): TranscriptionConfig {
-  const provider = localStorage.getItem("wisper_provider") || "groq";
+  const provider = localStorage.getItem("unhush_provider") || "groq";
 
   if (provider === "groq") {
     return {
-      apiKey: localStorage.getItem("wisper_groq_key") || "",
+      apiKey: localStorage.getItem("unhush_groq_key") || "",
       apiUrl: "https://api.groq.com/openai/v1/audio/transcriptions",
       model: "whisper-large-v3-turbo",
     };
   } else if (provider === "openai") {
     return {
-      apiKey: localStorage.getItem("wisper_openai_key") || "",
+      apiKey: localStorage.getItem("unhush_openai_key") || "",
       apiUrl: "https://api.openai.com/v1/audio/transcriptions",
       model: "whisper-1",
     };
   } else {
     return {
-      apiKey: localStorage.getItem("wisper_custom_key") || "",
-      apiUrl: localStorage.getItem("wisper_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL,
-      model: localStorage.getItem("wisper_custom_model") || "",
+      apiKey: localStorage.getItem("unhush_custom_key") || "",
+      apiUrl: localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL,
+      model: localStorage.getItem("unhush_custom_model") || "",
     };
   }
 }
 
 export function validateTranscriptionConfig(config: TranscriptionConfig): string | null {
-  const provider = localStorage.getItem("wisper_provider") || "groq";
+  const provider = localStorage.getItem("unhush_provider") || "groq";
 
   if (provider === "custom" && !(config.apiUrl && config.model)) {
     return "API URL or model is unset.\nOpen Settings from tray.";
@@ -45,7 +45,7 @@ export async function transcribeAudioBlob(
   audioBlob: Blob,
   config: TranscriptionConfig,
 ): Promise<string> {
-  const provider = localStorage.getItem("wisper_provider") || "groq";
+  const provider = localStorage.getItem("unhush_provider") || "groq";
   const formData = new FormData();
 
   // Determine file extension from blob type

@@ -183,33 +183,33 @@ interface ServiceInfo {
 }
 
 export async function ensureCustomServices(log: LogFn): Promise<void> {
-  const transcriptionProvider = localStorage.getItem("wisper_provider") || "groq";
-  const llmProvider = localStorage.getItem("wisper_llm_provider") || "none";
+  const transcriptionProvider = localStorage.getItem("unhush_provider") || "groq";
+  const llmProvider = localStorage.getItem("unhush_llm_provider") || "none";
 
   const services: ServiceInfo[] = [];
 
   if (transcriptionProvider === "custom") {
-    const url = localStorage.getItem("wisper_custom_url") || "";
+    const url = localStorage.getItem("unhush_custom_url") || "";
     if (url) {
       services.push({
         kind: "transcription",
         baseUrl: getBaseUrl(url),
-        apiKey: localStorage.getItem("wisper_custom_key") || "",
-        model: localStorage.getItem("wisper_custom_model") || "",
-        startCommand: localStorage.getItem("wisper_custom_start_cmd") || "",
+        apiKey: localStorage.getItem("unhush_custom_key") || "",
+        model: localStorage.getItem("unhush_custom_model") || "",
+        startCommand: localStorage.getItem("unhush_custom_start_cmd") || "",
       });
     }
   }
 
   if (llmProvider === "custom") {
-    const url = localStorage.getItem("wisper_llm_custom_url") || "";
+    const url = localStorage.getItem("unhush_llm_custom_url") || "";
     if (url) {
       services.push({
         kind: "llm",
         baseUrl: getBaseUrl(url),
-        apiKey: localStorage.getItem("wisper_llm_custom_key") || "",
-        model: localStorage.getItem("wisper_llm_model_custom") || "",
-        startCommand: localStorage.getItem("wisper_llm_custom_start_cmd") || "",
+        apiKey: localStorage.getItem("unhush_llm_custom_key") || "",
+        model: localStorage.getItem("unhush_llm_model_custom") || "",
+        startCommand: localStorage.getItem("unhush_llm_custom_start_cmd") || "",
       });
     }
   }
@@ -274,8 +274,8 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
     const intervalKey =
       service.kind === "transcription"
-        ? "wisper_warmup_interval_sec"
-        : "wisper_llm_warmup_interval_sec";
+        ? "unhush_warmup_interval_sec"
+        : "unhush_llm_warmup_interval_sec";
     const intervalMs =
       parseInt(localStorage.getItem(intervalKey) || "300", 10) * 1000;
 

@@ -47,33 +47,33 @@ export const LLM_FINAL_INSTRUCTIONS = // placed after the xml-enclosed transcrip
   'Output the cleaned transcript only. No commentary, no explanations, no preamble.'
 
 export function getLLMConfig(): LLMConfig | null {
-  const provider = (localStorage.getItem("wisper_llm_provider") || "none") as LLMProvider;
+  const provider = (localStorage.getItem("unhush_llm_provider") || "none") as LLMProvider;
   if (provider === "none") return null;
 
   const getApiKey = () => {
-    if (provider === "groq") return localStorage.getItem("wisper_groq_key") || "";
-    if (provider === "openai") return localStorage.getItem("wisper_openai_key") || "";
-    return localStorage.getItem("wisper_llm_custom_key") || "";
+    if (provider === "groq") return localStorage.getItem("unhush_groq_key") || "";
+    if (provider === "openai") return localStorage.getItem("unhush_openai_key") || "";
+    return localStorage.getItem("unhush_llm_custom_key") || "";
   };
 
   const getApiUrl = () => {
     if (provider === "groq") return "https://api.groq.com/openai/v1/chat/completions";
     if (provider === "openai") return "https://api.openai.com/v1/chat/completions";
-    return localStorage.getItem("wisper_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL;
+    return localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL;
   };
 
   const getModel = () => {
-    const stored = localStorage.getItem(`wisper_llm_model_${provider}`);
+    const stored = localStorage.getItem(`unhush_llm_model_${provider}`);
     if (stored) return stored;
     if (provider === "groq" || provider === "openai") return LLM_DEFAULT_MODELS[provider];
     return "";
   };
 
   const systemPrompt =
-    localStorage.getItem("wisper_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT;
+    localStorage.getItem("unhush_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT;
 
   const finalInstructions =
-    localStorage.getItem("wisper_llm_final_instructions") || LLM_FINAL_INSTRUCTIONS;
+    localStorage.getItem("unhush_llm_final_instructions") || LLM_FINAL_INSTRUCTIONS;
 
   return {
     provider,
@@ -82,8 +82,8 @@ export function getLLMConfig(): LLMConfig | null {
     model: getModel(),
     systemPrompt,
     finalInstructions,
-    lengthMultiplier: parseFloat(localStorage.getItem("wisper_llm_length_multiplier") || "1.1"),
-    lengthFloor: parseInt(localStorage.getItem("wisper_llm_excess_length_floor") || "20", 10),
+    lengthMultiplier: parseFloat(localStorage.getItem("unhush_llm_length_multiplier") || "1.1"),
+    lengthFloor: parseInt(localStorage.getItem("unhush_llm_excess_length_floor") || "20", 10),
   };
 }
 

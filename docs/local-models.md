@@ -1,10 +1,10 @@
 ---
-title: Using Local Models — Wisper
+title: Using Local Models — Unhush
 ---
 
-# Using Local Models with Wisper
+# Using Local Models with Unhush
 
-Running Wisper entirely locally gives you:
+Running Unhush entirely locally gives you:
 
 - **Complete privacy** — audio never leaves your machine
 - **No API costs** — no usage fees or rate limits
@@ -16,7 +16,7 @@ Both the transcription (speech-to-text) and LLM formatting steps can be run loca
 
 ## Local Transcription — speaches
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Wisper and need not be configured.
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
 
 ### Speaches Setup
 
@@ -64,10 +64,10 @@ curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-large-v3
 SPEACHES_BASE_URL="http://localhost:8000" uvx speaches-cli model download Systran/faster-whisper-large-v3
 ```
 
-The download may take a few minutes. After that, Wisper can start speaches automatically via the Start Command (see below) — you won't need to run speaches manually again.
+The download may take a few minutes. After that, Unhush can start speaches automatically via the Start Command (see below) — you won't need to run speaches manually again.
 
 
-### Wisper settings (Transcription tab)
+### Unhush settings (Transcription tab)
 
 | Setting | Value |
 |---------|-------|
@@ -76,7 +76,7 @@ The download may take a few minutes. After that, Wisper can start speaches autom
 | Model name | Exact model name as downloaded (e.g. `Systran/faster-whisper-large-v3`) |
 | Start Command | *(optional)* eg: `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` |
 
-Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above). Docker Compose caches the repo locally after the first run, so this is fast and works offline after that. Wisper runs the command automatically if speaches isn't up and responding when you try to record.
+Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above). Docker Compose caches the repo locally after the first run, so this is fast and works offline after that. Unhush runs the command automatically if speaches isn't up and responding when you try to record.
 
 ### Recommended models
 
@@ -108,7 +108,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.1:8b
 ```
 
-### Wisper settings (Formatting tab)
+### Unhush settings (Formatting tab)
 
 | Setting | Value |
 |---------|-------|
@@ -136,17 +136,17 @@ If neither model runs well locally, consider using a cloud provider (Groq's free
 
 ### Start Command
 
-The optional **Start Command** field (in Settings, under Custom for either provider) lets Wisper launch the server automatically. On each recording, Wisper health-checks the endpoint. If it doesn't respond and a Start Command is set, Wisper runs it and waits up to 15 seconds for the server to come up before proceeding.
+The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. On each recording, Unhush health-checks the endpoint. If it doesn't respond and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding.
 
 ### Warm-up
 
-After a server starts (or after it hasn't been used for ~5 minutes), Wisper sends a silent warm-up request to pre-load the model into GPU memory as soon as dictation begins. This reduces or even eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
+After a server starts (or after it hasn't been used for ~5 minutes), Unhush sends a silent warm-up request to pre-load the model into GPU memory as soon as dictation begins. This reduces or even eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
 
 ---
 
 ## Troubleshooting
 
-Check `/tmp/wisper.log` for detailed error messages.
+Check `~/.config/unhush/logs/unhush.log` for detailed error messages.
 
 **Server not starting**
 - Run the Start Command manually in a terminal to see its output
@@ -156,8 +156,8 @@ Check `/tmp/wisper.log` for detailed error messages.
 - The model name in Settings must match exactly what the server reports. Check via the `/v1/models` endpoint above, or look at the speaches web interface at `http://localhost:8000`, or run `ollama list` to see the models you have `pull`ed.
 
 **Slow first transcription**
-- This is expected — the model is being loaded into GPU memory. Warm-up should prevent it on subsequent recordings. Check `/tmp/wisper.log` for `warm-up` entries if it persists.
+- This is expected — the model is being loaded into GPU memory. Warm-up should prevent it on subsequent recordings. Check `~/.config/unhush/logs/unhush.log` for `warm-up` entries if it persists.
 
 **Health check or warm-up failing**
-- Check `/tmp/wisper.log` for `Health check failed` or `warm-up failed` lines
+- Check `~/.config/unhush/logs/unhush.log` for `Health check failed` or `warm-up failed` lines
 - Confirm the API URL in Settings includes the full path (e.g. `/v1/audio/transcriptions`, not just the host)

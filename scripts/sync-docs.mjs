@@ -18,7 +18,7 @@ const version     = pkg.version;
 const productName = pkg.build?.productName ?? pkg.name;
 const pkgName     = pkg.name;                              // lowercase, used in deb/rpm filenames
 const targets     = pkg.build?.linux?.target ?? ['AppImage'];
-const BASE        = `https://github.com/jtbr/wisper/releases/latest/download`;
+const BASE        = `https://github.com/propriaworks/unhush/releases/latest/download`;
 
 // Filename electron-builder produces for each target (Linux x86_64 defaults)
 function filename(target) {

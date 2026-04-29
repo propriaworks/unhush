@@ -1,4 +1,4 @@
-# Wisper Speech to Text Pipeline
+# Unhush Speech to Text Pipeline
 
 ## Overview
 
