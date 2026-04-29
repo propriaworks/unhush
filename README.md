@@ -6,7 +6,7 @@
 
 Unhush is a fast, system-wide voice input application for Linux.
 
-For the longest time, computer input has been quiet. Just keyboard and mouse. No longer. Unlock the power of your voice with Unhush, for more than 3x faster input.
+For the longest time, computer input has been quiet. Just keyboard and mouse. No longer. Unlock the power of your voice with *Unhush*, for at least 3x faster input.
 
 Unhush provides seamless speech-to-text using AI transcription, allowing you to dictate anywhere and have text delivered instantly. It offers functionality comparable to *Wispr Flow* (a commercial voice dictation app for Windows and macOS).
 
@@ -35,7 +35,8 @@ Unhush provides seamless speech-to-text using AI transcription, allowing you to 
 
 ## Installation
 
-### As a package
+<details open>
+<summary>As a system package</summary>
 
 Download the latest release from the [Releases](https://github.com/propriaworks/unhush/releases) page and install:
 
@@ -54,8 +55,10 @@ sha256sum -c SHA256SUMS.txt --ignore-missing
 The `.deb`, `.rpm`, and `.pacman` packages automatically:
 - Install ydotool as a dependency
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
+</details>
 
-### AppImage
+<details>
+<summary>AppImage</summary>
 
 Download and run the AppImage, no installation needed (after making it executable).
 
@@ -64,8 +67,10 @@ Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcri
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
 `ydotool` needs write access to `/dev/uinput`. At startup, Unhush will show a one-time dialog with setup instructions if it isn't already accessible.
+</details>
 
-### From Source
+<details>
+<summary>From Source</summary>
 
 ```bash
 # Clone the repository
@@ -87,6 +92,7 @@ Using the `ydotoold` daemon improves responsiveness and avoids the small startup
 systemctl --user daemon-reload
 systemctl --user enable --now ydotoold
 ```
+</details>
 
 ## Usage
 
@@ -94,9 +100,9 @@ systemctl --user enable --now ydotoold
 
 1. Right-click the system tray icon and select **Settings**
 2. Choose your transcription provider:
-   - **Groq**: Free, fast Whisper models (recommended)
+   - **Groq**: Free, fast Whisper models
    - **OpenAI**: Official Whisper API
-   - **Custom**: Any OpenAI transcription-API-compatible endpoint (e.g. locally-served)
+   - **Custom**: *Recommended:* Any OpenAI transcription-API-compatible endpoint (e.g. [locally-served](docs/local-models.md))
 3. Enter your API key from [Groq](https://console.groq.com/keys) or [OpenAI](https://platform.openai.com/api-keys) (optional for custom)
 4. Optionally configure a **Formatting** (LLM) provider for post-processing
 5. On the **Usability** tab, choose your **Output** method (default: **Paste**):
@@ -119,7 +125,10 @@ systemctl --user enable --now ydotoold
 
 ## Wayland Setup
 
-Global shortcut handling on X11 works seemlessly. On Wayland it depends on your desktop environment:
+Global shortcut handling on X11 works seemlessly. On Wayland it depends on your desktop environment.
+
+<details>
+<summary>Wayland Shortcut Setup</summary>
 
 | Desktop | Behaviour |
 |---|---|
@@ -137,10 +146,14 @@ If you need to configure the shortcut yourself, add a custom keyboard shortcut i
 - **Package install**: `unhush`
 - **AppImage**: `/path/to/Unhush.AppImage` (add `--no-sandbox` if Unhush fails to start)
 - **Development**: `pnpm run -C /path/to/unhushrepo electron:dev`
+</details>
 
 ## Auto-starting Unhush
 
-To have Unhush start automatically when you log in:
+<details>
+<summary>To have Unhush start up automatically</summary>
+
+This can be done in several ways:
 
 - **Package install — XDG autostart** (works on GNOME, KDE, XFCE, and most DEs):
   ```bash
@@ -170,6 +183,7 @@ To have Unhush start automatically when you log in:
   ```
 
 - **AppImage**: use Desktop Environment or systemd approaches, substituting `/path/to/Unhush.AppImage` as the command (add `--no-sandbox` if Unhush fails to start).
+</details>
 
 ## Detailed Configuration
 
@@ -195,7 +209,8 @@ After transcription, Unhush can send the raw transcript to an LLM to clean it up
 
 For the **Custom** provider, see [Using Local Models](docs/local-models.md) for setup, model recommendations, and auto-start configuration.
 
-### Settings Reference
+<details>
+<summary>Settings Reference</summary>
 
 | Setting | Where | Description |
 |---------|-------|-------------|
@@ -213,9 +228,12 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`) |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
 
-### Advanced Settings
+</details>
 
-These settings are not exposed in the UI. Set them by adding keys to `~/.config/unhush/settings.json` (create the file if it doesn't exist). Keys use the setting name without the `unhush_` prefix:
+<details>
+<summary>Advanced Settings</summary>
+
+These settings are not exposed in the UI. Set them by adding keys to `~/.config/unhush/settings.json` (create the file if it doesn't exist). Keys use the setting name without the `unhush_` prefix from the code:
 
 ```json
 {
@@ -235,11 +253,14 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 
 Settings in this file are loaded at startup and take precedence over any previously saved values.
 
+</details>
+
 ## Troubleshooting
 
 Unhush logs to `~/.config/Unhush/logs/unhush.log` (Linux). When something goes wrong, check there first.
 
-### Text not being typed / ydotool not working
+<details>
+<summary>Text not being typed / ydotool not working</summary>
 
 If you're using **Paste** (default) or **Type** output mode, Unhush depends on ydotool. Switch to **Clipboard** mode in Settings to eliminate this dependency entirely (you will need to paste the result yourself).
 
@@ -253,20 +274,26 @@ If you're using **Paste** (default) or **Type** output mode, Unhush depends on y
   sudo udevadm control --reload-rules && sudo udevadm trigger
   ```
   In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>`.
+</details>
 
-### Global shortcut not working on Wayland
+<details>
+<summary>Global shortcut not working on Wayland</summary>
 
 - **KDE / GNOME 48+**: On first launch, a system dialog should appear asking you to confirm the shortcut. If you dismissed it, restart Unhush to re-trigger it.
 - **GNOME < 48**: Unhush configures this automatically on first launch. If it failed, set it up manually in GNOME Settings → Keyboard → Custom Shortcuts (see [Manual shortcut setup](#manual-shortcut-setup)).
 - **Other compositors**: Add a custom shortcut in your compositor config that runs `unhush` (or the AppImage path).
 - Running `unhush` again from the command line always toggles recording regardless of how shortcuts are configured.
+</details>
 
-### Microphone access denied
+<details>
+<summary>Microphone access denied</summary>
 
 - Grant microphone permission in system settings
 - Check if another application has exclusive microphone access
+</details>
 
-### Transcription errors
+<details>
+<summary>Transcription errors</summary>
 
 When transcription fails, Unhush plays a buzzer sound, displays the error message in the recording pill for ~3.5 seconds, then dismisses. Nothing is typed. Common messages:
 
@@ -278,19 +305,25 @@ When transcription fails, Unhush plays a buzzer sound, displays the error messag
 | `Rate limited` | Hit the provider's rate limit — wait a moment and retry |
 | `Bad endpoint URL` | Custom URL is wrong — it must include the full path, e.g. `/v1/audio/transcriptions` |
 | `Whisper server error` | Server returned 5xx — check the server's own logs |
+</details>
 
-### Custom server: health check, warm-up, or slow first transcription
+<details>
+<summary>Custom server: health check, warm-up, or slow first transcription</summary>
 
 See [Using Local Models — Troubleshooting](docs/local-models.md#troubleshooting).
+</details>
 
-### LLM formatting not working
+<details>
+<summary>LLM formatting not working</summary>
 
 - Ensure the Formatting provider is set (not "Off") in the Formatting tab
 - For Custom: verify the API URL points to a `/v1/chat/completions` endpoint and the model name is correct
 - Check `~/.config/Unhush/logs/unhush.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
+</details>
 
-### Diagnosing transcription quality or pipeline issues
+<details>
+<summary>Diagnosing transcription quality or pipeline issues</summary>
 
 Enable debug audio to capture each recording session in detail:
 
@@ -307,13 +340,22 @@ Then after each recording, Unhush writes to `/tmp/unhush-debug/<timestamp>/`:
 | `segment-NNN.wav` | Individual VAD-segmented audio chunks sent to Whisper |
 | `transcript.txt` | Per-segment transcription with timing and latency |
 | `llm-pass.json` | LLM formatting input/output, status, and latency (if LLM enabled) |
+</details>
 
 
 ## Development
 
-This is actively maintained; your contributions and feedback are welcome.
+This is actively maintained; your contributions and feedback are most welcome.
 
 A diagram of the recording, processing, chunking, postprocessing pipeline workflow is available [here](pipeline.md).
+
+### Testing
+
+Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10), particularly with respect to the hotkey functionality.
+
+
+<details>
+<summary>Developer notes</summary>
 
 ### Building
 
@@ -333,10 +375,6 @@ pnpm run package          # Create distributables for all targets supported on t
 
 The `.pacman` package is built in CI using an Arch Linux container and is not cross-buildable from other distributions.
 
-### Testing
-
-Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/2), particularly with respect to the hotkey functionality.
-
 ### Releases
 
 Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally tag it, and push the commit along with the tag:
@@ -347,6 +385,16 @@ git tag v3.1.0 && git push origin main v3.1.0
 ```
 
 CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
+</details>
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details
+
+## Acknowledgments
+
+Unhush was based upon [wisper](https://github.com/taraksh01/wisper), but is now independently maintained.
+> The original project has had no activity since February 2026.
 
 ### Key Improvements
 
@@ -357,14 +405,6 @@ CI will be launched by github to build it, save release builds and update docs/i
 - Added LLM-based post-processing
 - Seamless installation and Wayland support
 
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details
-
-## Acknowledgments
-
-Unhush was based upon [wisper](https://github.com/taraksh01/wisper), but is now independently maintained.
-> The original project has had no activity since February 2026.
 
 ### Authors
 - Justin Briggs - [@jtbr](https://github.com/jtbr) — Current maintainer
