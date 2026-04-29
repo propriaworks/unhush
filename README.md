@@ -1,4 +1,4 @@
-# [<img alt="Unhush" src="docs/mic_button_fullmetallic.png" width="40" height="40" align="top" style="margin-right: 8px" />](https://unhush.propriaworks.com) Unhush
+# [<img alt="Unhush mic" src="docs/mic_button_sm.png" width="40" height="40" align="top" style="margin-right: 8px" />](https://unhush.propriaworks.com) Unhush
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-actively--maintained-brightgreen)]()
