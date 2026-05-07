@@ -24,7 +24,7 @@ let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 
 const isDev = !app.isPackaged;
-const appIcon = path.join(__dirname, "../assets/icon.png"); //path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
+const appIcon = path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
 
 let logFile = null;
 function log(level, message) {

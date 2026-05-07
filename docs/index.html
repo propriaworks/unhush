@@ -4,12 +4,10 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Unhush — Voice input for Linux</title>
-		<meta
-			name="description"
+		<meta	name="description"
 			content="Free your voice: Unhush enables fast, system-wide voice dictation for Linux. Output text directly at your cursor with AI-powered transcription. Works on Ubuntu, Debian, Fedora, Arch and all other Linux distributions."
 		/>
-		<meta
-			name="keywords"
+		<meta	name="keywords"
 			content="voice dictation, speech-to-text, unhush, linux, whisper, dictation, transcription, voice typing, voice input, ubuntu, debian, fedora, arch, wispr-flow, wisprflow"
 		/>
 		<meta name="robots" content="index, follow" />
@@ -21,41 +19,34 @@
 		<!-- Open Graph / Facebook -->
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="https://unhush.propriaworks.com" />
-		<meta
-			property="og:title"
+		<meta	property="og:title"
 			content="Unhush — Free your Voice"
 		/>
-		<meta
-			property="og:description"
+		<meta	property="og:description"
 			content="Unhush enables fast, system-wide voice input for Linux. Output text directly at your cursor with AI-powered transcription."
 		/>
-		<meta
-			property="og:image"
+		<meta	property="og:image"
 			content="https://unhush.propriaworks.com/mic_button_fullmetallic.png"
 		/>
 
 		<!-- Twitter -->
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:url" content="https://unhush.propriaworks.com" />
-		<meta
-			name="twitter:title"
+		<meta	name="twitter:title"
 			content="Unhush — Free your Voice"
 		/>
-		<meta
-			name="twitter:description"
+		<meta	name="twitter:description"
 			content="Unhush enables fast, system-wide voice input for Linux. Output text directly at your cursor with AI-powered transcription."
 		/>
-		<meta
-			name="twitter:image"
+		<meta	name="twitter:image"
 			content="https://unhush.propriaworks.com/mic_button_fullmetallic.png"
 		/>
 
 		<!-- Fonts -->
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link
+		<link rel="stylesheet"
 			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-			rel="stylesheet"
 		/>
 
 		<!-- JSON-LD Structured Data -->
@@ -110,6 +101,9 @@
 				--primary-dark: #1A3DBE;
 				--primary-light: #6B8AFF;
 				--primary-rgb: 46, 91, 255;
+				--btn-highlight: #9db9ff; /* #7da0ff */
+				--btn-shadow: #1c3bb3;
+				--btn-border: #1a39a8;
 				--bg-dark: #0a0a0f;
 				--bg-card: #16161f;
 				--bg-card-hover: #1e1e2a;
@@ -180,22 +174,43 @@
 			}
 
 			.logo-icon {
-				width: 36px;
-				height: 36px;
-				background: linear-gradient(
-					135deg,
-					var(--primary),
-					var(--primary-light)
-				);
+				width: 40px;
+				height: 40px;
 				border-radius: 50%;
 				display: grid;
 				place-items: center;
+
+				/* The Metallic Effect: Brushed Conic Gradient */
+				background: conic-gradient(
+					from 195deg at 50% 50%,
+					var(--primary) 0%,
+					var(--primary) 8%,
+					var(--btn-highlight) 15%,
+					var(--primary) 22%,
+					var(--primary) 30%,
+					var(--btn-shadow) 40%,
+					var(--primary) 50%,
+					var(--primary) 58%,
+					var(--btn-highlight) 65%,
+					var(--primary) 72%,
+					var(--primary) 80%,
+					var(--btn-shadow) 90%,
+					var(--primary) 100%
+				);
+
+				/* Depth: Inner bevel and outer soft shadow */
+				box-shadow:
+					inset 0 1px 1px rgba(255, 255, 255, 0.3),
+					inset 0 -1px 1px rgba(0, 0, 0, 0.4),
+					0 2px 4px rgba(0, 0, 0, 0.2);
+				border: 1px solid var(--btn-border);
 			}
 
 			.logo-icon svg {
-				width: 18px;
-				height: 18px;
+				width: 24px;
+				height: 24px;
 				fill: white;
+    		filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));
 			}
 
 			.nav-links {
