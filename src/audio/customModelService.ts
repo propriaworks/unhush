@@ -5,6 +5,7 @@ export interface ModelInfo {
   object?: string;
   created?: number;
   owned_by?: string;
+  language?: string[]; // Speaches-specific: list of supported language codes
 }
 
 export interface ModelsResponse {
@@ -22,9 +23,12 @@ let healthCheckedThisSession = false;
 const lastWarmupTime = new Map<string, number>();
 const lastWarmupModel = new Map<string, string>();
 
+// Model list cache keyed by base URL (origin)
+const modelCache = new Map<string, { models: ModelInfo[]; fetchedAt: number }>();
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function getBaseUrl(endpointUrl: string): string {
+export function getBaseUrl(endpointUrl: string): string {
   try {
     return new URL(endpointUrl).origin;
   } catch {
@@ -238,6 +242,7 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
         const models = await fetchModels(baseUrl, service.apiKey);
         const hcMs = Date.now() - hcT0;
         if (models) {
+          modelCache.set(baseUrl, { models: models.data, fetchedAt: Date.now() });
           log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s)) [${hcMs}ms]`);
           // Warn if any configured model for this URL isn't in the list
           const ids = models.data.map((m) => m.id);
@@ -295,4 +300,45 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
   // Fire warm-up in the background — caller has already been unblocked after Phase 1
   Promise.allSettled(warmupPromises);
+}
+
+// ── Model cache access ─────────────────────────────────────────────────────────
+
+export function getCachedModels(baseUrl: string): ModelInfo[] | null {
+  return modelCache.get(baseUrl)?.models ?? null;
+}
+
+/** Fetch /v1/models, update the cache, and return the list. Returns null on failure. */
+export async function refreshModels(baseUrl: string, apiKey?: string): Promise<ModelInfo[] | null> {
+  if (!baseUrl) return null;
+  const result = await fetchModels(baseUrl, apiKey);
+  if (!result) {
+    window.electronAPI?.log("warn", `refreshModels: failed to fetch models from ${baseUrl}/v1/models`);
+    return null;
+  }
+  modelCache.set(baseUrl, { models: result.data, fetchedAt: Date.now() });
+  return result.data;
+}
+
+// ── Metadata hint formatters ───────────────────────────────────────────────────
+
+/** Returns a human-readable language hint for transcription models, or null if unavailable. */
+export function formatTranscriptionHint(m: ModelInfo): string | null {
+  if (!m.language || m.language.length === 0) return null;
+  if (m.language.length === 1) return `language: ${m.language[0]}`;
+  return `${m.language.length} languages`;
+}
+
+/** Returns a coarse age string for LLM models based on the `created` unix timestamp, or null. */
+export function formatLlmHint(m: ModelInfo, now = Date.now()): string | null {
+  if (!m.created || m.created <= 0) return null;
+  const ageMs = now - m.created * 1000;
+  const days = ageMs / 86_400_000;
+  if (days < 7) return "<1 wk old";
+  const weeks = Math.round(days / 7);
+  if (weeks <= 8) return `${weeks} wk old`;
+  const months = Math.round(days / 30.44);
+  if (months <= 24) return `${months} mo old`;
+  const years = Math.round(days / 365.25);
+  return `${years} yr old`;
 }

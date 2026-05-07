@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { LLM_DEFAULT_CUSTOM_URL, LLM_DEFAULT_MODELS, LLM_DEFAULT_SYSTEM_PROMPT } from "../audio/llmApi";
 import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
+import {
+  getBaseUrl,
+  getCachedModels,
+  refreshModels,
+  formatTranscriptionHint,
+  formatLlmHint,
+  type ModelInfo,
+} from "../audio/customModelService";
+import { ModelCombobox } from "./ModelCombobox";
 
 type Provider = "groq" | "openai" | "custom";
 type LLMProvider = "none" | "groq" | "openai" | "custom";
@@ -42,6 +51,8 @@ function Settings() {
   const [llmSystemPrompt, setLlmSystemPrompt] = useState(LLM_DEFAULT_SYSTEM_PROMPT);
   const [customStartCmd, setCustomStartCmd] = useState("");
   const [llmCustomStartCmd, setLlmCustomStartCmd] = useState("");
+  const [transcriptionModels, setTranscriptionModels] = useState<ModelInfo[]>([]);
+  const [llmModels, setLlmModels] = useState<ModelInfo[]>([]);
 
   useEffect(() => {
     setGroqKey(localStorage.getItem("unhush_groq_key") || "");
@@ -61,6 +72,13 @@ function Settings() {
     setLlmSystemPrompt(localStorage.getItem("unhush_llm_system_prompt") || LLM_DEFAULT_SYSTEM_PROMPT);
     setCustomStartCmd(localStorage.getItem("unhush_custom_start_cmd") || "");
     setLlmCustomStartCmd(localStorage.getItem("unhush_llm_custom_start_cmd") || "");
+
+    // Hydrate model lists from cache (populated by ensureCustomServices on first recording)
+    const cachedT = getCachedModels(getBaseUrl(localStorage.getItem("unhush_custom_url") || ""));
+    if (cachedT) setTranscriptionModels(cachedT);
+    const cachedL = getCachedModels(getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || ""));
+    if (cachedL) setLlmModels(cachedL);
+
     window.electronAPI?.getShortcutMode().then(setShortcutMode);
 
     const handleNavigateTab = (_event: unknown, newTab: string) => {
@@ -233,12 +251,16 @@ function Settings() {
                   </div>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">Model name</label>
-                    <input
-                      type="text"
+                    <ModelCombobox
                       value={customModel}
-                      onChange={persist(setCustomModel, "unhush_custom_model")}
+                      onChange={(v) => { setCustomModel(v); localStorage.setItem("unhush_custom_model", v); }}
+                      models={transcriptionModels}
+                      formatHint={formatTranscriptionHint}
+                      onFocus={async () => {
+                        const fresh = await refreshModels(getBaseUrl(customUrl), customKey);
+                        if (fresh) setTranscriptionModels(fresh);
+                      }}
                       placeholder="Systran/faster-whisper-large-v3"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
                   </div>
                   <div>
@@ -353,17 +375,31 @@ function Settings() {
                 <>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">Language Model</label>
-                    <input
-                      type="text"
-                      value={currentLlmModel}
-                      onChange={persist(setCurrentLlmModel, currentLlmModelStorageKey)}
-                      placeholder={
-                        llmProvider === "groq" ? LLM_DEFAULT_MODELS.groq :
-                        llmProvider === "openai" ? LLM_DEFAULT_MODELS.openai :
-                        "model name"
-                      }
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
-                    />
+                    {llmProvider === "custom" ? (
+                      <ModelCombobox
+                        value={llmModelCustom}
+                        onChange={(v) => { setLlmModelCustom(v); localStorage.setItem("unhush_llm_model_custom", v); }}
+                        models={llmModels}
+                        formatHint={formatLlmHint}
+                        onFocus={async () => {
+                          const fresh = await refreshModels(getBaseUrl(llmCustomUrl), llmCustomKey);
+                          if (fresh) setLlmModels(fresh);
+                        }}
+                        placeholder="model name"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={currentLlmModel}
+                        onChange={persist(setCurrentLlmModel, currentLlmModelStorageKey)}
+                        placeholder={
+                          llmProvider === "groq" ? LLM_DEFAULT_MODELS.groq :
+                          llmProvider === "openai" ? LLM_DEFAULT_MODELS.openai :
+                          "model name"
+                        }
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                      />
+                    )}
                   </div>
                   {llmProvider === "custom" && (
                     <>
