@@ -15,6 +15,11 @@ export interface ModelsResponse {
 
 type LogFn = (level: "info" | "warn" | "error", msg: string) => void;
 
+export const PROVIDER_BASE_URLS: Record<"groq" | "openai", string> = {
+  groq: "https://api.groq.com/openai",
+  openai: "https://api.openai.com",
+};
+
 // ── Module-level state ─────────────────────────────────────────────────────────
 
 let healthCheckedThisSession = false;

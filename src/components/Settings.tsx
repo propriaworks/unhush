@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { LLM_DEFAULT_CUSTOM_URL, LLM_DEFAULT_MODELS, LLM_DEFAULT_SYSTEM_PROMPT } from "../audio/llmApi";
 import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
 import {
+  PROVIDER_BASE_URLS,
   getBaseUrl,
   getCachedModels,
   refreshModels,
@@ -103,6 +104,19 @@ function Settings() {
     llmProvider === "openai" ? setLlmModelOpenai :
     llmProvider === "custom" ? setLlmModelCustom : (() => {});
   const currentLlmModelStorageKey = `unhush_llm_model_${llmProvider}`;
+
+  const llmBaseUrl =
+    llmProvider === "groq" ? PROVIDER_BASE_URLS.groq :
+    llmProvider === "openai" ? PROVIDER_BASE_URLS.openai :
+    getBaseUrl(llmCustomUrl);
+
+  const llmApiKey =
+    llmProvider === "groq" ? groqKey :
+    llmProvider === "openai" ? openaiKey :
+    llmCustomKey;
+
+  // Clear stale model list when the user switches LLM provider
+  useEffect(() => { setLlmModels([]); }, [llmProvider]);
 
   // Helper: update React state + persist to localStorage in one step
   const persist = (setter: (v: string) => void, key: string) =>
@@ -374,32 +388,24 @@ function Settings() {
               {llmProvider !== "none" && (
                 <>
                   <div>
-                    <label className="block text-white/70 text-xs font-medium mb-1">Language Model</label>
-                    {llmProvider === "custom" ? (
-                      <ModelCombobox
-                        value={llmModelCustom}
-                        onChange={(v) => { setLlmModelCustom(v); localStorage.setItem("unhush_llm_model_custom", v); }}
-                        models={llmModels}
-                        formatHint={formatLlmHint}
-                        onFocus={async () => {
-                          const fresh = await refreshModels(getBaseUrl(llmCustomUrl), llmCustomKey);
-                          if (fresh) setLlmModels(fresh);
-                        }}
-                        placeholder="model name"
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={currentLlmModel}
-                        onChange={persist(setCurrentLlmModel, currentLlmModelStorageKey)}
-                        placeholder={
-                          llmProvider === "groq" ? LLM_DEFAULT_MODELS.groq :
-                          llmProvider === "openai" ? LLM_DEFAULT_MODELS.openai :
-                          "model name"
-                        }
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
-                      />
-                    )}
+                    <label className="block text-white/70 text-xs font-medium mb-1">
+                      Language Model{llmProvider === "custom" && <span className="text-white/40 font-normal"> (auto-populates from API endpoint)</span>}
+                    </label>
+                    <ModelCombobox
+                      value={currentLlmModel}
+                      onChange={(v) => { setCurrentLlmModel(v); localStorage.setItem(currentLlmModelStorageKey, v); }}
+                      models={llmModels}
+                      formatHint={formatLlmHint}
+                      onFocus={async () => {
+                        const fresh = await refreshModels(llmBaseUrl, llmApiKey);
+                        if (fresh) setLlmModels(fresh);
+                      }}
+                      placeholder={
+                        llmProvider === "groq" ? LLM_DEFAULT_MODELS.groq :
+                        llmProvider === "openai" ? LLM_DEFAULT_MODELS.openai :
+                        "model name"
+                      }
+                    />
                   </div>
                   {llmProvider === "custom" && (
                     <>

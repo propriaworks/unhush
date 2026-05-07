@@ -18,6 +18,9 @@ export const LLM_DEFAULT_MODELS: Record<"groq" | "openai", string> = {
 
 export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434/v1/chat/completions";
 
+import { PROVIDER_BASE_URLS } from "./customModelService";
+export { PROVIDER_BASE_URLS };
+
 export const SPLIT_POINT_MARKER = " <split_point/> ";
 
 export const LLM_DEFAULT_SYSTEM_PROMPT =
@@ -57,8 +60,8 @@ export function getLLMConfig(): LLMConfig | null {
   };
 
   const getApiUrl = () => {
-    if (provider === "groq") return "https://api.groq.com/openai/v1/chat/completions";
-    if (provider === "openai") return "https://api.openai.com/v1/chat/completions";
+    if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}/v1/chat/completions`;
+    if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}/v1/chat/completions`;
     return localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL;
   };
 
