@@ -151,7 +151,12 @@ function createWindow(offsetFromBottom) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      webSecurity: false, // disable cors checks, same-origin policy, mixed content blocking, file:// isolation, so we can load from APIs that don't send cors headers
+      // webSecurity: false is safe here because this window only ever loads our own bundled
+      // files (no user-navigable browser, no external URLs, no user-supplied HTML), so there
+      // is no vector for a malicious page to exploit the relaxed CORS/same-origin policy.
+      // It is required because local AI servers (Speaches, Ollama, etc.) don't send CORS
+      // headers — they're designed to be called from native apps, not browsers.
+      webSecurity: false, // disable cors checks, same-origin policy, mixed content blocking, file:// isolation
     },
     icon: appIcon,
   });
@@ -215,6 +220,11 @@ function createSettingsWindow(tab = null) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // webSecurity: false is safe here because this window only loads our own bundled
+      // settings page (no navigation, no external content, no user-supplied HTML), so
+      // there is no vector to exploit the relaxed policy. It is required to fetch
+      // /v1/models from local AI servers, which don't send CORS headers.
+      webSecurity: false,
     },
     icon: appIcon,
     title: "Unhush Settings",

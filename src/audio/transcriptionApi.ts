@@ -1,5 +1,7 @@
 export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000/v1/audio/transcriptions";
 
+import { PROVIDER_BASE_URLS } from "./customModelService";
+
 export interface TranscriptionConfig {
   apiUrl: string;
   apiKey: string;
@@ -12,13 +14,13 @@ export function getTranscriptionConfig(): TranscriptionConfig {
   if (provider === "groq") {
     return {
       apiKey: localStorage.getItem("unhush_groq_key") || "",
-      apiUrl: "https://api.groq.com/openai/v1/audio/transcriptions",
+      apiUrl: `${PROVIDER_BASE_URLS.groq}/v1/audio/transcriptions`,
       model: "whisper-large-v3-turbo",
     };
   } else if (provider === "openai") {
     return {
       apiKey: localStorage.getItem("unhush_openai_key") || "",
-      apiUrl: "https://api.openai.com/v1/audio/transcriptions",
+      apiUrl: `${PROVIDER_BASE_URLS.openai}/v1/audio/transcriptions`,
       model: "whisper-1",
     };
   } else {
