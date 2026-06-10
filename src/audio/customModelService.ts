@@ -31,6 +31,12 @@ const lastWarmupModel = new Map<string, string>();
 // Model list cache keyed by base URL (origin)
 const modelCache = new Map<string, { models: ModelInfo[]; fetchedAt: number }>();
 
+// Ollama detection cache — probed once per baseUrl per session
+const ollamaCache = new Map<string, boolean>();
+
+// Tracks whether the most recent custom LLM warm-up succeeded
+let llmWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 export function getBaseUrl(endpointUrl: string): string {
@@ -125,7 +131,7 @@ async function warmUpLLM(
   apiKey: string,
   model: string,
   log: LogFn,
-): Promise<void> {
+): Promise<boolean> {
   const url = `${baseUrl}/v1/chat/completions`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
@@ -139,17 +145,73 @@ async function warmUpLLM(
         max_tokens: 1,
         messages: [{ role: "user", content: "hi" }],
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(90000),
     });
     const latencyMs = Date.now() - t0;
     if (response.ok) {
       log("info", `LLM warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
+      return true;
     } else {
       log("warn", `LLM warm-up returned ${response.status} for ${baseUrl} [${latencyMs}ms]`);
+      return false;
     }
   } catch (err) {
     const latencyMs = Date.now() - t0;
     log("warn", `LLM warm-up failed for ${baseUrl} [${latencyMs}ms]: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+}
+
+/** Detects whether the server at baseUrl is Ollama by probing /api/version. Result is cached. */
+async function isOllama(baseUrl: string): Promise<boolean> {
+  if (ollamaCache.has(baseUrl)) return ollamaCache.get(baseUrl)!;
+  try {
+    const response = await fetch(`${baseUrl}/api/version`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    const result = response.ok;
+    ollamaCache.set(baseUrl, result);
+    return result;
+  } catch {
+    ollamaCache.set(baseUrl, false);
+    return false;
+  }
+}
+
+/**
+ * Refreshes the Ollama model-unload timer after a dictation.
+ *
+ * Ollama's /v1/chat/completions shim resets keep_alive to the server-level default
+ * (~5 min if not overriden) on every real request. Calling this after each LLM
+ * post-processing step sets a longer duration via the ollama-native /api/generate
+ * endpoint (empty prompt = no generation, just a timer refresh). No-ops silently
+ * for non-Ollama servers. Designed to be called fire-and-forget (void).
+ */
+export async function pinOllamaKeepAlive(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  keepAlive: string,
+  log: LogFn,
+): Promise<void> {
+  if (!keepAlive) return; // empty string disables keep-alive pinning
+  if (!(await isOllama(baseUrl))) return;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(`${baseUrl}/api/generate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive }),
+      signal: AbortSignal.timeout(90000),
+    });
+    if (response.ok) {
+      log("info", `Ollama keep_alive pinned to ${keepAlive} for ${baseUrl}`);
+    } else {
+      log("warn", `Ollama keep_alive pin returned ${response.status} for ${baseUrl}`);
+    }
+  } catch (err) {
+    log("warn", `Ollama keep_alive pin failed for ${baseUrl}: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -287,7 +349,7 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
         ? "unhush_warmup_interval_sec"
         : "unhush_llm_warmup_interval_sec";
     const intervalMs =
-      parseInt(localStorage.getItem(intervalKey) || "300", 10) * 1000;
+      parseInt(localStorage.getItem(intervalKey) || "240", 10) * 1000;
 
     const warmupKey = `${service.baseUrl}:${service.kind}`;
     const lastWarmup = lastWarmupTime.get(warmupKey) ?? 0;
@@ -299,12 +361,24 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
     if (service.kind === "transcription") {
       warmupPromises.push(warmUpTranscription(service.baseUrl, service.apiKey, service.model, log));
     } else {
-      warmupPromises.push(warmUpLLM(service.baseUrl, service.apiKey, service.model, log));
+      llmWarmupStatus = "pending";
+      warmupPromises.push(
+        warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then(
+          (ok) => { llmWarmupStatus = ok ? "ready" : "failed"; },
+        ),
+      );
     }
   }
 
   // Fire warm-up in the background — caller has already been unblocked after Phase 1
   Promise.allSettled(warmupPromises);
+}
+
+// ── LLM warmup status ──────────────────────────────────────────────────────────
+
+/** Returns the status of the most recent custom LLM warm-up request. */
+export function getLLMWarmupStatus(): "idle" | "pending" | "ready" | "failed" {
+  return llmWarmupStatus;
 }
 
 // ── Model cache access ─────────────────────────────────────────────────────────

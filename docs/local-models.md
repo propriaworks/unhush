@@ -140,7 +140,53 @@ The optional **Start Command** field (in Settings, under Custom for either provi
 
 ### Warm-up
 
-After a server starts (or after it hasn't been used for ~5 minutes), Unhush sends a silent warm-up request to pre-load the model into GPU memory as soon as dictation begins. This reduces or even eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
+After a server starts (or after it hasn't been used for ~4 minutes), Unhush sends a silent warm-up request to pre-load the model into memory as soon as dictation begins. This reduces or eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
+
+The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted.
+
+### Keeping the Ollama model resident
+
+Ollama unloads models from VRAM after 5 minutes of inactivity by default. After each dictation, Unhush automatically calls Ollama's native API to extend this timer by `llm_keep_alive` (default `"2h"`), so the model stays loaded between dictations without holding the GPU indefinitely. This can be configured via `llm_keep_alive` in `settings.json` (see [Advanced Settings](../README.md#advanced-settings)).
+
+This mechanism only applies to Ollama (auto-detected). Other local servers (llama.cpp-server, vLLM, LM Studio, LocalAI) keep models loaded for the process lifetime by default and do not need this.
+
+### Pinning models permanently (server-side)
+
+For the most reliable low-latency startup, you can configure the server itself to never unload the model:
+
+**Speaches (Docker)** — set `STT_MODEL_TTL=-1` in the container environment:
+
+```yaml
+# docker-compose.yml
+services:
+  speaches:
+    # ... other options ...
+    environment:
+      STT_MODEL_TTL: "-1"   # -1 = never unload; default is 300 (5 minutes)
+```
+
+Or pass it on the command line: `docker run -e STT_MODEL_TTL=-1 ...`
+
+**Ollama (systemd)** — add the environment variable via a drop-in override:
+
+```bash
+sudo systemctl edit ollama
+```
+
+In the editor that opens, add:
+
+```ini
+[Service]
+Environment="OLLAMA_KEEP_ALIVE=-1"
+```
+
+Then apply the change:
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+```
+
+Use `OLLAMA_KEEP_ALIVE=2h` instead of `-1` on a shared GPU — the model unloads 2 hours after last use, freeing VRAM when you're not dictating. The in-app `llm_keep_alive` setting achieves the same on a per-dictation basis; that feature can be disabled (set to `""`) if set at the service level.
 
 ---
 
