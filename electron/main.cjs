@@ -255,7 +255,8 @@ function createTray() {
   const trayIcon = icon.resize({ width: 22, height: 22 });
   tray = new Tray(trayIcon);
 
-  tray.setToolTip("Unhush - Voice Dictation");
+  const ttStr = `Unhush - Voice Input${isDev ? " (devmode)" : ""}`;
+  tray.setToolTip(ttStr);
   updateTrayMenu();
 
   tray.on("click", () => {

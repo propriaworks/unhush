@@ -245,8 +245,9 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 | Key | Description | Default |
 |-----|-------------|---------|
 | `debug_audio` | Save each recording's audio segments and transcripts to `/tmp/unhush-debug/` for inspection | `false` |
-| `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `300` |
-| `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `300` |
+| `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
+| `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
+| `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disbles this feature. Has no effect on non-Ollama servers. | `"2h"` |
 | `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |
 | `llm_excess_length_floor` | Minimum character headroom above input length regardless of multiplier | `20` |
 | `llm_final_instructions` | Instruction appended to the user message sent to the LLM, after the transcript | `"Output the cleaned transcript only. No commentary, no explanations, no preamble."` |

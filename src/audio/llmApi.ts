@@ -126,6 +126,7 @@ export async function postProcessTranscript(
         { role: "user", content: makeUserPrompt(transcript, config) },
       ],
     }),
+    signal: AbortSignal.timeout(90000),
   }).catch(() => { throw new Error(config.provider === "custom" ? "server unreachable" : "network error"); });
 
   if (!response.ok) {

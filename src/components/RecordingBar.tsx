@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
-import { ensureCustomServices } from "../audio/customModelService";
+import { ensureCustomServices, getLLMWarmupStatus, pinOllamaKeepAlive, getBaseUrl } from "../audio/customModelService";
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -43,7 +43,12 @@ function RecordingBar() {
 
       if (transcript && window.electronAPI) {
         let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
-        if (finalTranscript && llmConfig && !transcript.startsWith("[Error")) {
+        // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang
+        const llmNotReady = llmConfig?.provider === "custom" && getLLMWarmupStatus() !== "ready";
+        if (llmNotReady) {
+          window.electronAPI?.log("info", `Custom LLM warm-up not ready (${getLLMWarmupStatus()}), using raw Whisper transcript`);
+        }
+        if (finalTranscript && llmConfig && !transcript.startsWith("[Error") && !llmNotReady) {
           let llmStatus = "error";
           let llmLatencyMs: number | undefined;
           const llmResult = await postProcessTranscript(transcript, llmConfig).catch((err) => {
@@ -63,6 +68,12 @@ function RecordingBar() {
             } else {
               llmStatus = "ok";
               finalTranscript = llmOutput!;
+              // Re-pin the Ollama model unload timer; /v1 requests reset it to the server default (~5 min)
+              void pinOllamaKeepAlive(
+                getBaseUrl(llmConfig.apiUrl), llmConfig.apiKey, llmConfig.model,
+                localStorage.getItem("unhush_llm_keep_alive") ?? "2h",
+                (level, msg) => window.electronAPI?.log(level, msg),
+              );
             }
           }
           if (localStorage.getItem("unhush_debug_audio") === "true") {
