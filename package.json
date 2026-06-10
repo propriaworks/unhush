@@ -1,6 +1,6 @@
 {
   "name": "unhush",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "Voice input for Linux",
   "main": "electron/main.cjs",
   "homepage": "https://unhush.propriaworks.com",
