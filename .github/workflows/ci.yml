@@ -34,9 +34,14 @@ jobs:
         with:
           node-version: '22'
 
+      # pnpm/action-setup does not put the store at ~/.local/share/pnpm/store,
+      # so ask pnpm for the real location instead of hardcoding it
+      - name: Get pnpm store directory
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
-          path: ~/.local/share/pnpm/store
+          path: ${{ env.STORE_PATH }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-${{ runner.os }}-
 
@@ -63,9 +68,14 @@ jobs:
         with:
           node-version: '22'
 
+      # pnpm/action-setup does not put the store at ~/.local/share/pnpm/store,
+      # so ask pnpm for the real location instead of hardcoding it
+      - name: Get pnpm store directory
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
-          path: ~/.local/share/pnpm/store
+          path: ${{ env.STORE_PATH }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-${{ runner.os }}-
 
@@ -73,15 +83,17 @@ jobs:
       - name: Install cross-format build tools
         run: sudo apt-get install -y --no-install-recommends rpm fakeroot
 
-      # Electron downloads large binaries; cache them to avoid re-downloading each run
-      # Key is shared with arch-build: the Linux electron binary is identical on both runners
+      # Electron downloads large binaries; cache them to avoid re-downloading each run.
+      # Key is per-job to avoid two parallel jobs racing to reserve the same key;
+      # restore-keys still lets each job warm-start from the other's cache (the
+      # Linux electron binary is identical on both runners).
       - name: Cache Electron binary cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
-          key: electron-linux-${{ hashFiles('package.json') }}
+          key: electron-linux-${{ github.job }}-${{ hashFiles('package.json') }}
           restore-keys: electron-linux-
 
       - run: pnpm install --frozen-lockfile
@@ -116,14 +128,15 @@ jobs:
 
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
 
-      # Share the electron binary cache with the ubuntu build job (Linux binary is identical)
+      # Per-job key (no save race); restore-keys warm-starts from the ubuntu
+      # build job's cache when present (Linux electron binary is identical)
       - name: Cache Electron binary cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
-          key: electron-linux-${{ hashFiles('package.json') }}
+          key: electron-linux-${{ github.job }}-${{ hashFiles('package.json') }}
           restore-keys: electron-linux-
 
       - run: pnpm install --frozen-lockfile
