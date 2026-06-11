@@ -491,7 +491,7 @@
 			}
 
 			.demo-frame {
-				max-width: 860px;
+				max-width: 800px;
 				margin: 0 auto;
 				border-radius: var(--radius);
 				overflow: hidden;
@@ -920,10 +920,28 @@
 				transform: translateY(-5px) scale(1.01);
 				box-shadow:
 					0 20px 40px -10px rgba(0, 0, 0, 0.5),
-					0 0 30px -5px rgba(var(--primary-rgb), 0.15),
-					inset 0 0 0 1px rgba(var(--primary-rgb), 0.2);
-				border-color: rgba(var(--primary-rgb), 0.4);
+					0 0 30px rgba(var(--primary-rgb), 0.12);
+				border-color: rgba(var(--primary-rgb), 0.5);
 				background: rgba(30, 30, 42, 0.7);
+			}
+
+			/* Top-sweep highlight on hover (inspired by liberclaw card effect) */
+			.feature-card::after, .step-card::after, .download-card::after {
+				content: "";
+				position: absolute;
+				top: 0;
+				left: 0;
+				width: 100%;
+				height: 2px;
+				background: linear-gradient(90deg, transparent, var(--primary-light), transparent);
+				transform: scaleX(0);
+				transform-origin: left center;
+				transition: transform 0.5s ease;
+				pointer-events: none;
+			}
+
+			.feature-card:hover::after, .step-card:hover::after, .download-card:hover::after {
+				transform: scaleX(1);
 			}
 
 			/* Logo Pulse */
@@ -1235,7 +1253,7 @@
 						<img
 							src="https://raw.githubusercontent.com/propriaworks/unhush/main/assets/demo.gif"
 							alt="Unhush in action: recording audio and delivering transcribed text"
-							width="1280" height="720" loading="lazy"
+							width="800" height="600" loading="lazy"
 						/>
 					</div>
 				</div>

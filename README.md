@@ -153,7 +153,7 @@ If you need to configure the shortcut yourself, add a custom keyboard shortcut i
 <details>
 <summary>To have Unhush start up automatically</summary>
 
-This can be done in several ways:
+This can be done in several ways, depending partly upon how you installed:
 
 - **Package install — XDG autostart** (works on GNOME, KDE, XFCE, and most DEs):
   ```bash
@@ -199,7 +199,7 @@ For the **Custom** provider, set the full endpoint URL (e.g. `http://localhost:8
 
 ### LLM Formatting (optional)
 
-After transcription, Unhush can send the raw transcript to an LLM to clean it up: fixing punctuation, removing filler words ("um", "uh"), and correcting verbal course corrections. The system prompt is fully editable in settings.
+After transcription, Unhush can send the raw transcript to an LLM to clean it up: fixing punctuation, removing filler words ("um", "uh"), and correcting verbal course corrections. The system prompt is fully editable in Settings.
 
 | Provider | Default model | Cost | Notes |
 |----------|--------------|------|-------|
@@ -391,6 +391,10 @@ git tag v3.1.0 && git push origin main v3.1.0
 ```
 
 CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
+
+### Other details
+
+Screen recording created using `byzanz` cli.
 </details>
 
 ## License
@@ -400,7 +404,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 ## Acknowledgments
 
 Unhush was based upon [wisper](https://github.com/taraksh01/wisper), but is now independently maintained.
-> The original project has had no activity since February 2026.
+> The predecessor project has had no activity since February 2026.
 
 ### Key Improvements
 
