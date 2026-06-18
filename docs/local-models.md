@@ -6,7 +6,7 @@ title: Using Local Models — Unhush
 
 Running Unhush entirely locally gives you:
 
-- **Complete privacy** — audio never leaves your machine
+- **Complete privacy** — audio and dictation text never leave your machine
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
