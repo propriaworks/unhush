@@ -136,7 +136,9 @@ If neither model runs well locally, consider using a cloud provider (Groq's free
 
 ### Start Command
 
-The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. Unhush health-checks the endpoint before a recording when the server hasn't been reached recently — the first time, whenever it's gone unreached for `provider_restart_stale_min` minutes (default 60; see [Advanced Settings](../README.md#advanced-settings)), or immediately after you edit the Start Command. If the check fails and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding. While the server is being actively used, this check is skipped on every recording to avoid unnecessary latency.
+The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. Unhush health-checks the endpoint before a recording when the server hasn't been reached recently — the first time, whenever it's gone unreached for `provider_restart_stale_min` minutes since it was last confirmed up (default 60; see [Advanced Settings](../README.md#advanced-settings)), every 2 minutes while it stays unreachable, or immediately whenever you close Settings after changing the URL, key, model, provider, or Start Command. If the check fails and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding. While the server is being actively used, this check is skipped on every recording to avoid unnecessary latency.
+
+Because the Start Command can be re-run every couple of minutes while the server stays down, it needs to be safe to run more than once — e.g. `docker compose up` is fine since it does nothing if the container's already running, but a command that launches a second, competing instance each time it's re-run isn't.
 
 ### Warm-up
 

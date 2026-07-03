@@ -219,14 +219,14 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | API Key | Transcription tab | Provider API key |
 | API URL | Transcription tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
-| Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, whenever the server hasn't been reachable in a while (see `provider_restart_stale_min` below), or right after you edit this command |
+| Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
 | Shortcut | Usability tab | Global hotkey |
 | Formatting provider | Formatting tab | None, Groq, OpenAI, or Custom |
 | Language Model | Formatting tab | LLM model name |
 | API URL | Formatting tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | API Key | Formatting tab (Custom) | Optional bearer token |
-| Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, whenever the server hasn't been reachable in a while (see `provider_restart_stale_min` below), or right after you edit this command |
+| Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
 
 </details>

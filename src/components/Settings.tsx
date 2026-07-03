@@ -279,7 +279,7 @@ function Settings() {
                   </div>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">
-                      Start Command <span className="text-white/40">(optional; runs only on 1st recording, if needed)</span>
+                      Start Command <span className="text-white/40">(optional; may re-run every couple of minutes until the service responds)</span>
                     </label>
                     <input
                       type="text"
@@ -288,7 +288,7 @@ function Settings() {
                       placeholder="docker compose -f speaches-compose.yaml up --detach"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
-                    <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running</p>
+                    <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running. May re-run while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                   </div>
                 </>
               )}
@@ -431,7 +431,7 @@ function Settings() {
                       </div>
                       <div>
                         <label className="block text-white/70 text-xs font-medium mb-1">
-                          Start Command <span className="text-white/40">(optional; runs only on 1st recording, if needed)</span>
+                          Start Command <span className="text-white/40">(optional; may re-run every couple of minutes until the service responds)</span>
                         </label>
                         <input
                           type="text"
@@ -440,7 +440,7 @@ function Settings() {
                           placeholder="ollama serve"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
-                        <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running</p>
+                        <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running. May re-run while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                       </div>
                     </>
                   )}

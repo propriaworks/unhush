@@ -33,25 +33,42 @@ export const TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions";
 // attempt (success or failure) or a successful Phase-2 warm-up. Used to decide whether a
 // custom service looks "stale" and is worth re-probing / restarting. Counting failed
 // attempts (not just successes) keeps a permanently-broken server from being re-probed on
-// every single recording — it's retried at most once per staleness window, unless the
-// start command changes in the meantime.
+// every single recording — it's retried at most once per staleness window (or immediately,
+// via force=true, right after a Settings edit — see ensureCustomServices).
 const lastServiceContact = new Map<string, number>();
-
-// Tracks the start command we last acted on (ran, or confirmed unnecessary) per baseUrl,
-// so an edit to the command in Settings is detected and re-run even if the service was
-// contacted recently.
-const lastStartCommand = new Map<string, string>();
 
 // Keyed by "baseUrl:kind" (e.g. "http://localhost:8080:transcription")
 const lastWarmupTime = new Map<string, number>();
 const lastWarmupModel = new Map<string, string>();
 const lastWarmupOk = new Map<string, boolean>();
 
+// Most recent "is this baseUrl healthy" belief, fed by whichever phase last had fresh
+// evidence — a Phase-1 health check (keyed by baseUrl, shared across kinds) or a Phase-2
+// warm-up success (keyed by service, but only ever narrows down from "unreachable" to
+// "healthy", never the other way — a warm-up succeeding is strong evidence on its own,
+// stronger than an older Phase-1 failure). Read by Phase 2 below so a health-check failure
+// accelerates warm-up retries even if that particular warm-up hasn't been retried yet.
+const lastHealthCheckOk = new Map<string, boolean>();
+
 // A failed warm-up is retried much sooner than the (minutes-long) steady-state interval —
 // otherwise a server that comes back up quickly still gets stuck on raw-transcript fallback
 // for the rest of that interval, since the same cooldown was blocking the retry that would
 // have noticed it was back.
 const WARMUP_FAILURE_RETRY_MS = 15_000;
+
+// A failed Phase-1 health check is also retried well before the (up to 60-minute) steady-
+// state staleness window — otherwise a Start Command meant to auto-recover a crashed local
+// server would only ever get re-run once an hour. Longer than WARMUP_FAILURE_RETRY_MS
+// because this retry may itself re-launch the Start Command, which should get a real chance
+// to finish starting up before we conclude it didn't work and try again.
+const HEALTHCHECK_FAILURE_RETRY_MS = 120_000;
+
+// Serializes Phase 1 (health check + auto-start) per baseUrl, keyed by baseUrl. Two
+// overlapping ensureCustomServices() calls (e.g. a rapid recording retry racing a
+// Settings-close force=true) must never run Phase 1 — and therefore the Start Command —
+// concurrently for the same baseUrl; a second caller just awaits the first's in-flight
+// attempt instead of launching its own redundant one.
+const inFlightPhase1 = new Map<string, Promise<void>>();
 
 // Model list cache keyed by base URL (origin)
 const modelCache = new Map<string, { models: ModelInfo[]; fetchedAt: number }>();
@@ -324,6 +341,29 @@ interface ServiceInfo {
   startCommand: string;
 }
 
+// The localStorage keys that affect what ensureCustomServices() below actually does —
+// kept as one list so callers can cheaply detect "is a live probe even worth it" (e.g.
+// after the Settings window closes) without duplicating this set themselves.
+const RELEVANT_CONFIG_KEYS = [
+  "unhush_provider",
+  "unhush_custom_url",
+  "unhush_custom_key",
+  "unhush_custom_model",
+  "unhush_custom_start_cmd",
+  "unhush_llm_provider",
+  "unhush_llm_custom_url",
+  "unhush_llm_custom_key",
+  "unhush_llm_model_custom",
+  "unhush_llm_custom_start_cmd",
+];
+
+/** Snapshot of the fields ensureCustomServices() cares about, for cheaply detecting
+ * whether anything relevant changed (e.g. across a Settings window open/close) without
+ * needing a live probe just to find out. */
+export function getRelevantConfigSnapshot(): string {
+  return JSON.stringify(RELEVANT_CONFIG_KEYS.map((k) => localStorage.getItem(k)));
+}
+
 /**
  * @param force Bypass the staleness/dedup gate and always run Phase 1 (health check +
  * auto-start) for every configured service. Used after Settings closes, where the user
@@ -386,6 +426,7 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     // both transcription and LLM. Only touched for baseUrls we actually (re-)probe below;
     // baseUrls skipped as "still fresh" keep whatever warning state they already had.
     const setUnreachable = (baseUrl: string, unreachable: boolean) => {
+      lastHealthCheckOk.set(baseUrl, !unreachable);
       for (const s of services) {
         if (s.baseUrl !== baseUrl) continue;
         if (s.kind === "transcription") window.electronAPI?.setTranscriptionWarning("unreachable", unreachable);
@@ -398,60 +439,71 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     const phase1Now = Date.now();
 
     // Only probe services worth probing: never checked (covers first-run-ever, since the
-    // map starts empty), gone stale since we last checked on it, or the configured start
-    // command changed since we last acted on it. Otherwise assume the service is still up
-    // and skip the round-trip — this keeps rapid re-recordings cheap. `force` overrides all
-    // of that (see doc comment above).
+    // map starts empty), or gone stale since we last checked on it — where "stale" means a
+    // shorter cooldown (HEALTHCHECK_FAILURE_RETRY_MS) if the last attempt failed, and the
+    // long steady-state one (staleMs) if it succeeded. Otherwise assume the service is
+    // still up and skip the round-trip — this keeps rapid re-recordings cheap. A Start
+    // Command edit doesn't need its own check here: it's in RELEVANT_CONFIG_KEYS, so it
+    // already gets an immediate `force=true` probe when Settings closes.
     const dueForCheck = force
       ? [...uniqueByUrl.entries()]
-      : [...uniqueByUrl.entries()].filter(([baseUrl, service]) => {
-          const stale = phase1Now - (lastServiceContact.get(baseUrl) ?? 0) > staleMs;
-          const cmdChanged = service.startCommand !== (lastStartCommand.get(baseUrl) ?? "");
-          return stale || cmdChanged;
+      : [...uniqueByUrl.entries()].filter(([baseUrl]) => {
+          const lastOk = lastHealthCheckOk.get(baseUrl) ?? true;
+          const effectiveStaleMs = lastOk ? staleMs : HEALTHCHECK_FAILURE_RETRY_MS;
+          return phase1Now - (lastServiceContact.get(baseUrl) ?? 0) > effectiveStaleMs;
         });
 
-    // run health checks / startup commands concurrently on all due service providers
+    // Run health checks / startup commands concurrently on all due service providers — but
+    // dedupe per baseUrl via inFlightPhase1 so two overlapping ensureCustomServices() calls
+    // can never run Phase 1 (and thus the Start Command) for the same baseUrl at once; a
+    // second caller just awaits the first's attempt instead of starting its own.
     await Promise.allSettled(
-      dueForCheck.map(async ([baseUrl, service]) => {
-        const hcT0 = Date.now();
-        const models = await fetchModels(baseUrl, service.apiKey);
-        const hcMs = Date.now() - hcT0;
-        if (models) {
-          modelCache.set(baseUrl, { models: models.data, fetchedAt: Date.now() });
-          log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s)) [${hcMs}ms]`);
-          lastServiceContact.set(baseUrl, Date.now());
-          lastStartCommand.set(baseUrl, service.startCommand);
-          setUnreachable(baseUrl, false);
-          // Warn if any configured model for this URL isn't in the list
-          const ids = models.data.map((m) => m.id);
-          if (ids.length > 0) {
-            for (const s of services) {
-              if (s.baseUrl === baseUrl && s.model && !ids.includes(s.model)) {
-                log(
-                  "warn",
-                  `Model '${s.model}' not found in models from ${baseUrl} ` +
-                    `(available: ${ids.join(", ")}) — this will likely cause a downstream failure`,
-                );
+      dueForCheck.map(([baseUrl, service]) => {
+        const existing = inFlightPhase1.get(baseUrl);
+        if (existing) return existing;
+
+        const attempt = (async () => {
+          const hcT0 = Date.now();
+          const models = await fetchModels(baseUrl, service.apiKey);
+          const hcMs = Date.now() - hcT0;
+          if (models) {
+            modelCache.set(baseUrl, { models: models.data, fetchedAt: Date.now() });
+            log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s)) [${hcMs}ms]`);
+            lastServiceContact.set(baseUrl, Date.now());
+            setUnreachable(baseUrl, false);
+            // Warn if any configured model for this URL isn't in the list
+            const ids = models.data.map((m) => m.id);
+            if (ids.length > 0) {
+              for (const s of services) {
+                if (s.baseUrl === baseUrl && s.model && !ids.includes(s.model)) {
+                  log(
+                    "warn",
+                    `Model '${s.model}' not found in models from ${baseUrl} ` +
+                      `(available: ${ids.join(", ")}) — this will likely cause a downstream failure`,
+                  );
+                }
               }
             }
+          } else {
+            log(service.startCommand ? "info" : "warn", `Health check failed for ${baseUrl} [${hcMs}ms]`);
+            let recovered = false;
+            if (service.startCommand) {
+              recovered = await tryAutoStart(baseUrl, service.startCommand, log);
+              // be nice and give services another 0.1s to handle requests
+              await new Promise<void>((r) => setTimeout(r, 100));
+            }
+            setUnreachable(baseUrl, !recovered);
+            // Record the attempt even on failure, so a permanently-broken server is retried
+            // on a cooldown (HEALTHCHECK_FAILURE_RETRY_MS) instead of on every recording —
+            // and note this is timestamped from here, after the attempt (including any
+            // Start Command run) has fully finished, not from when it started.
+            lastServiceContact.set(baseUrl, Date.now());
           }
-        } else {
-          log(service.startCommand ? "info" : "warn", `Health check failed for ${baseUrl} [${hcMs}ms]`);
-          // Mark the command as acted-on regardless of outcome, so a repeatedly-failing
-          // unchanged command doesn't get re-run on every single stale check.
-          lastStartCommand.set(baseUrl, service.startCommand);
-          let recovered = false;
-          if (service.startCommand) {
-            recovered = await tryAutoStart(baseUrl, service.startCommand, log);
-            // be nice and give services another 0.1s to handle requests
-            await new Promise<void>((r) => setTimeout(r, 100));
-          }
-          setUnreachable(baseUrl, !recovered);
-          // Record the attempt even on failure (with or without a start command), so a
-          // permanently-broken server is retried on a cooldown — once per staleness
-          // window — instead of on every single recording, unless the command changes.
-          lastServiceContact.set(baseUrl, Date.now());
-        }
+        })();
+
+        const tracked = attempt.finally(() => inFlightPhase1.delete(baseUrl));
+        inFlightPhase1.set(baseUrl, tracked);
+        return tracked;
       }),
     );
   }
@@ -471,6 +523,13 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     const intervalMs =
       parseInt(localStorage.getItem(intervalKey) || "240", 10) * 1000;
 
+    // If the most recent health check found this baseUrl down, don't bother warming it up —
+    // that's just another doomed request. Phase 1 above now retries failures on its own
+    // short cooldown (HEALTHCHECK_FAILURE_RETRY_MS) and will flip this back to true — via
+    // setUnreachable() or a warm-up success below — the moment it's actually reachable
+    // again, which naturally unblocks warm-up on the next call.
+    if (!(lastHealthCheckOk.get(service.baseUrl) ?? true)) continue;
+
     const warmupKey = `${service.baseUrl}:${service.kind}`;
     const lastWarmup = lastWarmupTime.get(warmupKey) ?? 0;
     const lastOk = lastWarmupOk.get(warmupKey) ?? false;
@@ -487,7 +546,10 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
           // never looks stale even though Phase 1 only re-probes it occasionally.
           (ok) => {
             lastWarmupOk.set(warmupKey, ok);
-            if (ok) lastServiceContact.set(service.baseUrl, Date.now());
+            if (ok) {
+              lastServiceContact.set(service.baseUrl, Date.now());
+              lastHealthCheckOk.set(service.baseUrl, true);
+            }
           },
         ),
       );
@@ -497,7 +559,10 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
         warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then((ok) => {
           llmWarmupStatus = ok ? "ready" : "failed";
           lastWarmupOk.set(warmupKey, ok);
-          if (ok) lastServiceContact.set(service.baseUrl, Date.now());
+          if (ok) {
+            lastServiceContact.set(service.baseUrl, Date.now());
+            lastHealthCheckOk.set(service.baseUrl, true);
+          }
         }),
       );
     }

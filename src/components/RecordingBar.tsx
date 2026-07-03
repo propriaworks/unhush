@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
-import { ensureCustomServices, getLLMWarmupStatus, pinOllamaKeepAlive, getBaseUrl } from "../audio/customModelService";
+import { ensureCustomServices, getLLMWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 
 function RecordingBar() {
@@ -12,6 +12,7 @@ function RecordingBar() {
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
   const llmFallbackStreak = useRef(0);   // consecutive "custom LLM warm-up not ready" fallbacks
+  const lastRelevantConfigRef = useRef(""); // snapshot of provider-config fields as of the last check
 
   const {
     isRecording,
@@ -48,16 +49,24 @@ function RecordingBar() {
   // for the next recording attempt. (Live reachability is skipped at startup: it's already
   // probed lazily on the first recording, and ensureCustomServices() may spawn the
   // configured Start Command, which isn't something we want to do on every app launch.)
+  // The live probe itself is skipped unless a field ensureCustomServices() actually cares
+  // about changed — e.g. tweaking the system prompt or hotkey shouldn't trigger a network
+  // round-trip (or worse, re-run a Start Command) on every Settings close.
   // force=true: the user just edited config, so probe now even if this exact baseUrl was
   // checked (and badged as broken) moments ago — otherwise a same-session fix wouldn't
   // clear the badge until the staleness window (up to an hour) lapsed.
   const recheckAfterSettingsClose = useCallback(() => {
     checkConfigWarnings();
-    void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg), true);
+    const snapshot = getRelevantConfigSnapshot();
+    if (snapshot !== lastRelevantConfigRef.current) {
+      lastRelevantConfigRef.current = snapshot;
+      void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg), true);
+    }
   }, [checkConfigWarnings]);
 
   useEffect(() => {
     checkConfigWarnings();
+    lastRelevantConfigRef.current = getRelevantConfigSnapshot();
     window.electronAPI?.onRecheckConfig(recheckAfterSettingsClose);
     return () => window.electronAPI?.removeAllListeners("recheck-config");
   }, [checkConfigWarnings, recheckAfterSettingsClose]);
