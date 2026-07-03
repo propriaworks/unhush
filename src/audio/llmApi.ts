@@ -16,9 +16,10 @@ export const LLM_DEFAULT_MODELS: Record<"groq" | "openai", string> = {
   openai: "gpt-4.1-mini",
 };
 
-export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434/v1/chat/completions";
+// Server prefix — Settings stores just this; the /v1/... path is appended below.
+export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434";
 
-import { PROVIDER_BASE_URLS, isValidHttpUrl } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, CHAT_COMPLETIONS_PATH } from "./customModelService";
 import type { ConfigValidationError } from "./transcriptionApi";
 export { PROVIDER_BASE_URLS };
 
@@ -61,9 +62,10 @@ export function getLLMConfig(): LLMConfig | null {
   };
 
   const getApiUrl = () => {
-    if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}/v1/chat/completions`;
-    if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}/v1/chat/completions`;
-    return localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL;
+    if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}${CHAT_COMPLETIONS_PATH}`;
+    if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}${CHAT_COMPLETIONS_PATH}`;
+    const base = getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL);
+    return `${base}${CHAT_COMPLETIONS_PATH}`;
   };
 
   const getModel = () => {

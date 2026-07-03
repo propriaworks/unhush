@@ -101,8 +101,8 @@ systemctl --user enable --now ydotoold
 1. Right-click the system tray icon and select **Settings**
 2. Choose your transcription provider:
    - **Groq**: Free, fast Whisper models
-   - **OpenAI**: Official Whisper API
-   - **Custom**: *Recommended:* Any OpenAI transcription-API-compatible endpoint (e.g. [locally-served](docs/local-models.md))
+   - **OpenAI**: Official Whisper API, good if you have a subscription
+   - **Custom**: Any OpenAI transcription-API-compatible endpoint (e.g. *recommended* [locally-served](docs/local-models.md) for those who can)
 3. Enter your API key from [Groq](https://console.groq.com/keys) or [OpenAI](https://platform.openai.com/api-keys) (optional for custom)
 4. Optionally configure a **Formatting** (LLM) provider for post-processing
 5. On the **Usability** tab, choose your **Output** method (default: **Paste**):
@@ -192,11 +192,11 @@ This can be done in several ways, depending partly upon how you installed:
 
 | Provider | Model | Cost | Get API Key |
 |----------|-------|------|-------------|
-| **Groq** (Recommended) | `whisper-large-v3-turbo` | Free tier | [console.groq.com](https://console.groq.com/keys) |
+| **Groq** | `whisper-large-v3-turbo` | Free tier for most | [console.groq.com](https://console.groq.com/keys) |
 | **OpenAI** | `whisper-1` | Paid | [platform.openai.com](https://platform.openai.com/api-keys) |
 | **Custom** | Any OpenAI-compatible transcriptions endpoint | Free if local | — |
 
-For the **Custom** provider, set the full endpoint URL (e.g. `http://localhost:8000/v1/audio/transcriptions`) and the model name as the server expects it. See [Using Local Models](docs/local-models.md) for setup guides and recommended options.
+For the **Custom** provider, set the server's base URL (e.g. `http://localhost:8000`) and the model name as the server expects it. See [Using Local Models](docs/local-models.md) for setup guides and recommended configuration.
 
 ### LLM Formatting (optional)
 
@@ -206,7 +206,7 @@ After transcription, Unhush can send the raw transcript to an LLM to clean it up
 |----------|--------------|------|-------|
 | **Groq** | `llama-3.3-70b-versatile` | Free tier | Uses your Groq API key from the transcription tab |
 | **OpenAI** | `gpt-4.1-mini` | Paid | Uses your OpenAI API key from the transcription tab |
-| **Custom** | — | Free if local | Default URL: `http://localhost:11434/v1/chat/completions` ([ollama](https://ollama.com)) |
+| **Custom** | — | Free if local | Default URL: `http://localhost:11434` ([ollama](https://ollama.com)) |
 
 For the **Custom** provider, see [Using Local Models](docs/local-models.md) for setup, model recommendations, and auto-start configuration.
 
@@ -217,14 +217,14 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 |---------|-------|-------------|
 | Provider | Transcription tab | Groq, OpenAI, or Custom |
 | API Key | Transcription tab | Provider API key |
-| API URL | Transcription tab (Custom) | Full transcription endpoint URL |
+| API URL | Transcription tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
 | Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, whenever the server hasn't been reachable in a while (see `provider_restart_stale_min` below), or right after you edit this command |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
 | Shortcut | Usability tab | Global hotkey |
 | Formatting provider | Formatting tab | None, Groq, OpenAI, or Custom |
 | Language Model | Formatting tab | LLM model name |
-| API URL | Formatting tab (Custom) | Full chat completions endpoint URL |
+| API URL | Formatting tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | API Key | Formatting tab (Custom) | Optional bearer token |
 | Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, whenever the server hasn't been reachable in a while (see `provider_restart_stale_min` below), or right after you edit this command |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
@@ -306,7 +306,7 @@ When transcription fails, Unhush plays a buzzer sound, displays the error messag
 | `Network error` | No internet connection (Groq/OpenAI), or blocked by IP address |
 | `Bad API key` | API key is missing or invalid — check Settings |
 | `Rate limited` | Hit the provider's rate limit — wait a moment and retry |
-| `Bad endpoint URL` | Custom URL is wrong — it must include the full path, e.g. `/v1/audio/transcriptions` |
+| `Bad endpoint URL` | Custom URL is wrong — it should be just the server's base URL, e.g. `http://localhost:8000` (no `/v1/...` path) |
 | `Whisper server error` | Server returned 5xx — check the server's own logs |
 </details>
 
@@ -320,7 +320,7 @@ See [Using Local Models — Troubleshooting](docs/local-models.md#troubleshootin
 <summary>LLM formatting not working</summary>
 
 - Ensure the Formatting provider is set (not "Off") in the Formatting tab
-- For Custom: verify the API URL points to a `/v1/chat/completions` endpoint and the model name is correct
+- For Custom: verify the API URL is the server's base URL (not a full endpoint path) and the model name is correct
 - Check `~/.config/unhush/logs/unhush.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
 - For Custom: if the tray icon shows a **⚠ badge**, the formatter's warm-up has failed on two dictations in a row — check that the server is running and reachable at the configured API URL

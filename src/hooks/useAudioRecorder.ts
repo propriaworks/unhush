@@ -144,7 +144,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
-  const wlog = useCallback((level: "info" | "warn" | "error", message: string) => {
+  const wlog = useCallback((level: "debug" | "info" | "warn" | "error", message: string) => {
     window.electronAPI?.log(level, message);
   }, []);
 
@@ -230,8 +230,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         // onnxruntime-web silently forces single-threaded WASM (no warning, no error) when
         // the page isn't cross-origin isolated — log the actual state so a threading
         // regression is visible in unhush.log instead of only showing up as "VAD feels slow".
-        const isolated = typeof self !== "undefined" && self.crossOriginIsolated;
-        wlog("info", `VAD: crossOriginIsolated=${isolated} (threaded WASM ${isolated ? "available" : "disabled — falling back to single-threaded"})`);
+        // const isolated = typeof self !== "undefined" && self.crossOriginIsolated;
+        // wlog("debug", `VAD: crossOriginIsolated=${isolated} (threaded WASM ${isolated ? "available" : "disabled — falling back to single-threaded"})`);
+        // current dev build is known to fall back to single-threaded, but performs well enough. This could be fixable for dev but is harder for prod, so leave as-is for now.
 
         const accumulator = new SegmentAccumulator((wavBlob, segmentIndex, durationSec) => {
           whisperQueueRef.current?.enqueue(wavBlob, segmentIndex);

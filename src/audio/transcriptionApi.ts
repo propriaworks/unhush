@@ -1,6 +1,7 @@
-export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000/v1/audio/transcriptions";
+// Server prefix — Settings stores just this; the /v1/... path is appended below.
+export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000";
 
-import { PROVIDER_BASE_URLS, isValidHttpUrl } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -21,19 +22,20 @@ export function getTranscriptionConfig(): TranscriptionConfig {
   if (provider === "groq") {
     return {
       apiKey: localStorage.getItem("unhush_groq_key") || "",
-      apiUrl: `${PROVIDER_BASE_URLS.groq}/v1/audio/transcriptions`,
+      apiUrl: `${PROVIDER_BASE_URLS.groq}${TRANSCRIPTIONS_PATH}`,
       model: "whisper-large-v3-turbo",
     };
   } else if (provider === "openai") {
     return {
       apiKey: localStorage.getItem("unhush_openai_key") || "",
-      apiUrl: `${PROVIDER_BASE_URLS.openai}/v1/audio/transcriptions`,
+      apiUrl: `${PROVIDER_BASE_URLS.openai}${TRANSCRIPTIONS_PATH}`,
       model: "whisper-1",
     };
   } else {
+    const base = getBaseUrl(localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL);
     return {
       apiKey: localStorage.getItem("unhush_custom_key") || "",
-      apiUrl: localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL,
+      apiUrl: `${base}${TRANSCRIPTIONS_PATH}`,
       model: localStorage.getItem("unhush_custom_model") || "",
     };
   }

@@ -20,6 +20,13 @@ export const PROVIDER_BASE_URLS: Record<"groq" | "openai", string> = {
   openai: "https://api.openai.com",
 };
 
+// The three OpenAI-compatible paths Unhush ever appends to a base URL — defined once here
+// and reused everywhere they're needed (transcriptionApi.ts, llmApi.ts, and below), so
+// there's a single place to change if a provider ever needs a different path shape.
+export const MODELS_PATH = "/v1/models";
+export const CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
+export const TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions";
+
 // ── Module-level state ─────────────────────────────────────────────────────────
 
 // Tracks when we last checked on a service per baseUrl — either a Phase-1 health-check
@@ -57,11 +64,33 @@ let llmWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-export function getBaseUrl(endpointUrl: string): string {
+// Suffixes previously expected in the "API URL" Settings field, back when it meant "the
+// full literal endpoint" rather than "the server prefix before /v1". Longest first, since
+// endsWith() must check CHAT_COMPLETIONS_PATH before the "/v1" it also ends with.
+const API_SUFFIXES = [CHAT_COMPLETIONS_PATH, TRANSCRIPTIONS_PATH, "/v1"];
+
+/**
+ * Normalizes a custom-provider URL down to its server prefix (e.g.
+ * "http://localhost:11434") — the value every well-known endpoint (MODELS_PATH,
+ * CHAT_COMPLETIONS_PATH, TRANSCRIPTIONS_PATH, Ollama's /api/version) is built from.
+ * Trims whitespace/trailing slashes, and — for backward compatibility with values saved
+ * before the field meant "prefix" — strips a trailing /v1... suffix if one is still
+ * present. Falls back to the trimmed input unchanged if it isn't a parseable URL.
+ */
+export function getBaseUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  let stripped = trimmed;
+  for (const suffix of API_SUFFIXES) {
+    if (stripped.endsWith(suffix)) {
+      stripped = stripped.slice(0, -suffix.length);
+      break;
+    }
+  }
   try {
-    return new URL(endpointUrl).origin;
+    new URL(stripped);
+    return stripped;
   } catch {
-    return endpointUrl;
+    return trimmed;
   }
 }
 
@@ -76,12 +105,12 @@ export function isValidHttpUrl(url: string): boolean {
   }
 }
 
-/** GET {baseUrl}/v1/models — returns null on any failure. */
+/** GET {baseUrl}{MODELS_PATH} — returns null on any failure. */
 export async function fetchModels(
   baseUrl: string,
   apiKey?: string,
 ): Promise<ModelsResponse | null> {
-  const url = `${baseUrl}/v1/models`;
+  const url = `${baseUrl}${MODELS_PATH}`;
   const headers: Record<string, string> = {};
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   try {
@@ -128,7 +157,7 @@ async function warmUpTranscription(
   model: string,
   log: LogFn,
 ): Promise<boolean> {
-  const url = `${baseUrl}/v1/audio/transcriptions`;
+  const url = `${baseUrl}${TRANSCRIPTIONS_PATH}`;
   const formData = new FormData();
   formData.append("file", generateSilentWav(), "warmup.wav");
   formData.append("model", model);
@@ -164,7 +193,7 @@ async function warmUpLLM(
   model: string,
   log: LogFn,
 ): Promise<boolean> {
-  const url = `${baseUrl}/v1/chat/completions`;
+  const url = `${baseUrl}${CHAT_COMPLETIONS_PATH}`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   const t0 = Date.now();
@@ -180,13 +209,21 @@ async function warmUpLLM(
       signal: AbortSignal.timeout(90000),
     });
     const latencyMs = Date.now() - t0;
-    if (response.ok) {
-      log("info", `LLM warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
-      return true;
-    } else {
+    if (!response.ok) {
       log("warn", `LLM warm-up returned ${response.status} for ${baseUrl} [${latencyMs}ms]`);
       return false;
     }
+    // A 200 alone doesn't prove the model actually generated anything (mirrors the check
+    // postProcessTranscript does on the real call) — without it, a degenerate-but-"ok"
+    // response may (?) get reported as warm even though nothing was really loaded/generated.
+    const data = await response.json().catch(() => null);
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      log("warn", `LLM warm-up got 200 but no content for ${baseUrl} [${latencyMs}ms]`);
+      return false;
+    }
+    log("info", `LLM warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
+    return true;
   } catch (err) {
     const latencyMs = Date.now() - t0;
     log("warn", `LLM warm-up failed for ${baseUrl} [${latencyMs}ms]: ${err instanceof Error ? err.message : err}`);
@@ -287,7 +324,13 @@ interface ServiceInfo {
   startCommand: string;
 }
 
-export async function ensureCustomServices(log: LogFn): Promise<void> {
+/**
+ * @param force Bypass the staleness/dedup gate and always run Phase 1 (health check +
+ * auto-start) for every configured service. Used after Settings closes, where the user
+ * just edited config and wants an immediate answer, even if the same baseUrl was probed
+ * (and failed) moments ago and wouldn't otherwise be "due" again for up to an hour.
+ */
+export async function ensureCustomServices(log: LogFn, force = false): Promise<void> {
   const transcriptionProvider = localStorage.getItem("unhush_provider") || "groq";
   const llmProvider = localStorage.getItem("unhush_llm_provider") || "none";
 
@@ -357,12 +400,15 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
     // Only probe services worth probing: never checked (covers first-run-ever, since the
     // map starts empty), gone stale since we last checked on it, or the configured start
     // command changed since we last acted on it. Otherwise assume the service is still up
-    // and skip the round-trip — this keeps rapid re-recordings cheap.
-    const dueForCheck = [...uniqueByUrl.entries()].filter(([baseUrl, service]) => {
-      const stale = phase1Now - (lastServiceContact.get(baseUrl) ?? 0) > staleMs;
-      const cmdChanged = service.startCommand !== (lastStartCommand.get(baseUrl) ?? "");
-      return stale || cmdChanged;
-    });
+    // and skip the round-trip — this keeps rapid re-recordings cheap. `force` overrides all
+    // of that (see doc comment above).
+    const dueForCheck = force
+      ? [...uniqueByUrl.entries()]
+      : [...uniqueByUrl.entries()].filter(([baseUrl, service]) => {
+          const stale = phase1Now - (lastServiceContact.get(baseUrl) ?? 0) > staleMs;
+          const cmdChanged = service.startCommand !== (lastStartCommand.get(baseUrl) ?? "");
+          return stale || cmdChanged;
+        });
 
     // run health checks / startup commands concurrently on all due service providers
     await Promise.allSettled(
@@ -489,12 +535,12 @@ export function getCachedModels(baseUrl: string): ModelInfo[] | null {
   return modelCache.get(baseUrl)?.models ?? null;
 }
 
-/** Fetch /v1/models, update the cache, and return the list. Returns null on failure. */
+/** Fetch MODELS_PATH, update the cache, and return the list. Returns null on failure. */
 export async function refreshModels(baseUrl: string, apiKey?: string): Promise<ModelInfo[] | null> {
   if (!baseUrl) return null;
   const result = await fetchModels(baseUrl, apiKey);
   if (!result) {
-    window.electronAPI?.log("warn", `refreshModels: failed to fetch models from ${baseUrl}/v1/models`);
+    window.electronAPI?.log("warn", `refreshModels: failed to fetch models from ${baseUrl}${MODELS_PATH}`);
     return null;
   }
   modelCache.set(baseUrl, { models: result.data, fetchedAt: Date.now() });

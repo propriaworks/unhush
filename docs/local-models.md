@@ -10,13 +10,13 @@ Running Unhush entirely locally gives you:
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
-Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on and Nvidia GPU.
+Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an nVidia GPU.
 
 ---
 
 ## Local Transcription — speaches
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text model endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
 
 ### Speaches Setup
 
@@ -72,7 +72,7 @@ The download may take a few minutes. After that, Unhush can start speaches autom
 | Setting | Value |
 |---------|-------|
 | Provider | **Custom** |
-| API URL | `http://localhost:8000/v1/audio/transcriptions` |
+| API URL | `http://localhost:8000` *(this is the default)* |
 | Model name | Exact model name as downloaded (e.g. `Systran/faster-whisper-large-v3`) |
 | Start Command | *(optional)* eg: `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` |
 
@@ -113,7 +113,7 @@ ollama pull llama3.1:8b
 | Setting | Value |
 |---------|-------|
 | Provider | **Custom** |
-| API URL | `http://localhost:11434/v1/chat/completions` *(this is the default)* |
+| API URL | `http://localhost:11434` *(this is the default)* |
 | Model name | Exact name as pulled, e.g. `llama3.1:8b` or `gemma3:4b` |
 | Start Command | *(optional)* `ollama serve` |
 
@@ -206,5 +206,5 @@ Check `~/.config/unhush/logs/unhush.log` for detailed error messages.
 
 **Health check or warm-up failing**
 - Check `~/.config/unhush/logs/unhush.log` for `Health check failed` or `warm-up failed` lines
-- Confirm the API URL in Settings includes the full path (e.g. `/v1/audio/transcriptions`, not just the host)
+- Confirm the API URL in Settings is just the server's base URL (e.g. `http://localhost:8000`), without a `/v1/...` path — Unhush appends the correct path itself
 - After a warm-up fails, Unhush retries it automatically after 15s (much sooner than the normal warm-up interval), so a server that comes back up should recover within a couple of dictations, not minutes

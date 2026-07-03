@@ -254,12 +254,12 @@ function Settings() {
               {provider === "custom" && (
                 <>
                   <div>
-                    <label className="block text-white/70 text-xs font-medium mb-1">API URL</label>
+                    <label className="block text-white/70 text-xs font-medium mb-1">Server URL</label>
                     <input
                       type="text"
                       value={customUrl}
                       onChange={persist(setCustomUrl, "unhush_custom_url")}
-                      placeholder="https://localhost:8000/v1/audio/transcriptions"
+                      placeholder="http://localhost:8000"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
                   </div>
@@ -410,12 +410,12 @@ function Settings() {
                   {llmProvider === "custom" && (
                     <>
                       <div>
-                        <label className="block text-white/70 text-xs font-medium mb-1">API URL</label>
+                        <label className="block text-white/70 text-xs font-medium mb-1">Server URL</label>
                         <input
                           type="text"
                           value={llmCustomUrl}
                           onChange={persist(setLlmCustomUrl, "unhush_llm_custom_url")}
-                          placeholder="http://localhost:11434/v1/chat/completions"
+                          placeholder="http://localhost:11434"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
                       </div>

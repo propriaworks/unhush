@@ -48,9 +48,12 @@ function RecordingBar() {
   // for the next recording attempt. (Live reachability is skipped at startup: it's already
   // probed lazily on the first recording, and ensureCustomServices() may spawn the
   // configured Start Command, which isn't something we want to do on every app launch.)
+  // force=true: the user just edited config, so probe now even if this exact baseUrl was
+  // checked (and badged as broken) moments ago — otherwise a same-session fix wouldn't
+  // clear the badge until the staleness window (up to an hour) lapsed.
   const recheckAfterSettingsClose = useCallback(() => {
     checkConfigWarnings();
-    void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
+    void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg), true);
   }, [checkConfigWarnings]);
 
   useEffect(() => {
