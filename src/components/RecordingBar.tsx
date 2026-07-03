@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
-import { getLLMConfig, makeUserPrompt, postProcessTranscript, SPLIT_POINT_MARKER } from "../audio/llmApi";
+import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
 import { ensureCustomServices, getLLMWarmupStatus, pinOllamaKeepAlive, getBaseUrl } from "../audio/customModelService";
+import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -10,6 +11,7 @@ function RecordingBar() {
   const [error, setError] = useState<string | null>(null);
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
+  const llmFallbackStreak = useRef(0);   // consecutive "custom LLM warm-up not ready" fallbacks
 
   const {
     isRecording,
@@ -24,6 +26,38 @@ function RecordingBar() {
   useEffect(() => {
     if (fatalTranscriptionError && isRecording) handleStopRecording();
   }, [fatalTranscriptionError]);
+
+  // Known-bad settings (no API key, or no URL/model for a custom server) are static — no
+  // need to wait for a live probe to fail before badging them. Unlike the runtime/warmup
+  // reasons, this one is safe to both raise AND clear here, since "config" is its own
+  // independent reason key and can't clobber an unrelated active warning.
+  const checkConfigWarnings = useCallback(() => {
+    const tError = validateTranscriptionConfig(getTranscriptionConfig());
+    window.electronAPI?.setTranscriptionWarning("config", tError?.reasonKey === "config");
+    window.electronAPI?.setTranscriptionWarning("badurl", tError?.reasonKey === "badurl");
+
+    const llmConfig = getLLMConfig();
+    const lError = llmConfig && validateLLMConfig(llmConfig);
+    window.electronAPI?.setFormatterWarning("config", lError?.reasonKey === "config");
+    window.electronAPI?.setFormatterWarning("badurl", lError?.reasonKey === "badurl");
+  }, []);
+
+  // Whenever Settings closes, it may have just fixed or broken a required field, or
+  // pointed a custom provider at a URL that's well-formed but not actually responding —
+  // recheck both the static config and live reachability right away rather than waiting
+  // for the next recording attempt. (Live reachability is skipped at startup: it's already
+  // probed lazily on the first recording, and ensureCustomServices() may spawn the
+  // configured Start Command, which isn't something we want to do on every app launch.)
+  const recheckAfterSettingsClose = useCallback(() => {
+    checkConfigWarnings();
+    void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
+  }, [checkConfigWarnings]);
+
+  useEffect(() => {
+    checkConfigWarnings();
+    window.electronAPI?.onRecheckConfig(recheckAfterSettingsClose);
+    return () => window.electronAPI?.removeAllListeners("recheck-config");
+  }, [checkConfigWarnings, recheckAfterSettingsClose]);
 
   const handleStopRecording = useCallback(async () => {
     if (isStartingRef.current) {
@@ -40,13 +74,26 @@ function RecordingBar() {
     try {
       const llmConfig = getLLMConfig();
       const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
+      window.electronAPI?.setTranscriptionWarning("runtime", false);
 
       if (transcript && window.electronAPI) {
         let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
         // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang
         const llmNotReady = llmConfig?.provider === "custom" && getLLMWarmupStatus() !== "ready";
+        if (llmConfig?.provider === "custom") {
+          // Only warm-up-not-ready counts toward the streak — live call errors and
+          // over-length rejections further down are surfaced via logs, not this warning.
+          llmFallbackStreak.current = llmNotReady ? llmFallbackStreak.current + 1 : 0;
+          window.electronAPI?.setFormatterWarning("warmup", llmFallbackStreak.current >= 2);
+        } else if (llmFallbackStreak.current > 0) {
+          // User switched off the custom LLM provider — clear any stale warning.
+          llmFallbackStreak.current = 0;
+          window.electronAPI?.setFormatterWarning("warmup", false);
+        }
         if (llmNotReady) {
-          window.electronAPI?.log("info", `Custom LLM warm-up not ready (${getLLMWarmupStatus()}), using raw Whisper transcript`);
+          // Reports the last known warm-up status, not necessarily a fresh attempt from
+          // this recording — Phase 2 may have skipped re-trying if it isn't due yet.
+          window.electronAPI?.log("info", `Custom LLM not ready, last warm-up status: ${getLLMWarmupStatus()} — using raw Whisper transcript`);
         }
         if (finalTranscript && llmConfig && !transcript.startsWith("[Error") && !llmNotReady) {
           let llmStatus = "error";
@@ -109,6 +156,7 @@ function RecordingBar() {
       console.error("Transcription failed:", err);
       playErrorSound();
       setError(err instanceof Error ? err.message : "Transcription failed");
+      window.electronAPI?.setTranscriptionWarning("runtime", true);
       setTimeout(() => {
         if (window.electronAPI) {
           setOverlayVisible(false);
@@ -125,6 +173,8 @@ function RecordingBar() {
     isStartingRef.current = true;
     try {
       setError(null);
+      checkConfigWarnings();
+
       const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
       await startRecording(readyPromise);
       isStartingRef.current = false; // must be before handleStopRecording guard check
@@ -148,7 +198,7 @@ function RecordingBar() {
     } finally {
       isStartingRef.current = false;
     }
-  }, [startRecording, playErrorSound, handleStopRecording]);
+  }, [startRecording, playErrorSound, handleStopRecording, checkConfigWarnings]);
 
   // Listen for Electron events
   useEffect(() => {

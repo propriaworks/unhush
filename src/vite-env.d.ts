@@ -23,6 +23,12 @@ declare global {
       log: (level: "info" | "warn" | "error", message: string) => void;
       saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string, subdir?: string, filename?: string) => Promise<string | null>;
       spawnDetached: (command: string) => Promise<{ ok: boolean; pid?: number; error?: string }>;
+
+      // Custom-provider health signals — reasonKey is an independent cause (e.g. "config",
+      // "runtime", "warmup"); each clears on its own without affecting other active reasons.
+      setFormatterWarning: (reasonKey: string, on: boolean) => void;
+      setTranscriptionWarning: (reasonKey: string, on: boolean) => void;
+      onRecheckConfig: (callback: () => void) => void;
     };
   }
 }

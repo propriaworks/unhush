@@ -7,6 +7,7 @@ import {
   transcribeAudioBlob,
 } from "../audio/transcriptionApi";
 import { VAD_CONFIG } from "../audio/vadConfig";
+import { getBaseUrl, invalidateServiceContact } from "../audio/customModelService";
 
 interface UseAudioRecorderReturn {
   isRecording: boolean;
@@ -165,7 +166,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     // check transcription Config and fail early for obvious errors
     const config = getTranscriptionConfig();
     const validationError = validateTranscriptionConfig(config);
-    if (validationError) throw new Error(validationError);
+    if (validationError) throw new Error(validationError.message);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -225,6 +226,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       try {
         const t0 = Date.now();
         const { MicVAD } = await import("@ricky0123/vad-web");
+
+        // onnxruntime-web silently forces single-threaded WASM (no warning, no error) when
+        // the page isn't cross-origin isolated — log the actual state so a threading
+        // regression is visible in unhush.log instead of only showing up as "VAD feels slow".
+        const isolated = typeof self !== "undefined" && self.crossOriginIsolated;
+        wlog("info", `VAD: crossOriginIsolated=${isolated} (threaded WASM ${isolated ? "available" : "disabled — falling back to single-threaded"})`);
 
         const accumulator = new SegmentAccumulator((wavBlob, segmentIndex, durationSec) => {
           whisperQueueRef.current?.enqueue(wavBlob, segmentIndex);
@@ -459,6 +466,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       const msg = err instanceof Error ? err.message : String(err);
       wlog("error", `Transcription failed: ${msg}`);
       console.error("Transcription failed:", err);
+      // A real transcription failure means the custom server is actually down — make sure
+      // the next recording's health check re-probes it (and re-runs its Start Command)
+      // right away instead of assuming it's still fine. Covers both the VAD/WhisperQueue
+      // path and the MediaRecorder fallback path, since both throw into this catch.
+      if (localStorage.getItem("unhush_provider") === "custom") {
+        invalidateServiceContact(getBaseUrl(config.apiUrl));
+      }
       cleanupStream();
       whisperQueueRef.current = null;
       setTranscriptionProgress(null);

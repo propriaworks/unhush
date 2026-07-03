@@ -22,9 +22,31 @@ let tray = null;
 let isRecording = false;
 let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
+// Reason-keyed warning registries. Each entry is one independent cause the renderer has
+// reported (bad settings, a runtime failure, a warm-up streak, etc.) — the tray badges
+// whenever either set is non-empty, and clears only once every reason in it has cleared,
+// so e.g. fixing a missing API key doesn't wipe out an unrelated "server is down" warning.
+// See "set-transcription-warning" / "set-formatter-warning" IPC below.
+const transcriptionWarnings = new Set();
+const formatterWarnings = new Set();
+const WARNING_MESSAGES = {
+  transcription: {
+    config: "Missing transcription API key or model — check Settings",
+    badurl: "Transcription API URL is invalid — check Settings",
+    runtime: "Transcription failing — check your provider/server",
+    unreachable: "Local transcription server unreachable — check it's running",
+  },
+  formatter: {
+    config: "Missing LLM API key or model — check Settings",
+    badurl: "LLM API URL is invalid — check Settings",
+    warmup: "LLM formatting unavailable — using raw transcript",
+    unreachable: "Local LLM server unreachable — check it's running",
+  },
+};
 
 const isDev = !app.isPackaged;
 const appIcon = path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../assets/icon.png");
+const appIconWarning = path.join(__dirname, isDev ? "../assets/icon-dev-warning.png" : "../assets/icon-warning.png");
 
 let logFile = null;
 function log(level, message) {
@@ -73,17 +95,39 @@ async function registerShortcut(shortcut) {
   updateTrayMenu();
 }
 
+// Builds one "⚠ ..." line per active reason, transcription warnings first.
+function activeWarningLines() {
+  return [
+    ...[...transcriptionWarnings].map((k) => `⚠ ${WARNING_MESSAGES.transcription[k]}`),
+    ...[...formatterWarnings].map((k) => `⚠ ${WARNING_MESSAGES.formatter[k]}`),
+  ];
+}
+
+// Swaps the tray icon/tooltip between normal and warning-badged based on the warning sets.
+function updateTrayIcon() {
+  if (!tray) return;
+  const lines = activeWarningLines();
+  const icon = nativeImage.createFromPath(lines.length ? appIconWarning : appIcon);
+  if (icon.isEmpty()) return;
+  tray.setImage(icon.resize({ width: 22, height: 22 }));
+  const base = `Unhush - Voice Input${isDev ? " (devmode)" : ""}`;
+  tray.setToolTip(lines.length ? `${base}\n${lines.join("\n")}` : base);
+}
+
 function updateTrayMenu() {
   if (!tray) return;
   const preview = lastTranscript
     ? `"${lastTranscript.slice(0, 45)}${lastTranscript.length > 45 ? "…" : ""}"`
     : null;
+  const warningLines = activeWarningLines();
   const contextMenu = Menu.buildFromTemplate([
     {
       label: `Toggle Recording (${currentShortcut})`,
       click: () => { toggleRecording(); },
     },
     { type: "separator" },
+    ...warningLines.map((label) => ({ label, enabled: false })),
+    ...(warningLines.length ? [{ type: "separator" }] : []),
     ...(preview ? [
       {
         label: `Copy last: ${preview}`,
@@ -197,6 +241,18 @@ function createWindow(offsetFromBottom) {
       if (e.code !== "ENOENT") log("warn", `Failed to read settings.json: ${e.message}`);
     }
   });
+
+  // Diagnostics: this app previously had no visibility into renderer crashes — a dead
+  // render frame just silently fails IPC sends (see toggleRecording) with no explanation.
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    log("error", `mainWindow renderer process gone: reason=${details.reason}, exitCode=${details.exitCode}`);
+  });
+  mainWindow.webContents.on("unresponsive", () => {
+    log("warn", "mainWindow renderer became unresponsive");
+  });
+  mainWindow.webContents.on("responsive", () => {
+    log("info", "mainWindow renderer responsive again");
+  });
 }
 
 function createSettingsWindow(tab = null) {
@@ -241,22 +297,21 @@ function createSettingsWindow(tab = null) {
 
   settingsWindow.on("closed", () => {
     settingsWindow = null;
+    // Settings may have just fixed (or broken) a required field — recheck immediately
+    // rather than waiting for the next recording attempt.
+    if (mainWindow) mainWindow.webContents.send("recheck-config");
   });
 }
 
 function createTray() {
-  const iconPath = appIcon;
-  const icon = nativeImage.createFromPath(iconPath);
+  const icon = nativeImage.createFromPath(appIcon);
 
   if (icon.isEmpty()) {
     return;
   }
 
-  const trayIcon = icon.resize({ width: 22, height: 22 });
-  tray = new Tray(trayIcon);
-
-  const ttStr = `Unhush - Voice Input${isDev ? " (devmode)" : ""}`;
-  tray.setToolTip(ttStr);
+  tray = new Tray(icon.resize({ width: 22, height: 22 }));
+  updateTrayIcon();
   updateTrayMenu();
 
   tray.on("click", () => {
@@ -362,6 +417,26 @@ ipcMain.handle("output-text", async (event, text, method) => {
 
 ipcMain.on("log", (_event, level, message) => {
   log(level, message);
+});
+
+// reasonKey identifies which independent cause this is (e.g. "config", "runtime", "warmup") —
+// see WARNING_MESSAGES above. Setting/clearing one reason never affects any other.
+ipcMain.on("set-formatter-warning", (_event, reasonKey, on) => {
+  const had = formatterWarnings.has(reasonKey);
+  if (on === had) return; // no-op, avoid redundant icon churn
+  if (on) formatterWarnings.add(reasonKey); else formatterWarnings.delete(reasonKey);
+  log(on ? "warn" : "info", `Formatter warning '${reasonKey}' ${on ? "raised" : "cleared"} (tray badge updated)`);
+  updateTrayIcon();
+  updateTrayMenu();
+});
+
+ipcMain.on("set-transcription-warning", (_event, reasonKey, on) => {
+  const had = transcriptionWarnings.has(reasonKey);
+  if (on === had) return; // no-op, avoid redundant icon churn
+  if (on) transcriptionWarnings.add(reasonKey); else transcriptionWarnings.delete(reasonKey);
+  log(on ? "warn" : "info", `Transcription warning '${reasonKey}' ${on ? "raised" : "cleared"} (tray badge updated)`);
+  updateTrayIcon();
+  updateTrayMenu();
 });
 
 ipcMain.handle("spawn-detached", async (event, command) => {

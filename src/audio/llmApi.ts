@@ -18,7 +18,8 @@ export const LLM_DEFAULT_MODELS: Record<"groq" | "openai", string> = {
 
 export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434/v1/chat/completions";
 
-import { PROVIDER_BASE_URLS } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidHttpUrl } from "./customModelService";
+import type { ConfigValidationError } from "./transcriptionApi";
 export { PROVIDER_BASE_URLS };
 
 export const SPLIT_POINT_MARKER = " <split_point/> ";
@@ -88,6 +89,23 @@ export function getLLMConfig(): LLMConfig | null {
     lengthMultiplier: parseFloat(localStorage.getItem("unhush_llm_length_multiplier") || "1.1"),
     lengthFloor: parseInt(localStorage.getItem("unhush_llm_excess_length_floor") || "20", 10),
   };
+}
+
+/** Mirrors transcriptionApi's validateTranscriptionConfig: a static check for known-bad
+ * settings (no API key, or no URL/model for a custom server) — doesn't require a live
+ * probe, so it can badge the tray as soon as the config is known to be broken. */
+export function validateLLMConfig(config: LLMConfig): ConfigValidationError | null {
+  if (config.provider === "custom") {
+    if (!(config.apiUrl && config.model)) {
+      return { reasonKey: "config", message: "Custom LLM API URL or model is unset." };
+    }
+    if (!isValidHttpUrl(config.apiUrl)) {
+      return { reasonKey: "badurl", message: "Custom LLM API URL is invalid." };
+    }
+  } else if (!config.apiKey) {
+    return { reasonKey: "config", message: "No API key for LLM formatting." };
+  }
+  return null;
 }
 
 export function makeUserPrompt(transcript: string, config: LLMConfig): string {

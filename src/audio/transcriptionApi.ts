@@ -1,11 +1,18 @@
 export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000/v1/audio/transcriptions";
 
-import { PROVIDER_BASE_URLS } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidHttpUrl } from "./customModelService";
 
 export interface TranscriptionConfig {
   apiUrl: string;
   apiKey: string;
   model: string;
+}
+
+/** reasonKey distinguishes causes that need separate tray messages (see main.cjs
+ * WARNING_MESSAGES) — "config" for unset fields, "badurl" for a malformed custom URL. */
+export interface ConfigValidationError {
+  reasonKey: "config" | "badurl";
+  message: string;
 }
 
 export function getTranscriptionConfig(): TranscriptionConfig {
@@ -32,13 +39,18 @@ export function getTranscriptionConfig(): TranscriptionConfig {
   }
 }
 
-export function validateTranscriptionConfig(config: TranscriptionConfig): string | null {
+export function validateTranscriptionConfig(config: TranscriptionConfig): ConfigValidationError | null {
   const provider = localStorage.getItem("unhush_provider") || "groq";
 
-  if (provider === "custom" && !(config.apiUrl && config.model)) {
-    return "API URL or model is unset.\nOpen Settings from tray.";
-  } else if (provider !== "custom" && !config.apiKey) {
-    return "No API key.\nOpen Settings from tray.";
+  if (provider === "custom") {
+    if (!(config.apiUrl && config.model)) {
+      return { reasonKey: "config", message: "API URL or model is unset.\nOpen Settings from tray." };
+    }
+    if (!isValidHttpUrl(config.apiUrl)) {
+      return { reasonKey: "badurl", message: "API URL is invalid.\nOpen Settings from tray." };
+    }
+  } else if (!config.apiKey) {
+    return { reasonKey: "config", message: "No API key.\nOpen Settings from tray." };
   }
   return null;
 }

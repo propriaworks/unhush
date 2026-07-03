@@ -22,11 +22,29 @@ export const PROVIDER_BASE_URLS: Record<"groq" | "openai", string> = {
 
 // ── Module-level state ─────────────────────────────────────────────────────────
 
-let healthCheckedThisSession = false;
+// Tracks when we last checked on a service per baseUrl — either a Phase-1 health-check
+// attempt (success or failure) or a successful Phase-2 warm-up. Used to decide whether a
+// custom service looks "stale" and is worth re-probing / restarting. Counting failed
+// attempts (not just successes) keeps a permanently-broken server from being re-probed on
+// every single recording — it's retried at most once per staleness window, unless the
+// start command changes in the meantime.
+const lastServiceContact = new Map<string, number>();
+
+// Tracks the start command we last acted on (ran, or confirmed unnecessary) per baseUrl,
+// so an edit to the command in Settings is detected and re-run even if the service was
+// contacted recently.
+const lastStartCommand = new Map<string, string>();
 
 // Keyed by "baseUrl:kind" (e.g. "http://localhost:8080:transcription")
 const lastWarmupTime = new Map<string, number>();
 const lastWarmupModel = new Map<string, string>();
+const lastWarmupOk = new Map<string, boolean>();
+
+// A failed warm-up is retried much sooner than the (minutes-long) steady-state interval —
+// otherwise a server that comes back up quickly still gets stuck on raw-transcript fallback
+// for the rest of that interval, since the same cooldown was blocking the retry that would
+// have noticed it was back.
+const WARMUP_FAILURE_RETRY_MS = 15_000;
 
 // Model list cache keyed by base URL (origin)
 const modelCache = new Map<string, { models: ModelInfo[]; fetchedAt: number }>();
@@ -44,6 +62,17 @@ export function getBaseUrl(endpointUrl: string): string {
     return new URL(endpointUrl).origin;
   } catch {
     return endpointUrl;
+  }
+}
+
+/** True if `url` parses as an absolute http/https URL (e.g. rejects blank, malformed,
+ * or non-http(s) values like a bare hostname or a "file:" URL). */
+export function isValidHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
   }
 }
 
@@ -98,7 +127,7 @@ async function warmUpTranscription(
   apiKey: string,
   model: string,
   log: LogFn,
-): Promise<void> {
+): Promise<boolean> {
   const url = `${baseUrl}/v1/audio/transcriptions`;
   const formData = new FormData();
   formData.append("file", generateSilentWav(), "warmup.wav");
@@ -117,12 +146,15 @@ async function warmUpTranscription(
     const latencyMs = Date.now() - t0;
     if (response.ok) {
       log("info", `Transcription warm-up succeeded for ${baseUrl} [${latencyMs}ms]`);
+      return true;
     } else {
       log("warn", `Transcription warm-up returned ${response.status} for ${baseUrl} [${latencyMs}ms]`);
+      return false;
     }
   } catch (err) {
     const latencyMs = Date.now() - t0;
     log("warn", `Transcription warm-up failed for ${baseUrl} [${latencyMs}ms]: ${err instanceof Error ? err.message : err}`);
+    return false;
   }
 }
 
@@ -215,19 +247,20 @@ export async function pinOllamaKeepAlive(
   }
 }
 
-// attempts to start service using custom command and wait up to 10s for signs of life
+// attempts to start service using custom command and wait up to 15s for signs of life.
+// Returns true if the service was confirmed alive afterwards.
 async function tryAutoStart(
   baseUrl: string,
   startCommand: string,
   log: LogFn,
-): Promise<void> {
-  if (!startCommand || !window.electronAPI?.spawnDetached) return;
+): Promise<boolean> {
+  if (!startCommand || !window.electronAPI?.spawnDetached) return false;
 
   log("info", `Auto-starting service for ${baseUrl}: ${startCommand}`);
   const result = await window.electronAPI.spawnDetached(startCommand);
   if (!result.ok) {
     log("error", `Auto-start failed for ${baseUrl}: ${result.error}`);
-    return;
+    return false;
   }
   log("info", `Auto-start launched (pid=${result.pid}), waiting for service at ${baseUrl}...`);
 
@@ -237,10 +270,11 @@ async function tryAutoStart(
     const models = await fetchModels(baseUrl);
     if (models) {
       log("info", `Service ${baseUrl} responded after ${((i + 1) * 0.5).toFixed(1)}s`);
-      return;
+      return true;
     }
   }
   log("warn", `Service ${baseUrl} did not respond within 15s after auto-start`);
+  return false;
 }
 
 // ── Main entry point ───────────────────────────────────────────────────────────
@@ -259,9 +293,12 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
   const services: ServiceInfo[] = [];
 
+  // A malformed URL is already surfaced via the "config" warning (validateTranscriptionConfig /
+  // validateLLMConfig) — no need to also probe it here, which would just fail again for the
+  // same reason and pointlessly raise a second ("unreachable") warning on top of it.
   if (transcriptionProvider === "custom") {
     const url = localStorage.getItem("unhush_custom_url") || "";
-    if (url) {
+    if (url && isValidHttpUrl(url)) {
       services.push({
         kind: "transcription",
         baseUrl: getBaseUrl(url),
@@ -274,7 +311,7 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
   if (llmProvider === "custom") {
     const url = localStorage.getItem("unhush_llm_custom_url") || "";
-    if (url) {
+    if (url && isValidHttpUrl(url)) {
       services.push({
         kind: "llm",
         baseUrl: getBaseUrl(url),
@@ -287,11 +324,9 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
   if (services.length === 0) return;
 
-  // ── Phase 1: Health check + auto-start (first recording only) ────────────────
+  // ── Phase 1: Health check + auto-start (first time, stale, or command changed) ─
 
-  if (!healthCheckedThisSession) {
-    healthCheckedThisSession = true;
-
+  {
     // Deduplicate by baseUrl (matching baseUrls mean the same provider; only need to check once)
     // — prefer the entry that has a start command
     const uniqueByUrl = new Map<string, ServiceInfo>();
@@ -302,15 +337,45 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
       }
     }
 
-    // run health checks / startup commands concurrently on all service providers
+    // Badges the tray with a "server unreachable" reason, independent of the "config"
+    // reason (which only reflects static settings, not whether the server responds).
+    // Applied per service kind sharing this baseUrl — a single local server can serve
+    // both transcription and LLM. Only touched for baseUrls we actually (re-)probe below;
+    // baseUrls skipped as "still fresh" keep whatever warning state they already had.
+    const setUnreachable = (baseUrl: string, unreachable: boolean) => {
+      for (const s of services) {
+        if (s.baseUrl !== baseUrl) continue;
+        if (s.kind === "transcription") window.electronAPI?.setTranscriptionWarning("unreachable", unreachable);
+        else window.electronAPI?.setFormatterWarning("unreachable", unreachable);
+      }
+    };
+
+    const staleMs =
+      parseInt(localStorage.getItem("unhush_provider_restart_stale_min") || "60", 10) * 60_000;
+    const phase1Now = Date.now();
+
+    // Only probe services worth probing: never checked (covers first-run-ever, since the
+    // map starts empty), gone stale since we last checked on it, or the configured start
+    // command changed since we last acted on it. Otherwise assume the service is still up
+    // and skip the round-trip — this keeps rapid re-recordings cheap.
+    const dueForCheck = [...uniqueByUrl.entries()].filter(([baseUrl, service]) => {
+      const stale = phase1Now - (lastServiceContact.get(baseUrl) ?? 0) > staleMs;
+      const cmdChanged = service.startCommand !== (lastStartCommand.get(baseUrl) ?? "");
+      return stale || cmdChanged;
+    });
+
+    // run health checks / startup commands concurrently on all due service providers
     await Promise.allSettled(
-      [...uniqueByUrl.entries()].map(async ([baseUrl, service]) => {
+      dueForCheck.map(async ([baseUrl, service]) => {
         const hcT0 = Date.now();
         const models = await fetchModels(baseUrl, service.apiKey);
         const hcMs = Date.now() - hcT0;
         if (models) {
           modelCache.set(baseUrl, { models: models.data, fetchedAt: Date.now() });
           log("info", `Health check OK for ${baseUrl} (${models.data.length} model(s)) [${hcMs}ms]`);
+          lastServiceContact.set(baseUrl, Date.now());
+          lastStartCommand.set(baseUrl, service.startCommand);
+          setUnreachable(baseUrl, false);
           // Warn if any configured model for this URL isn't in the list
           const ids = models.data.map((m) => m.id);
           if (ids.length > 0) {
@@ -326,11 +391,20 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
           }
         } else {
           log(service.startCommand ? "info" : "warn", `Health check failed for ${baseUrl} [${hcMs}ms]`);
+          // Mark the command as acted-on regardless of outcome, so a repeatedly-failing
+          // unchanged command doesn't get re-run on every single stale check.
+          lastStartCommand.set(baseUrl, service.startCommand);
+          let recovered = false;
           if (service.startCommand) {
-            await tryAutoStart(baseUrl, service.startCommand, log);
+            recovered = await tryAutoStart(baseUrl, service.startCommand, log);
             // be nice and give services another 0.1s to handle requests
             await new Promise<void>((r) => setTimeout(r, 100));
           }
+          setUnreachable(baseUrl, !recovered);
+          // Record the attempt even on failure (with or without a start command), so a
+          // permanently-broken server is retried on a cooldown — once per staleness
+          // window — instead of on every single recording, unless the command changes.
+          lastServiceContact.set(baseUrl, Date.now());
         }
       }),
     );
@@ -353,25 +427,53 @@ export async function ensureCustomServices(log: LogFn): Promise<void> {
 
     const warmupKey = `${service.baseUrl}:${service.kind}`;
     const lastWarmup = lastWarmupTime.get(warmupKey) ?? 0;
-    if (now - lastWarmup < intervalMs && lastWarmupModel.get(warmupKey) === service.model) continue;
+    const lastOk = lastWarmupOk.get(warmupKey) ?? false;
+    const effectiveIntervalMs = lastOk ? intervalMs : WARMUP_FAILURE_RETRY_MS;
+    if (now - lastWarmup < effectiveIntervalMs && lastWarmupModel.get(warmupKey) === service.model) continue;
 
     lastWarmupTime.set(warmupKey, now);
     lastWarmupModel.set(warmupKey, service.model);
 
     if (service.kind === "transcription") {
-      warmupPromises.push(warmUpTranscription(service.baseUrl, service.apiKey, service.model, log));
+      warmupPromises.push(
+        warmUpTranscription(service.baseUrl, service.apiKey, service.model, log).then(
+          // A successful warm-up counts as recent contact, so an actively-used service
+          // never looks stale even though Phase 1 only re-probes it occasionally.
+          (ok) => {
+            lastWarmupOk.set(warmupKey, ok);
+            if (ok) lastServiceContact.set(service.baseUrl, Date.now());
+          },
+        ),
+      );
     } else {
       llmWarmupStatus = "pending";
       warmupPromises.push(
-        warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then(
-          (ok) => { llmWarmupStatus = ok ? "ready" : "failed"; },
-        ),
+        warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then((ok) => {
+          llmWarmupStatus = ok ? "ready" : "failed";
+          lastWarmupOk.set(warmupKey, ok);
+          if (ok) lastServiceContact.set(service.baseUrl, Date.now());
+        }),
       );
     }
   }
 
   // Fire warm-up in the background — caller has already been unblocked after Phase 1
   Promise.allSettled(warmupPromises);
+}
+
+// ── Service contact invalidation ───────────────────────────────────────────────
+
+/**
+ * Clears the recorded last-contact time for a custom service's baseUrl, so the next
+ * ensureCustomServices() call treats it as never-checked (same as a fresh app start) —
+ * Phase 1 will re-probe it immediately and, if that also fails, re-run its Start Command,
+ * rather than waiting out the (up to 60 min) staleness window. Call this when a real
+ * (non-warmup) request to the service fails outright, e.g. a transcription that
+ * exhausted its retries — that's a much stronger "this is actually down" signal than
+ * warm-up alone, and worth reacting to on the very next attempt.
+ */
+export function invalidateServiceContact(baseUrl: string): void {
+  lastServiceContact.delete(baseUrl);
 }
 
 // ── LLM warmup status ──────────────────────────────────────────────────────────

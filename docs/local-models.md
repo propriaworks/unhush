@@ -136,13 +136,13 @@ If neither model runs well locally, consider using a cloud provider (Groq's free
 
 ### Start Command
 
-The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. On each recording, Unhush health-checks the endpoint. If it doesn't respond and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding.
+The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. Unhush health-checks the endpoint before a recording when the server hasn't been reached recently — the first time, whenever it's gone unreached for `provider_restart_stale_min` minutes (default 60; see [Advanced Settings](../README.md#advanced-settings)), or immediately after you edit the Start Command. If the check fails and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding. While the server is being actively used, this check is skipped on every recording to avoid unnecessary latency.
 
 ### Warm-up
 
-After a server starts (or after it hasn't been used for ~4 minutes), Unhush sends a silent warm-up request to pre-load the model into memory as soon as dictation begins. This reduces or eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
+After a server starts (or after it hasn't been used for ~4 minutes), Unhush sends a silent warm-up request to pre-load the model into memory as soon as dictation begins. This reduces or eliminates the long first-request latency you'd otherwise see when the model is loaded on demand. A successful warm-up also counts as "reaching" the server for the Start Command check above.
 
-The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted.
+The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted. If this happens on two dictations in a row for the Custom LLM Formatting provider, Unhush badges the system tray icon with a ⚠ warning until formatting succeeds again.
 
 ### Keeping the Ollama model resident
 
@@ -207,3 +207,4 @@ Check `~/.config/unhush/logs/unhush.log` for detailed error messages.
 **Health check or warm-up failing**
 - Check `~/.config/unhush/logs/unhush.log` for `Health check failed` or `warm-up failed` lines
 - Confirm the API URL in Settings includes the full path (e.g. `/v1/audio/transcriptions`, not just the host)
+- After a warm-up fails, Unhush retries it automatically after 15s (much sooner than the normal warm-up interval), so a server that comes back up should recover within a couple of dictations, not minutes
