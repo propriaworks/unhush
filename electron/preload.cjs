@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Process management
   spawnDetached: (command) => ipcRenderer.invoke("spawn-detached", command),
 
+  // Custom-provider health signals — reasonKey is an independent cause (e.g. "config",
+  // "badurl", "runtime", "warmup", "unreachable"); each clears on its own without
+  // affecting other active reasons.
+  setFormatterWarning: (reasonKey, on) => ipcRenderer.send("set-formatter-warning", reasonKey, on),
+  setTranscriptionWarning: (reasonKey, on) => ipcRenderer.send("set-transcription-warning", reasonKey, on),
+  onRecheckConfig: (callback) => ipcRenderer.on("recheck-config", callback),
+
   // Debug
   saveDebugAudio: (arrayBuffer, mimeType, subdir, filename) =>
     ipcRenderer.invoke("save-debug-audio", arrayBuffer, mimeType, subdir, filename),

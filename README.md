@@ -101,8 +101,8 @@ systemctl --user enable --now ydotoold
 1. Right-click the system tray icon and select **Settings**
 2. Choose your transcription provider:
    - **Groq**: Free, fast Whisper models
-   - **OpenAI**: Official Whisper API
-   - **Custom**: *Recommended:* Any OpenAI transcription-API-compatible endpoint (e.g. [locally-served](docs/local-models.md))
+   - **OpenAI**: Official Whisper API, good if you have a subscription
+   - **Custom**: Any OpenAI transcription-API-compatible endpoint (e.g. *recommended* [locally-served](docs/local-models.md) for those who can)
 3. Enter your API key from [Groq](https://console.groq.com/keys) or [OpenAI](https://platform.openai.com/api-keys) (optional for custom)
 4. Optionally configure a **Formatting** (LLM) provider for post-processing
 5. On the **Usability** tab, choose your **Output** method (default: **Paste**):
@@ -122,6 +122,7 @@ systemctl --user enable --now ydotoold
 
 - **Left-click**: Toggle recording (same as hotkey-press)
 - **Right-click**: Open menu (Settings, Copy last transcript, Quit)
+- A **⚠ badge** appears on the tray icon for transcription failures, missing settings (API key, custom URL/model), or repeated LLM warm-up failures. Hover the icon or open the menu for details; each cause clears independently, and the badge itself clears once none remain.
 
 ## Wayland Setup
 
@@ -191,11 +192,11 @@ This can be done in several ways, depending partly upon how you installed:
 
 | Provider | Model | Cost | Get API Key |
 |----------|-------|------|-------------|
-| **Groq** (Recommended) | `whisper-large-v3-turbo` | Free tier | [console.groq.com](https://console.groq.com/keys) |
+| **Groq** | `whisper-large-v3-turbo` | Free tier for most | [console.groq.com](https://console.groq.com/keys) |
 | **OpenAI** | `whisper-1` | Paid | [platform.openai.com](https://platform.openai.com/api-keys) |
 | **Custom** | Any OpenAI-compatible transcriptions endpoint | Free if local | — |
 
-For the **Custom** provider, set the full endpoint URL (e.g. `http://localhost:8000/v1/audio/transcriptions`) and the model name as the server expects it. See [Using Local Models](docs/local-models.md) for setup guides and recommended options.
+For the **Custom** provider, set the server's base URL (e.g. `http://localhost:8000`) and the model name as the server expects it. See [Using Local Models](docs/local-models.md) for setup guides and recommended configuration.
 
 ### LLM Formatting (optional)
 
@@ -205,7 +206,7 @@ After transcription, Unhush can send the raw transcript to an LLM to clean it up
 |----------|--------------|------|-------|
 | **Groq** | `llama-3.3-70b-versatile` | Free tier | Uses your Groq API key from the transcription tab |
 | **OpenAI** | `gpt-4.1-mini` | Paid | Uses your OpenAI API key from the transcription tab |
-| **Custom** | — | Free if local | Default URL: `http://localhost:11434/v1/chat/completions` ([ollama](https://ollama.com)) |
+| **Custom** | — | Free if local | Default URL: `http://localhost:11434` ([ollama](https://ollama.com)) |
 
 For the **Custom** provider, see [Using Local Models](docs/local-models.md) for setup, model recommendations, and auto-start configuration.
 
@@ -216,16 +217,16 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 |---------|-------|-------------|
 | Provider | Transcription tab | Groq, OpenAI, or Custom |
 | API Key | Transcription tab | Provider API key |
-| API URL | Transcription tab (Custom) | Full transcription endpoint URL |
+| API URL | Transcription tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
-| Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`) |
+| Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
 | Shortcut | Usability tab | Global hotkey |
 | Formatting provider | Formatting tab | None, Groq, OpenAI, or Custom |
 | Language Model | Formatting tab | LLM model name |
-| API URL | Formatting tab (Custom) | Full chat completions endpoint URL |
+| API URL | Formatting tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | API Key | Formatting tab (Custom) | Optional bearer token |
-| Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`) |
+| Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
 
 </details>
@@ -247,6 +248,7 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 | `debug_audio` | Save each recording's audio segments and transcripts to `/tmp/unhush-debug/` for inspection | `false` |
 | `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
 | `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
+| `provider_restart_stale_min` | Minutes since a custom server (transcription or LLM) was last successfully reached, after which Unhush will re-check it and, if unreachable, re-run its Start Command. Also triggers immediately after editing the Start Command, regardless of this interval | `60` |
 | `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disbles this feature. Has no effect on non-Ollama servers. | `"2h"` |
 | `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |
 | `llm_excess_length_floor` | Minimum character headroom above input length regardless of multiplier | `20` |
@@ -258,7 +260,7 @@ Settings in this file are loaded at startup and take precedence over any previou
 
 ## Troubleshooting
 
-Unhush logs to `~/.config/Unhush/logs/unhush.log` (Linux). When something goes wrong, check there first.
+Unhush logs to `~/.config/unhush/logs/unhush.log` (Linux). When something goes wrong, check there first.
 
 <details>
 <summary>Text not being typed / ydotool not working</summary>
@@ -296,7 +298,7 @@ If you're using **Paste** (default) or **Type** output mode, Unhush depends on y
 <details>
 <summary>Transcription errors</summary>
 
-When transcription fails, Unhush plays a buzzer sound, displays the error message in the recording pill for ~3.5 seconds, then dismisses. Nothing is typed. Common messages:
+When transcription fails, Unhush plays a buzzer sound, displays the error message in the recording pill for ~3.5 seconds, then dismisses. Nothing is typed. The tray icon also shows a **⚠ badge** until a transcription succeeds again. Common messages:
 
 | Message | Likely cause |
 |---------|-------------|
@@ -304,7 +306,7 @@ When transcription fails, Unhush plays a buzzer sound, displays the error messag
 | `Network error` | No internet connection (Groq/OpenAI), or blocked by IP address |
 | `Bad API key` | API key is missing or invalid — check Settings |
 | `Rate limited` | Hit the provider's rate limit — wait a moment and retry |
-| `Bad endpoint URL` | Custom URL is wrong — it must include the full path, e.g. `/v1/audio/transcriptions` |
+| `Bad endpoint URL` | Custom URL is wrong — it should be just the server's base URL, e.g. `http://localhost:8000` (no `/v1/...` path) |
 | `Whisper server error` | Server returned 5xx — check the server's own logs |
 </details>
 
@@ -318,9 +320,10 @@ See [Using Local Models — Troubleshooting](docs/local-models.md#troubleshootin
 <summary>LLM formatting not working</summary>
 
 - Ensure the Formatting provider is set (not "Off") in the Formatting tab
-- For Custom: verify the API URL points to a `/v1/chat/completions` endpoint and the model name is correct
-- Check `~/.config/Unhush/logs/unhush.log` for `LLM post-processing failed` errors
+- For Custom: verify the API URL is the server's base URL (not a full endpoint path) and the model name is correct
+- Check `~/.config/unhush/logs/unhush.log` for `LLM post-processing failed` errors
 - The raw transcript is used as fallback if the LLM call fails, so dictation still works
+- For Custom: if the tray icon shows a **⚠ badge**, the formatter's warm-up has failed on two dictations in a row — check that the server is running and reachable at the configured API URL
 </details>
 
 <details>
@@ -362,6 +365,10 @@ Run `pnpm install` to install dependencies.
 `pnpm up --latest` updates dependencies to their latest versions.
 
 Before committing check typescript with `pnpm tsc` .
+
+### Fixing OSV-flagged subdependencies
+
+The flagged package is often transitive (e.g. `esbuild`, pulled in by `vite`), so bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it, then `pnpm add -D <package>@<fixed-version>` to pin it directly, then `pnpm why <package>` again to confirm it deduped to one version.
 
 ### Building
 

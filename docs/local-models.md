@@ -10,13 +10,13 @@ Running Unhush entirely locally gives you:
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
-Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on and Nvidia GPU.
+Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an nVidia GPU.
 
 ---
 
 ## Local Transcription — speaches
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text model endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
 
 ### Speaches Setup
 
@@ -72,7 +72,7 @@ The download may take a few minutes. After that, Unhush can start speaches autom
 | Setting | Value |
 |---------|-------|
 | Provider | **Custom** |
-| API URL | `http://localhost:8000/v1/audio/transcriptions` |
+| API URL | `http://localhost:8000` *(this is the default)* |
 | Model name | Exact model name as downloaded (e.g. `Systran/faster-whisper-large-v3`) |
 | Start Command | *(optional)* eg: `docker compose -f https://github.com/speaches-ai/speaches.git#master:compose.cuda-cdi.yaml up --detach` |
 
@@ -113,7 +113,7 @@ ollama pull llama3.1:8b
 | Setting | Value |
 |---------|-------|
 | Provider | **Custom** |
-| API URL | `http://localhost:11434/v1/chat/completions` *(this is the default)* |
+| API URL | `http://localhost:11434` *(this is the default)* |
 | Model name | Exact name as pulled, e.g. `llama3.1:8b` or `gemma3:4b` |
 | Start Command | *(optional)* `ollama serve` |
 
@@ -136,13 +136,15 @@ If neither model runs well locally, consider using a cloud provider (Groq's free
 
 ### Start Command
 
-The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. On each recording, Unhush health-checks the endpoint. If it doesn't respond and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding.
+The optional **Start Command** field (in Settings, under Custom for either provider) lets Unhush launch the server automatically. Unhush health-checks the endpoint before a recording when the server hasn't been reached recently — the first time, whenever it's gone unreached for `provider_restart_stale_min` minutes since it was last confirmed up (default 60; see [Advanced Settings](../README.md#advanced-settings)), every 2 minutes while it stays unreachable, or immediately whenever you close Settings after changing the URL, key, model, provider, or Start Command. If the check fails and a Start Command is set, Unhush runs it and waits up to 15 seconds for the server to come up before proceeding. While the server is being actively used, this check is skipped on every recording to avoid unnecessary latency.
+
+Because the Start Command can be re-run every couple of minutes while the server stays down, it needs to be safe to run more than once — e.g. `docker compose up` is fine since it does nothing if the container's already running, but a command that launches a second, competing instance each time it's re-run isn't.
 
 ### Warm-up
 
-After a server starts (or after it hasn't been used for ~4 minutes), Unhush sends a silent warm-up request to pre-load the model into memory as soon as dictation begins. This reduces or eliminates the long first-request latency you'd otherwise see when the model is loaded on demand.
+After a server starts (or after it hasn't been used for ~4 minutes), Unhush sends a silent warm-up request to pre-load the model into memory as soon as dictation begins. This reduces or eliminates the long first-request latency you'd otherwise see when the model is loaded on demand. A successful warm-up also counts as "reaching" the server for the Start Command check above.
 
-The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted.
+The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted. If this happens on two dictations in a row for the Custom LLM Formatting provider, Unhush badges the system tray icon with a ⚠ warning until formatting succeeds again.
 
 ### Keeping the Ollama model resident
 
@@ -206,4 +208,5 @@ Check `~/.config/unhush/logs/unhush.log` for detailed error messages.
 
 **Health check or warm-up failing**
 - Check `~/.config/unhush/logs/unhush.log` for `Health check failed` or `warm-up failed` lines
-- Confirm the API URL in Settings includes the full path (e.g. `/v1/audio/transcriptions`, not just the host)
+- Confirm the API URL in Settings is just the server's base URL (e.g. `http://localhost:8000`), without a `/v1/...` path — Unhush appends the correct path itself
+- After a warm-up fails, Unhush retries it automatically after 15s (much sooner than the normal warm-up interval), so a server that comes back up should recover within a couple of dictations, not minutes

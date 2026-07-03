@@ -16,9 +16,11 @@ export const LLM_DEFAULT_MODELS: Record<"groq" | "openai", string> = {
   openai: "gpt-4.1-mini",
 };
 
-export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434/v1/chat/completions";
+// Server prefix — Settings stores just this; the /v1/... path is appended below.
+export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434";
 
-import { PROVIDER_BASE_URLS } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, CHAT_COMPLETIONS_PATH } from "./customModelService";
+import type { ConfigValidationError } from "./transcriptionApi";
 export { PROVIDER_BASE_URLS };
 
 export const SPLIT_POINT_MARKER = " <split_point/> ";
@@ -60,9 +62,10 @@ export function getLLMConfig(): LLMConfig | null {
   };
 
   const getApiUrl = () => {
-    if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}/v1/chat/completions`;
-    if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}/v1/chat/completions`;
-    return localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL;
+    if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}${CHAT_COMPLETIONS_PATH}`;
+    if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}${CHAT_COMPLETIONS_PATH}`;
+    const base = getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL);
+    return `${base}${CHAT_COMPLETIONS_PATH}`;
   };
 
   const getModel = () => {
@@ -88,6 +91,23 @@ export function getLLMConfig(): LLMConfig | null {
     lengthMultiplier: parseFloat(localStorage.getItem("unhush_llm_length_multiplier") || "1.1"),
     lengthFloor: parseInt(localStorage.getItem("unhush_llm_excess_length_floor") || "20", 10),
   };
+}
+
+/** Mirrors transcriptionApi's validateTranscriptionConfig: a static check for known-bad
+ * settings (no API key, or no URL/model for a custom server) — doesn't require a live
+ * probe, so it can badge the tray as soon as the config is known to be broken. */
+export function validateLLMConfig(config: LLMConfig): ConfigValidationError | null {
+  if (config.provider === "custom") {
+    if (!(config.apiUrl && config.model)) {
+      return { reasonKey: "config", message: "Custom LLM API URL or model is unset." };
+    }
+    if (!isValidHttpUrl(config.apiUrl)) {
+      return { reasonKey: "badurl", message: "Custom LLM API URL is invalid." };
+    }
+  } else if (!config.apiKey) {
+    return { reasonKey: "config", message: "No API key for LLM formatting." };
+  }
+  return null;
 }
 
 export function makeUserPrompt(transcript: string, config: LLMConfig): string {
