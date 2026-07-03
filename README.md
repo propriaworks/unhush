@@ -366,6 +366,10 @@ Run `pnpm install` to install dependencies.
 
 Before committing check typescript with `pnpm tsc` .
 
+### Fixing OSV-flagged subdependencies
+
+The flagged package is often transitive (e.g. `esbuild`, pulled in by `vite`), so bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it, then `pnpm add -D <package>@<fixed-version>` to pin it directly, then `pnpm why <package>` again to confirm it deduped to one version.
+
 ### Building
 
 Cross-format building is supported with native system tools:
