@@ -54,14 +54,21 @@ const lastHealthCheckOk = new Map<string, boolean>();
 // otherwise a server that comes back up quickly still gets stuck on raw-transcript fallback
 // for the rest of that interval, since the same cooldown was blocking the retry that would
 // have noticed it was back.
-const WARMUP_FAILURE_RETRY_MS = 15_000;
+export const WARMUP_FAILURE_RETRY_MS = 15_000;
 
 // A failed Phase-1 health check is also retried well before the (up to 60-minute) steady-
 // state staleness window — otherwise a Start Command meant to auto-recover a crashed local
 // server would only ever get re-run once an hour. Longer than WARMUP_FAILURE_RETRY_MS
 // because this retry may itself re-launch the Start Command, which should get a real chance
 // to finish starting up before we conclude it didn't work and try again.
-const HEALTHCHECK_FAILURE_RETRY_MS = 120_000;
+export const HEALTHCHECK_FAILURE_RETRY_MS = 120_000;
+
+// Defaults for the two user-configurable timings (settings.json keys, sans "unhush_" prefix:
+// provider_restart_stale_min, warmup_interval_sec / llm_warmup_interval_sec — see README's
+// Advanced Settings). Named and exported so tests reference the same values a real user with
+// unmodified settings would get, rather than duplicating the literal fallback numbers.
+export const DEFAULT_PROVIDER_RESTART_STALE_MIN = 60;
+export const DEFAULT_WARMUP_INTERVAL_SEC = 240;
 
 // Serializes Phase 1 (health check + auto-start) per baseUrl, keyed by baseUrl. Two
 // overlapping ensureCustomServices() calls (e.g. a rapid recording retry racing a
@@ -435,7 +442,7 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     };
 
     const staleMs =
-      parseInt(localStorage.getItem("unhush_provider_restart_stale_min") || "60", 10) * 60_000;
+      parseInt(localStorage.getItem("unhush_provider_restart_stale_min") || String(DEFAULT_PROVIDER_RESTART_STALE_MIN), 10) * 60_000;
     const phase1Now = Date.now();
 
     // Only probe services worth probing: never checked (covers first-run-ever, since the
@@ -521,7 +528,7 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
         ? "unhush_warmup_interval_sec"
         : "unhush_llm_warmup_interval_sec";
     const intervalMs =
-      parseInt(localStorage.getItem(intervalKey) || "240", 10) * 1000;
+      parseInt(localStorage.getItem(intervalKey) || String(DEFAULT_WARMUP_INTERVAL_SEC), 10) * 1000;
 
     // If the most recent health check found this baseUrl down, don't bother warming it up —
     // that's just another doomed request. Phase 1 above now retries failures on its own

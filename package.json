@@ -12,7 +12,9 @@
     "build": "tsc && vite build",
     "electron": "electron . --no-sandbox",
     "electron:dev": "pnpm run copy-vad-assets && trap 'exit 0' INT TERM; concurrently --kill-others --success first 'vite' 'wait-on http://localhost:5173 && electron . --no-sandbox'",
-    "package": "pnpm run build && electron-builder --linux AppImage deb rpm"
+    "package": "pnpm run build && electron-builder --linux AppImage deb rpm",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "voice",
@@ -32,11 +34,13 @@
     "concurrently": "^10.0.3",
     "electron": "41.3.0",
     "electron-builder": "^26.15.2",
+    "jsdom": "^29.1.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
+    "vitest": "^4.1.9",
     "wait-on": "^9.0.10"
   },
   "desktopName": "com.propriaworks.unhush",
