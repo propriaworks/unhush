@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onStopRecording: (callback) => ipcRenderer.on("stop-recording", callback),
   setRecordingState: (state) => ipcRenderer.send("set-recording-state", state),
   getRecordingState: () => ipcRenderer.invoke("get-recording-state"),
+  getDefaultMicSource: () => ipcRenderer.invoke("get-default-mic-source"),
 
   // Clipboard
   copyToClipboard: (text) => ipcRenderer.invoke("copy-to-clipboard", text),
