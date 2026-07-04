@@ -19,6 +19,7 @@ declare global {
       onNavigateTab: (callback: (event: unknown, tab: string) => void) => void;
       updateShortcut: (shortcut: string) => Promise<boolean>;
       getShortcutMode: () => Promise<"native" | "gsettings" | "manual">;
+      setDuckingConfig: (config: { amount: number }) => void;
       removeAllListeners: (channel: string) => void;
       log: (level: "debug" | "info" | "warn" | "error", message: string) => void;
       saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string, subdir?: string, filename?: string) => Promise<string | null>;

@@ -12,6 +12,7 @@ const {
 const path = require("path");
 const { exec } = require("child_process");
 const waylandShortcut = require("./waylandShortcut.cjs");
+const audioDucking = require("./audioDucking.cjs");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
@@ -62,6 +63,7 @@ function log(level, message) {
   if (isDev) console.log(line.trimEnd());
 }
 waylandShortcut.init(log);
+audioDucking.init(log, app.getName());
 
 app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
@@ -151,6 +153,17 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
+// Central recording-state transition: keeps audio ducking in sync wherever isRecording
+// changes (hotkey/tray toggle, hide-window, and the renderer's own state confirmation —
+// including its start-failure and stop paths). No-op guard avoids double-duck/-restore
+// when the renderer's confirmation arrives after toggleRecording() already set the flag.
+function setRecordingActive(active) {
+  if (active === isRecording) return;
+  isRecording = active;
+  if (active) audioDucking.duck();
+  else audioDucking.restore();
+}
+
 // Toggle recording: show+record or stop+hide
 function toggleRecording() {
   if (mainWindow) {
@@ -158,10 +171,10 @@ function toggleRecording() {
       mainWindow.setIgnoreMouseEvents(false);
       mainWindow.setAlwaysOnTop(true);
       mainWindow.webContents.send("start-recording");
-      isRecording = true;
+      setRecordingActive(true);
     } else {
       mainWindow.webContents.send("stop-recording");
-      isRecording = false;
+      setRecordingActive(false);
     }
   }
 }
@@ -324,7 +337,7 @@ ipcMain.handle("hide-window", async () => {
   if (mainWindow) {
     mainWindow.setIgnoreMouseEvents(true);
     mainWindow.setAlwaysOnTop(false);
-    isRecording = false;
+    setRecordingActive(false);
   }
 });
 
@@ -457,7 +470,11 @@ ipcMain.handle("get-recording-state", async () => {
 });
 
 ipcMain.on("set-recording-state", (event, state) => {
-  isRecording = state;
+  setRecordingActive(state);
+});
+
+ipcMain.on("set-ducking-config", (event, config) => {
+  audioDucking.setConfig(config);
 });
 
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
@@ -615,6 +632,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  audioDucking.restoreSyncForQuit();
   globalShortcut.unregisterAll();
   // Chromium doesn't reliably remove its Mojo IPC channel files from userData.
   // Only the main instance cleans up — the second instance must not touch files

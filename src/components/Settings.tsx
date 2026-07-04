@@ -40,6 +40,7 @@ function Settings() {
   const [shortcut, setShortcut] = useState("Ctrl+Alt+Space");
   const [shortcutMode, setShortcutMode] = useState<"native" | "gsettings" | "manual">("native");
   const [outputMethod, setOutputMethod] = useState<OutputMethod>("paste");
+  const [duckingAmount, setDuckingAmount] = useState(40);
   const [showPassword, setShowPassword] = useState(false);
 
   // LLM post-processing settings
@@ -64,6 +65,7 @@ function Settings() {
     setProvider((localStorage.getItem("unhush_provider") as Provider) || "groq");
     setShortcut(localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space");
     setOutputMethod((localStorage.getItem("unhush_output_method") as OutputMethod) || "paste");
+    setDuckingAmount(parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10));
     setLlmProvider((localStorage.getItem("unhush_llm_provider") as LLMProvider) || "none");
     setLlmModelGroq(localStorage.getItem("unhush_llm_model_groq") || LLM_DEFAULT_MODELS.groq);
     setLlmModelOpenai(localStorage.getItem("unhush_llm_model_openai") || LLM_DEFAULT_MODELS.openai);
@@ -144,6 +146,12 @@ function Settings() {
     setShortcut(newShortcut);
     localStorage.setItem("unhush_shortcut", newShortcut);
     window.electronAPI?.updateShortcut(newShortcut);
+  };
+
+  const handleDuckingAmountChange = (newAmount: number) => {
+    setDuckingAmount(newAmount);
+    localStorage.setItem("unhush_ducking_amount", String(newAmount));
+    window.electronAPI?.setDuckingConfig({ amount: newAmount });
   };
 
   return (
@@ -353,6 +361,34 @@ function Settings() {
                   Updates your GNOME keyboard shortcut automatically.
                 </p>
               )}
+            </div>
+
+            <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+              <label className="block text-white/70 text-xs font-medium">
+                Attenuate other audio while recording
+              </label>
+              <div className="flex gap-2">
+                {([0, 40, 60, 100] as const).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => handleDuckingAmountChange(preset)}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                      duckingAmount === preset
+                        ? "bg-primary-500 text-white"
+                        : "bg-white/5 text-white/60 hover:bg-white/10"
+                    }`}
+                  >
+                    {preset === 0 ? "Off" : preset === 100 ? "Mute" : `${preset}%`}
+                  </button>
+                ))}
+              </div>
+              <p className="text-white/40 text-xs">
+                {duckingAmount === 0 && "Other apps play at their normal volume while you record."}
+                {duckingAmount > 0 && duckingAmount < 100 &&
+                  `Other apps ramp down by ${duckingAmount}% while you record, then back up.`}
+                {duckingAmount === 100 && "Other apps are muted while you record, then ramp back up."}
+              </p>
             </div>
           </div>
         )}
