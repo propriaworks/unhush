@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onNavigateTab: (callback) => ipcRenderer.on("navigate-tab", callback),
   updateShortcut: (shortcut) => ipcRenderer.invoke("update-shortcut", shortcut),
   getShortcutMode: () => ipcRenderer.invoke("get-shortcut-mode"),
+  setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

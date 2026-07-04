@@ -96,6 +96,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, []);
 
   const playChime = useCallback((frequency: number): Promise<void> => {
+    if (localStorage.getItem("unhush_chimes_enabled") === "false") return Promise.resolve();
     const ctx = audioContextRef.current;
     if (!ctx) return Promise.resolve();
     const osc = ctx.createOscillator();

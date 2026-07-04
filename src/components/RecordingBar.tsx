@@ -228,6 +228,10 @@ function RecordingBar() {
         localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space";
       window.electronAPI.updateShortcut(savedShortcut);
 
+      window.electronAPI.setDuckingConfig({
+        amount: parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10),
+      });
+
       return () => {
         window.electronAPI.removeAllListeners("start-recording");
         window.electronAPI.removeAllListeners("stop-recording");
