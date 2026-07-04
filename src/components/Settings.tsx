@@ -41,6 +41,7 @@ function Settings() {
   const [shortcutMode, setShortcutMode] = useState<"native" | "gsettings" | "manual">("native");
   const [outputMethod, setOutputMethod] = useState<OutputMethod>("paste");
   const [duckingAmount, setDuckingAmount] = useState(40);
+  const [chimesEnabled, setChimesEnabled] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
 
   // LLM post-processing settings
@@ -66,6 +67,7 @@ function Settings() {
     setShortcut(localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space");
     setOutputMethod((localStorage.getItem("unhush_output_method") as OutputMethod) || "paste");
     setDuckingAmount(parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10));
+    setChimesEnabled(localStorage.getItem("unhush_chimes_enabled") !== "false");
     setLlmProvider((localStorage.getItem("unhush_llm_provider") as LLMProvider) || "none");
     setLlmModelGroq(localStorage.getItem("unhush_llm_model_groq") || LLM_DEFAULT_MODELS.groq);
     setLlmModelOpenai(localStorage.getItem("unhush_llm_model_openai") || LLM_DEFAULT_MODELS.openai);
@@ -152,6 +154,11 @@ function Settings() {
     setDuckingAmount(newAmount);
     localStorage.setItem("unhush_ducking_amount", String(newAmount));
     window.electronAPI?.setDuckingConfig({ amount: newAmount });
+  };
+
+  const handleChimesEnabledChange = (enabled: boolean) => {
+    setChimesEnabled(enabled);
+    localStorage.setItem("unhush_chimes_enabled", String(enabled));
   };
 
   return (
@@ -361,6 +368,31 @@ function Settings() {
                   Updates your GNOME keyboard shortcut automatically.
                 </p>
               )}
+            </div>
+
+            <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+              <label className="block text-white/70 text-xs font-medium">
+                Chimes
+              </label>
+              <div className="flex gap-2">
+                {([true, false] as const).map((enabled) => (
+                  <button
+                    key={String(enabled)}
+                    type="button"
+                    onClick={() => handleChimesEnabledChange(enabled)}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                      chimesEnabled === enabled
+                        ? "bg-primary-500 text-white"
+                        : "bg-white/5 text-white/60 hover:bg-white/10"
+                    }`}
+                  >
+                    {enabled ? "On" : "Off"}
+                  </button>
+                ))}
+              </div>
+              <p className="text-white/40 text-xs">
+                Play a short chime when recording starts and stops.
+              </p>
             </div>
 
             <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">

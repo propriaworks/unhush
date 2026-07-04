@@ -223,6 +223,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
 | Shortcut | Usability tab | Global hotkey |
+| Chimes | Usability tab | Play a short chime when recording starts and stops: `On` (default) or `Off` |
 | Attenuate other audio | Usability tab | Lowers other apps' volume while recording, then ramps back up when you stop: `Off`, `40%`, `60%`, or `Mute` (default `40%`). Your own start/stop chimes are never attenuated. Requires PulseAudio or PipeWire (i.e. virtually all Linux desktops) |
 | Formatting provider | Formatting tab | None, Groq, OpenAI, or Custom |
 | Language Model | Formatting tab | LLM model name |
