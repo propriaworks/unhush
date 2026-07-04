@@ -42,6 +42,7 @@ function Settings() {
   const [outputMethod, setOutputMethod] = useState<OutputMethod>("paste");
   const [duckingAmount, setDuckingAmount] = useState(40);
   const [chimesEnabled, setChimesEnabled] = useState(true);
+  const [keepMicWarm, setKeepMicWarm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   // LLM post-processing settings
@@ -68,6 +69,7 @@ function Settings() {
     setOutputMethod((localStorage.getItem("unhush_output_method") as OutputMethod) || "paste");
     setDuckingAmount(parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10));
     setChimesEnabled(localStorage.getItem("unhush_chimes_enabled") !== "false");
+    setKeepMicWarm(localStorage.getItem("unhush_keep_mic_warm") === "true");
     setLlmProvider((localStorage.getItem("unhush_llm_provider") as LLMProvider) || "none");
     setLlmModelGroq(localStorage.getItem("unhush_llm_model_groq") || LLM_DEFAULT_MODELS.groq);
     setLlmModelOpenai(localStorage.getItem("unhush_llm_model_openai") || LLM_DEFAULT_MODELS.openai);
@@ -161,6 +163,11 @@ function Settings() {
     localStorage.setItem("unhush_chimes_enabled", String(enabled));
   };
 
+  const handleKeepMicWarmChange = (enabled: boolean) => {
+    setKeepMicWarm(enabled);
+    localStorage.setItem("unhush_keep_mic_warm", String(enabled));
+  };
+
   return (
     <div className="min-h-screen bg-dark-400 text-white p-4">
       <div className="max-w-sm mx-auto">
@@ -226,7 +233,7 @@ function Settings() {
                     key={p}
                     type="button"
                     onClick={() => handleProviderChange(p)}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex-1 py-1 px-3 rounded-lg text-sm font-medium transition-all ${
                       provider === p
                         ? "bg-primary-500 text-white"
                         : "bg-white/5 text-white/60 hover:bg-white/10"
@@ -246,7 +253,7 @@ function Settings() {
                     value={currentKey}
                     onChange={persist(setCurrentKey, currentKeyStorageKey)}
                     placeholder={provider === "groq" ? "gsk_..." : provider === "openai" ? "sk-..." : "Bearer token (if required)"}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                   />
                   <button
                     type="button"
@@ -275,7 +282,7 @@ function Settings() {
                       value={customUrl}
                       onChange={persist(setCustomUrl, "unhush_custom_url")}
                       placeholder="http://localhost:8000"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
                   </div>
                   <div>
@@ -294,16 +301,16 @@ function Settings() {
                   </div>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">
-                      Start Command <span className="text-white/40">(optional; may re-run every couple of minutes until the service responds)</span>
+                      Start Command <span className="text-white/40">(optional)</span>
                     </label>
                     <input
                       type="text"
                       value={customStartCmd}
                       onChange={persist(setCustomStartCmd, "unhush_custom_start_cmd")}
                       placeholder="docker compose -f speaches-compose.yaml up --detach"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
-                    <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running. May re-run while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
+                    <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running; may re-run every couple of minutes while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                   </div>
                 </>
               )}
@@ -325,7 +332,7 @@ function Settings() {
                     key={m}
                     type="button"
                     onClick={() => handleOutputMethodChange(m)}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex-1 py-1 px-3 rounded-lg text-sm font-medium transition-all ${
                       outputMethod === m
                         ? "bg-primary-500 text-white"
                         : "bg-white/5 text-white/60 hover:bg-white/10"
@@ -350,7 +357,7 @@ function Settings() {
                 value={shortcut}
                 onChange={(e) => handleShortcutChange(e.target.value)}
                 disabled={shortcutMode === "manual"}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {SHORTCUT_OPTIONS.map((opt) => (
                   <option key={opt} value={opt} className="bg-gray-800">
@@ -371,24 +378,26 @@ function Settings() {
             </div>
 
             <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-              <label className="block text-white/70 text-xs font-medium">
-                Chimes
-              </label>
-              <div className="flex gap-2">
-                {([true, false] as const).map((enabled) => (
-                  <button
-                    key={String(enabled)}
-                    type="button"
-                    onClick={() => handleChimesEnabledChange(enabled)}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                      chimesEnabled === enabled
-                        ? "bg-primary-500 text-white"
-                        : "bg-white/5 text-white/60 hover:bg-white/10"
-                    }`}
-                  >
-                    {enabled ? "On" : "Off"}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between">
+                <label className="text-white/70 text-xs font-medium">
+                  Chimes
+                </label>
+                <div className="flex gap-2">
+                  {([true, false] as const).map((enabled) => (
+                    <button
+                      key={String(enabled)}
+                      type="button"
+                      onClick={() => handleChimesEnabledChange(enabled)}
+                      className={`py-1 px-4 rounded-lg text-sm font-medium transition-all ${
+                        chimesEnabled === enabled
+                          ? "bg-primary-500 text-white"
+                          : "bg-white/5 text-white/60 hover:bg-white/10"
+                      }`}
+                    >
+                      {enabled ? "On" : "Off"}
+                    </button>
+                  ))}
+                </div>
               </div>
               <p className="text-white/40 text-xs">
                 Play a short chime when recording starts and stops.
@@ -405,7 +414,7 @@ function Settings() {
                     key={preset}
                     type="button"
                     onClick={() => handleDuckingAmountChange(preset)}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex-1 py-1 px-3 rounded-lg text-sm font-medium transition-all ${
                       duckingAmount === preset
                         ? "bg-primary-500 text-white"
                         : "bg-white/5 text-white/60 hover:bg-white/10"
@@ -420,6 +429,35 @@ function Settings() {
                 {duckingAmount > 0 && duckingAmount < 100 &&
                   `Other apps ramp down by ${duckingAmount}% while you record, then back up.`}
                 {duckingAmount === 100 && "Other apps are muted while you record, then ramp back up."}
+              </p>
+            </div>
+
+            <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-white/70 text-xs font-medium">
+                  Keep microphone warm
+                </label>
+                <div className="flex gap-2">
+                  {([true, false] as const).map((enabled) => (
+                    <button
+                      key={String(enabled)}
+                      type="button"
+                      onClick={() => handleKeepMicWarmChange(enabled)}
+                      className={`py-1 px-4 rounded-lg text-sm font-medium transition-all ${
+                        keepMicWarm === enabled
+                          ? "bg-primary-500 text-white"
+                          : "bg-white/5 text-white/60 hover:bg-white/10"
+                      }`}
+                    >
+                      {enabled ? "On" : "Off"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-white/40 text-xs">
+                {keepMicWarm
+                  ? "The microphone stays open between recordings so the next one starts instantly. Your system's mic-in-use indicator stays on."
+                  : "The microphone is released after each recording. Some mics (especially USB) can take a second or more to wake back up."}
               </p>
             </div>
           </div>
@@ -438,7 +476,7 @@ function Settings() {
                     key={p}
                     type="button"
                     onClick={() => handleLlmProviderChange(p)}
-                    className={`flex-1 py-2 px-1 rounded-lg text-xs font-medium transition-all ${
+                    className={`flex-1 py-1 px-1 rounded-lg text-xs font-medium transition-all ${
                       llmProvider === p
                         ? "bg-primary-500 text-white"
                         : "bg-white/5 text-white/60 hover:bg-white/10"
@@ -457,7 +495,7 @@ function Settings() {
                 <>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">
-                      Language Model{llmProvider === "custom" && <span className="text-white/40 font-normal"> (auto-populates from API endpoint)</span>}
+                      Language Model{llmProvider === "custom" && <span className="text-white/40 font-normal"> (fetched from the server)</span>}
                     </label>
                     <ModelCombobox
                       value={currentLlmModel}
@@ -484,7 +522,7 @@ function Settings() {
                           value={llmCustomUrl}
                           onChange={persist(setLlmCustomUrl, "unhush_llm_custom_url")}
                           placeholder="http://localhost:11434"
-                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
                       </div>
                       <div>
@@ -494,21 +532,21 @@ function Settings() {
                           value={llmCustomKey}
                           onChange={persist(setLlmCustomKey, "unhush_llm_custom_key")}
                           placeholder="Bearer token (if required)"
-                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
                       </div>
                       <div>
                         <label className="block text-white/70 text-xs font-medium mb-1">
-                          Start Command <span className="text-white/40">(optional; may re-run every couple of minutes until the service responds)</span>
+                          Start Command <span className="text-white/40">(optional)</span>
                         </label>
                         <input
                           type="text"
                           value={llmCustomStartCmd}
                           onChange={persist(setLlmCustomStartCmd, "unhush_llm_custom_start_cmd")}
                           placeholder="ollama serve"
-                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
-                        <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running. May re-run while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
+                        <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running; may re-run every couple of minutes while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                       </div>
                     </>
                   )}
@@ -522,8 +560,8 @@ function Settings() {
                 <textarea
                   value={llmSystemPrompt}
                   onChange={persist(setLlmSystemPrompt, "unhush_llm_system_prompt")}
-                  rows={4}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500 resize-y"
+                  rows={3}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500 resize-y"
                 />
               </div>
             )}
