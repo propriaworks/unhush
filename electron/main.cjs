@@ -13,6 +13,7 @@ const path = require("path");
 const { exec } = require("child_process");
 const waylandShortcut = require("./waylandShortcut.cjs");
 const audioDucking = require("./audioDucking.cjs");
+const activeWindow = require("./activeWindow.cjs");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
@@ -23,6 +24,7 @@ let tray = null;
 let isRecording = false;
 let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
+let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
 // Reason-keyed warning registries. Each entry is one independent cause the renderer has
 // reported (bad settings, a runtime failure, a warm-up streak, etc.) — the tray badges
 // whenever either set is non-empty, and clears only once every reason in it has cleared,
@@ -50,7 +52,9 @@ const appIcon = path.join(__dirname, isDev ? "../assets/icon-dev.png" : "../asse
 const appIconWarning = path.join(__dirname, isDev ? "../assets/icon-dev-warning.png" : "../assets/icon-warning.png");
 
 let logFile = null;
+let debugLogging = false; // gates "debug"-level messages only — see settings.json's debug_logging
 function log(level, message) {
+  if (level === "debug" && !debugLogging) return;
   if (!logFile) {
     // shouldn't happen — log() is only called after app is ready
     console.error(`[pre-ready log] ${level.toUpperCase()}: ${message}`);
@@ -64,6 +68,7 @@ function log(level, message) {
 }
 waylandShortcut.init(log);
 audioDucking.init(log, app.getName());
+activeWindow.init(log);
 
 app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
@@ -121,6 +126,9 @@ function updateTrayMenu() {
   const preview = lastTranscript
     ? `"${lastTranscript.slice(0, 45)}${lastTranscript.length > 45 ? "…" : ""}"`
     : null;
+  const destination = lastPasteDestination
+    ? `sent ➜ ${lastPasteDestination.app || "unknown"}${lastPasteDestination.title ? ` — ${lastPasteDestination.title.slice(0, 40)}${lastPasteDestination.title.length > 40 ? "…" : ""}` : ""}`
+    : null;
   const warningLines = activeWarningLines();
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -138,6 +146,7 @@ function updateTrayMenu() {
           clipboard.writeText(lastTranscript, 'selection');
         },
       },
+      ...(destination ? [{ label: destination, enabled: false }] : []),
       { type: "separator" },
     ] : []),
     {
@@ -379,13 +388,31 @@ ipcMain.handle("output-text", async (event, text, method) => {
 
   log('info', `output-text: ${method} (${text.length} chars)`);
   lastTranscript = text;
+  lastPasteDestination = null; // reset every call so it can't show a stale destination from a prior paste
   updateTrayMenu();
+
+  // Fire-and-forget: never awaited before the paste keystroke below. Detection shells out to
+  // xprop/swaymsg/hyprctl/etc. (see activeWindow.cjs) and updates the tray whenever it resolves,
+  // even if that's after the paste already happened — focus doesn't change because of the paste
+  // itself, so the captured destination is accurate regardless of exactly when it resolves. This
+  // is what makes it structurally impossible for detection latency to delay the actual paste.
+  // Returns the promise so the "type" case below can await it — execSync fully blocks the event
+  // loop for the whole typing duration, so an un-awaited call there wouldn't visibly resolve
+  // until typing finishes (up to seconds later). Detection is fast enough (~10-20ms typically)
+  // that awaiting it before typing starts is negligible next to typing's own baseline latency.
+  function captureDestination() {
+    return activeWindow.getActiveWindowInfo().then((info) => {
+      lastPasteDestination = info;
+      updateTrayMenu();
+    });
+  }
 
   async function doPaste() {
     const saved = saveClipboard();
     clipboard.writeText(text);
     clipboard.writeText(text, 'selection');
     await new Promise(resolve => setTimeout(resolve, 250));
+    captureDestination();
     try {
       execSync('ydotool key --key-delay 20 42:1 110:1 110:0 42:0', { timeout: 5000, stdio: 'ignore' });
     } catch (err) {
@@ -406,6 +433,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
         try {
           fs.writeFileSync(tempFile, text);
           await new Promise(resolve => setTimeout(resolve, 250));
+          await captureDestination();
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
           execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore' });
@@ -574,6 +602,12 @@ if (!gotTheLock) {
     const logDir = app.getPath('logs');
     fs.mkdirSync(logDir, { recursive: true });
     logFile = path.join(logDir, 'unhush.log');
+
+    try {
+      const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
+      const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
+      debugLogging = cfg.debug_logging === true || cfg.debug_logging === "true";
+    } catch (e) {} // missing/invalid settings.json — debugLogging stays false
 
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */

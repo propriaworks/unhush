@@ -65,6 +65,9 @@
       "afterRemove": "scripts/postremove.sh",
       "depends": [
         "ydotool"
+      ],
+      "recommends": [
+        "x11-utils"
       ]
     },
     "rpm": {
