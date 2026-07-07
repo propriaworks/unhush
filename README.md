@@ -326,6 +326,21 @@ If you're using **Paste** (default) or **Type** output mode, Unhush depends on y
 </details>
 
 <details>
+
+<summary>No output or bogus output</summary>
+
+- In your system sound settings, ensure that the correct microphone is selected, working, and sensitive enough.
+- Sometimes nearly silent input will lead to voice models trying too hard to divine what you said, leading it to output nonsense.
+</details>
+
+<details>
+
+<summary>Sometimes text doesn't appear</summary>
+
+- If the cursor is not in an active text box, terminal, or other place that can accept text input, the pasted / typed text may be dropped by the target app. In case this happens, you can right click on the system try icon to find out to which window it was sent (where possible -- not all Wayland compositors support this), and copy the transcription text to clipboard yourself so you can paste again where you need it.
+</details>
+
+<details>
 <summary>Recording is slow to start (sometimes)</summary>
 
 The chime and red bar appear only once the microphone is actually delivering audio, so a slow start means the device itself is slow to wake. Most systems suspend an idle microphone a few seconds after its last use, and USB mics (especially webcams) may then also be put into USB power saving — waking one can take a second or more. You'd notice that starts are instant when recordings are very close together but slower after a pause.

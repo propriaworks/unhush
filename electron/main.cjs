@@ -10,7 +10,9 @@ const {
   dialog,
 } = require("electron");
 const path = require("path");
-const { exec } = require("child_process");
+const { exec, execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
@@ -407,6 +409,17 @@ ipcMain.handle("output-text", async (event, text, method) => {
     });
   }
 
+  // How long to leave our transcript as clipboard/selection owner before handing back whatever
+  // was there before. X11/Wayland clipboard delivery is a live request/response with the owning
+  // process (us) at the moment of paste, not a value copied into a shared buffer -- a busy target
+  // (web apps especially, whose paste handler may not run until several other pending tasks
+  // clear) can take a while to actually request the selection. Restoring too early revokes our
+  // ownership before that request arrives, and the paste silently delivers nothing. 3s is
+  // generous on purpose: the restore is scheduled below without blocking this handler's return,
+  // so it costs nothing but a few seconds of "old clipboard is one paste away," and the
+  // read-back check just below skips it if that's no longer safe anyway.
+  const RESTORE_CLIPBOARD_DELAY_MS = 3000;
+
   async function doPaste() {
     const saved = saveClipboard();
     clipboard.writeText(text);
@@ -414,12 +427,25 @@ ipcMain.handle("output-text", async (event, text, method) => {
     await new Promise(resolve => setTimeout(resolve, 250));
     captureDestination();
     try {
-      execSync('ydotool key --key-delay 20 42:1 110:1 110:0 42:0', { timeout: 5000, stdio: 'ignore' });
+      // execFile (async), not execSync: this keeps the main process' event loop free to service
+      // the target app's clipboard-selection request, which we must answer as clipboard owner on
+      // this same thread. Blocking here for the time ydotool takes to run risks stalling that
+      // response right when it's needed most. Still awaited, so callers see the real outcome
+      // and errors/timeouts are still caught below -- this isn't fire-and-forget.
+      await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000 });
     } catch (err) {
       log('error', `output-text paste key simulation failed: ${err.message}`);
     }
-    await new Promise(resolve => setTimeout(resolve, 200));
-    restoreClipboard(saved);
+    // Scheduled rather than awaited so this handler's promise resolves immediately instead of
+    // keeping the renderer's invoke() pending for RESTORE_CLIPBOARD_DELAY_MS. Skips the restore
+    // if the clipboard no longer holds our transcript: that means the user (or another process,
+    // e.g. a clipboard manager) has since taken ownership, and blindly restoring the old value
+    // would clobber that instead of being a harmless no-op.
+    setTimeout(() => {
+      if (clipboard.readText() === text) {
+        restoreClipboard(saved);
+      }
+    }, RESTORE_CLIPBOARD_DELAY_MS);
   }
 
   try {
