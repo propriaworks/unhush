@@ -18,6 +18,7 @@ interface UseAudioRecorderReturn {
   stopRecording: (separator?: string) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
   playErrorSound: () => void;
+  releaseMic: () => void;
 }
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
@@ -35,14 +36,27 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const streamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  // Source name the current stream's "default" device resolved to when opened — lets the
+  // keep-warm reuse check notice the user switched default microphones in the meantime
+  const streamMicSourceRef = useRef("");
 
-  // VAD pipeline refs
-  const vadRef = useRef<any>(null); // MicVAD instance
+  // VAD pipeline refs. The MicVAD instance is created once (at mount — loading the ONNX
+  // model needs no microphone) and reused across recordings via pause()/start(): on each
+  // re-start MicVAD calls our resumeStream() and builds a fresh source node from whatever
+  // stream it returns, which is the library's supported stream-swap path. Its frame
+  // processor resets VAD state (incl. the Silero RNN) on pause(), so recordings stay
+  // independent. destroy() only happens on unmount or when a broken instance is discarded.
+  const vadRef = useRef<any>(null); // persistent MicVAD instance
+  const vadInitPromiseRef = useRef<Promise<any> | null>(null); // in-flight MicVAD creation
+  const vadActiveRef = useRef(false); // current recording is using the VAD path
   const segmentAccumulatorRef = useRef<SegmentAccumulator | null>(null);
   const whisperQueueRef = useRef<WhisperQueue | null>(null);
+  // Per-recording gates read by the persistent onFrameProcessed callback
+  const accumulateFramesRef = useRef(false); // don't accumulate audio until chime finishes
+  const firstFrameResolveRef = useRef<(() => void) | null>(null);
+  const discardFirstFrameRef = useRef(false); // drop the stale first frame after each start
 
   // MediaRecorder fallback refs
-  const vadAvailableRef = useRef(true);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef<string>("");
@@ -74,6 +88,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
     return () => {
       isMonitoringRef.current = false;
+      // destroy() rejects if the VAD never started (no stream to look up) — nothing to
+      // release in that case anyway
+      vadRef.current?.destroy().catch(() => {});
+      vadRef.current = null;
+      // a kept-warm stream outlives recordings; stop it explicitly
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
       audioContext.close();
     };
   }, []);
@@ -136,7 +157,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     setAudioLevel(0);
   }, []);
 
-  const cleanupStream = useCallback(() => {
+  // Fully release the capture stream; the device goes idle and the OS may suspend it.
+  const releaseMic = useCallback(() => {
     streamSourceRef.current?.disconnect();
     streamSourceRef.current = null;
     if (streamRef.current) {
@@ -145,9 +167,96 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
+  // End-of-recording stream handling. With "keep mic warm" enabled, hold the stream open
+  // between recordings: an idle capture device gets suspended by the OS a few seconds after
+  // release (USB mics then autosuspend, and waking one is a slow USB reset-resume — see the
+  // "Recording start" timing log), so keeping it open makes the next start near-instant.
+  // The cost is honest and visible: the OS mic-in-use indicator stays on while warm.
+  const cleanupStream = useCallback(() => {
+    if (localStorage.getItem("unhush_keep_mic_warm") === "true") {
+      streamSourceRef.current?.disconnect();
+      streamSourceRef.current = null;
+      return;
+    }
+    releaseMic();
+  }, [releaseMic]);
+
   const wlog = useCallback((level: "debug" | "info" | "warn" | "error", message: string) => {
     window.electronAPI?.log(level, message);
   }, []);
+
+  // Create (or re-create after a failure) the persistent MicVAD instance. Loading the
+  // ONNX runtime + Silero model costs a few hundred ms but needs no microphone, so it
+  // runs at mount — off the hotkey-to-ready path entirely. The stream callbacks read
+  // streamRef so each recording's freshly-opened stream is picked up on vad.start().
+  const createVad = useCallback(async (): Promise<any | null> => {
+    try {
+      const { MicVAD } = await import("@ricky0123/vad-web");
+
+      // onnxruntime-web silently forces single-threaded WASM (no warning, no error) when
+      // the page isn't cross-origin isolated — log the actual state so a threading
+      // regression is visible in unhush.log instead of only showing up as "VAD feels slow".
+      // const isolated = typeof self !== "undefined" && self.crossOriginIsolated;
+      // wlog("debug", `VAD: crossOriginIsolated=${isolated} (threaded WASM ${isolated ? "available" : "disabled — falling back to single-threaded"})`);
+      // current dev build is known to fall back to single-threaded, but performs well enough. This could be fixable for dev but is harder for prod, so leave as-is for now.
+
+      return await MicVAD.new({
+        model: "v5",
+        baseAssetPath: "./vad/",
+        onnxWASMBasePath: new URL("./vad/", window.location.href).href,
+        audioContext: audioContextRef.current!,
+        getStream: () => Promise.resolve(streamRef.current!),
+        pauseStream: () => Promise.resolve(),   // we handle stream lifecycle ourselves
+        resumeStream: () => Promise.resolve(streamRef.current!),
+        startOnLoad: false,
+        positiveSpeechThreshold: VAD_CONFIG.positiveSpeechThreshold,
+        negativeSpeechThreshold: VAD_CONFIG.negativeSpeechThreshold,
+        onFrameProcessed: (
+          probabilities: { isSpeech: number },
+          frame: Float32Array,
+        ) => {
+          if (discardFirstFrameRef.current) {
+            // The worklet's resampler buffer survives pause()/start() (it has no flush
+            // message), so the first frame after a restart can carry up to ~32ms of the
+            // previous recording's tail — non-silent audio that would fool the silent-
+            // frame gate below into declaring a still-waking mic ready. The stale
+            // remainder is < 1 frame, so dropping exactly one frame removes it all.
+            discardFirstFrameRef.current = false;
+            return;
+          }
+          if (firstFrameResolveRef.current) {
+            // Mic hardware sends silent frames during init — skip until real audio arrives
+            let maxAbs = 0;
+            for (let i = 0; i < frame.length; i++) {
+              const abs = Math.abs(frame[i]);
+              if (abs > maxAbs) maxAbs = abs;
+            }
+            if (maxAbs <= 0.0001) return; // discard silent frame from mic init
+            firstFrameResolveRef.current();
+            firstFrameResolveRef.current = null;
+          }
+          if (!accumulateFramesRef.current) return; // discard frames during chime
+          segmentAccumulatorRef.current?.addFrame(
+            probabilities.isSpeech,
+            frame,
+          );
+        },
+        onSpeechStart: () => {},
+        onSpeechEnd: () => {},
+        onVADMisfire: () => {},
+        onSpeechRealStart: () => {},
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      wlog("warn", `VAD: failed to load model: ${msg}`);
+      return null;
+    }
+  }, [wlog]);
+
+  // Preload at mount so even the first recording skips the model load.
+  useEffect(() => {
+    if (!vadInitPromiseRef.current) vadInitPromiseRef.current = createVad();
+  }, [createVad]);
 
   const saveDebugBlob = useCallback(async (blob: Blob, filename: string) => {
     const session = debugSessionRef.current;
@@ -170,14 +279,48 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     if (validationError) throw new Error(validationError.message);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          // noiseSuppression: false,  // Keep noise suppression (on by default)
-          autoGainControl: false,
-        },
-      });
+      // Stage timings for the one-line startup summary logged below. getUserMedia is the
+      // stage that wakes the capture device — on suspended USB mics that's a full USB
+      // reset-resume, so it dominates and varies wildly; measure it first and separately.
+      const t0 = Date.now();
+      // A kept-warm stream from the previous recording skips the device open entirely
+      let warm = !!(streamRef.current?.active &&
+        streamRef.current.getAudioTracks().some((t) => t.readyState === "live"));
+      if (warm) {
+        // If the user switched default mics since this stream was opened, reopen it on
+        // the new default. Modern WirePlumber re-routes a live default-targeting stream
+        // server-side (verified empirically), making this a harmless one-time extra
+        // reopen — but older PulseAudio stacks leave the stream pinned to the old device,
+        // and the renderer cannot tell either way (no devicechange event fires on a
+        // default switch, and Chromium/Linux exposes only a "Default" pseudo-device with
+        // no concrete label or groupId). Asking the main process (pactl) and reopening on
+        // mismatch is the only behavior that's provably correct on every stack.
+        const currentDefault = (await window.electronAPI?.getDefaultMicSource?.()) ?? "";
+        if (currentDefault && streamMicSourceRef.current &&
+            currentDefault !== streamMicSourceRef.current) {
+          wlog("info", `Default microphone changed (${streamMicSourceRef.current} -> ${currentDefault}) — reopening warm stream`);
+          releaseMic();
+          warm = false;
+        }
+      }
+      const stream = warm
+        ? streamRef.current!
+        : await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              // noiseSuppression: false,  // Keep noise suppression (on by default)
+              autoGainControl: false,
+            },
+          });
+      const tMic = Date.now();
       streamRef.current = stream;
+      if (!warm) {
+        // Record what "default" resolved to, for the next warm-reuse check (fire and
+        // forget — not needed before recording starts)
+        void window.electronAPI?.getDefaultMicSource?.().then((name) => {
+          streamMicSourceRef.current = name ?? "";
+        });
+      }
 
       const audioContext = audioContextRef.current!;
       const analyser = analyserRef.current!;
@@ -221,19 +364,21 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       }
       whisperQueueRef.current = whisperQueue;
 
-      // Try VAD pipeline using MicVAD with our existing stream and AudioContext
+      // Try VAD pipeline, reusing the preloaded MicVAD with our fresh stream
       let vadInitialized = false;
-      let accumulateFrames = false; // gate: don't accumulate audio until chime finishes
+      let tVadSetup = 0; // set when the VAD pipeline is up and waiting for its first frame
       try {
-        const t0 = Date.now();
-        const { MicVAD } = await import("@ricky0123/vad-web");
-
-        // onnxruntime-web silently forces single-threaded WASM (no warning, no error) when
-        // the page isn't cross-origin isolated — log the actual state so a threading
-        // regression is visible in unhush.log instead of only showing up as "VAD feels slow".
-        // const isolated = typeof self !== "undefined" && self.crossOriginIsolated;
-        // wlog("debug", `VAD: crossOriginIsolated=${isolated} (threaded WASM ${isolated ? "available" : "disabled — falling back to single-threaded"})`);
-        // current dev build is known to fall back to single-threaded, but performs well enough. This could be fixable for dev but is harder for prod, so leave as-is for now.
+        // Await the mount-time preload; if it failed (or a previous recording discarded a
+        // broken instance), rebuild once — same self-healing as the old create-per-start,
+        // minus the cost on the happy path.
+        if (!vadInitPromiseRef.current) vadInitPromiseRef.current = createVad();
+        let vad = await vadInitPromiseRef.current;
+        if (!vad) {
+          vadInitPromiseRef.current = createVad();
+          vad = await vadInitPromiseRef.current;
+        }
+        if (!vad) throw new Error("VAD model failed to load");
+        vadRef.current = vad;
 
         const accumulator = new SegmentAccumulator((wavBlob, segmentIndex, durationSec) => {
           whisperQueueRef.current?.enqueue(wavBlob, segmentIndex);
@@ -247,58 +392,22 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         accumulator.onLog = wlog;
         segmentAccumulatorRef.current = accumulator;
 
-        let firstFrameResolve: (() => void) | null = null;
+        accumulateFramesRef.current = false;
+        discardFirstFrameRef.current = true;
         const firstFrameReady = new Promise<void>((resolve) => {
-          firstFrameResolve = resolve;
-        });
-        // wlog("info", `VAD: loading model (audioCtx state=${audioContext.state})`);
-        const vad = await MicVAD.new({
-          model: "v5",
-          baseAssetPath: "./vad/",
-          onnxWASMBasePath: new URL("./vad/", window.location.href).href,
-          audioContext,
-          getStream: () => Promise.resolve(stream),
-          pauseStream: () => Promise.resolve(),   // we handle stream lifecycle ourselves
-          resumeStream: () => Promise.resolve(stream),
-          startOnLoad: false,
-          positiveSpeechThreshold: VAD_CONFIG.positiveSpeechThreshold,
-          negativeSpeechThreshold: VAD_CONFIG.negativeSpeechThreshold,
-          onFrameProcessed: (
-            probabilities: { isSpeech: number },
-            frame: Float32Array,
-          ) => {
-            if (firstFrameResolve) {
-              // Mic hardware sends silent frames during init — skip until real audio arrives
-              let maxAbs = 0;
-              for (let i = 0; i < frame.length; i++) {
-                const abs = Math.abs(frame[i]);
-                if (abs > maxAbs) maxAbs = abs;
-              }
-              if (maxAbs > 0.0001) {
-                // wlog("info", `VAD: first non-silent frame at +${Date.now() - t0}ms (peak=${maxAbs.toFixed(6)})`);
-                firstFrameResolve();
-                firstFrameResolve = null;
-              } else {
-                return; // discard silent frame from mic init
-              }
-            }
-            if (!accumulateFrames) return; // discard frames during chime
-            segmentAccumulatorRef.current?.addFrame(
-              probabilities.isSpeech,
-              frame,
-            );
-          },
-          onSpeechStart: () => {},
-          onSpeechEnd: () => {},
-          onVADMisfire: () => {},
-          onSpeechRealStart: () => {},
+          firstFrameResolveRef.current = resolve;
         });
 
-        // wlog("info", `VAD: model loaded at +${Date.now() - t0}ms, starting audio pipeline`);
-        await vad.start();
-        // wlog("info", `VAD: pipeline started at +${Date.now() - t0}ms (audioCtx state=${audioContext.state}), waiting for first frame`);
-        vadRef.current = vad;
-        vadAvailableRef.current = true;
+        // If a previous start failed partway and left the instance listening, pause first —
+        // start() early-returns while listening and would silently keep the stale stream.
+        if (vad.listening) await vad.pause();
+        await vad.start(); // picks up our stream via getStream/resumeStream
+        if (!vad.listening) {
+          // start() swallows some failures into an internal errored state instead of throwing
+          throw new Error(`VAD failed to start${vad.errored ? `: ${vad.errored}` : ""}`);
+        }
+        tVadSetup = Date.now();
+        vadActiveRef.current = true;
         vadInitialized = true;
 
         // Wait for first real audio frame to confirm mic is active (2s timeout fallback)
@@ -309,14 +418,16 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         if (timedOut) {
           wlog("warn", `VAD: timed out waiting for first frame after ${Date.now() - t0}ms`);
         }
-        // else {
-        //   wlog("info", `VAD: ready at +${Date.now() - t0}ms`);
-        // }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         wlog("warn", `VAD initialization failed, falling back to MediaRecorder: ${msg}`);
         console.warn("VAD initialization failed, falling back to MediaRecorder:", err);
-        vadAvailableRef.current = false;
+        vadActiveRef.current = false;
+        firstFrameResolveRef.current = null;
+        // Discard the possibly-broken instance; the next recording rebuilds from scratch
+        vadRef.current?.destroy().catch(() => {});
+        vadRef.current = null;
+        vadInitPromiseRef.current = null;
       }
 
       // Fallback: use MediaRecorder if VAD failed
@@ -354,23 +465,47 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       startAudioLevelMonitoring();
 
-      // wlog("info", `Recording: playing chime and setting isRecording(true) (audioCtx state=${audioContextRef.current?.state})`);
+      const tReady = Date.now();
+      const micStage = `mic=${tMic - t0}ms${warm ? " (warm)" : ""}`;
+      const stages = vadInitialized
+        ? `${micStage}, vadSetup=${tVadSetup - tMic}ms, firstFrame=${tReady - tVadSetup}ms`
+        : `${micStage}, recorderFallback=${tReady - tMic}ms`;
+      // streamMicSourceRef is filled by a fire-and-forget IPC after each cold open; by now
+      // it has virtually always resolved. Answers "which mic did this actually record from?"
+      // — the renderer can't tell (track labels are just "Default"), but pactl can.
+      const src = streamMicSourceRef.current;
+      wlog("debug", `Recording start: ${stages}, total=${tReady - t0}ms${src ? `, source=${src}` : ""}`);
+
       const chimePromise = playChime(880);
       setIsRecording(true);  // turn red as chime plays
 
-      await chimePromise;    // wait for chime to finish
+      await chimePromise;    // wait for chime to finish rendering
+
+      // The chime only becomes audible after the output buffer drains (outputLatency), and
+      // its speaker→mic pickup then rides back through the capture pipeline (track latency
+      // + 32ms worklet framing), so frames carrying chime audio arrive well after onended.
+      // Wait out that round trip before keeping audio, or the beep lands at the start of
+      // segment 0 and the transcriber tries to interpret it. Clamped so a bogus latency
+      // report can't visibly delay real speech capture.
+      if (localStorage.getItem("unhush_chimes_enabled") !== "false") {
+        const outMs = (audioContext.outputLatency || audioContext.baseLatency || 0) * 1000;
+        // .latency is a Chromium extension to MediaTrackSettings, absent from TS's dom lib
+        const capMs = ((stream.getAudioTracks()[0]?.getSettings() as { latency?: number })?.latency ?? 0) * 1000;
+        const graceMs = Math.min(250, outMs + capMs + 64);
+        await new Promise((resolve) => setTimeout(resolve, graceMs));
+      }
 
       if (!vadInitialized) {
         // Keep header chunk for MediaRecorder fallback
         audioChunksRef.current = audioChunksRef.current.slice(0, 1);
       }
-      accumulateFrames = true; // open gate: start accumulating audio
+      accumulateFramesRef.current = true; // open gate: start accumulating audio
 
     } catch (err) {
       console.error("Failed to start recording:", err);
       throw err;
     }
-  }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog]);
+  }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog, createVad, releaseMic]);
 
   const stopRecording = useCallback(async (separator = " "): Promise<string | null> => {
     if (!isRecording) {
@@ -389,11 +524,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     try {
       let transcript: string;
 
-      if (vadAvailableRef.current && vadRef.current) {
-        // VAD pipeline: pause VAD, flush remaining segments, finalize queue
+      if (vadActiveRef.current && vadRef.current) {
+        // VAD pipeline: pause VAD (keeping the instance and its loaded model for the next
+        // recording — pause() also resets its speech state), flush remaining segments,
+        // finalize queue
         await vadRef.current.pause();
-        await vadRef.current.destroy();
-        vadRef.current = null;
+        vadActiveRef.current = false;
+        accumulateFramesRef.current = false;
 
         const accumulator = segmentAccumulatorRef.current!;
         accumulator.flushRemaining();
@@ -491,5 +628,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     stopRecording,
     saveDebugBlob,
     playErrorSound,
+    releaseMic,
   };
 }

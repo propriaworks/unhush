@@ -119,6 +119,17 @@ systemctl --user enable --now ydotoold
 3. Press your *hotkey* again to stop — a second chime plays and a thinking indicator appears while your speech is transcribed
 4. Text is delivered to your cursor — pasted instantly by default (see Output mode in Settings)
 
+### Choosing a Microphone
+
+Unhush records from your **system default input device**. To use a different microphone, change the default in your desktop's sound settings (GNOME: Settings → Sound → Input; KDE: System Settings → Sound), with `pavucontrol` (Input Devices → set fallback), or from a terminal:
+
+```bash
+pactl list sources short          # list input devices
+pactl set-default-source <name>   # set the default
+```
+
+The change takes effect on the next recording — no restart needed.
+
 ### System Tray
 
 - **Left-click**: Toggle recording (same as hotkey-press)
@@ -225,6 +236,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Shortcut | Usability tab | Global hotkey |
 | Chimes | Usability tab | Play a short chime when recording starts and stops: `On` (default) or `Off` |
 | Attenuate other audio | Usability tab | Lowers other apps' volume while recording, then ramps back up when you stop: `Off`, `40%`, `60%`, or `Mute` (default `40%`). Your own start/stop chimes are never attenuated. Requires PulseAudio or PipeWire (i.e. virtually all Linux desktops) |
+| Keep microphone warm | Usability tab | Keeps the microphone open between recordings so the next one starts instantly: `On` or `Off` (default). Useful for microphones that are slow to wake from power saving (common with USB webcam mics). While on, your system's microphone-in-use indicator stays lit, though audio isn't processed or saved except while transcribing |
 | Formatting provider | Formatting tab | None, Groq, OpenAI, or Custom |
 | Language Model | Formatting tab | LLM model name |
 | API URL | Formatting tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
@@ -296,6 +308,24 @@ If you're using **Paste** (default) or **Type** output mode, Unhush depends on y
 
 - Grant microphone permission in system settings
 - Check if another application has exclusive microphone access
+</details>
+
+<details>
+<summary>Recording is slow to start (sometimes)</summary>
+
+The chime and red bar appear only once the microphone is actually delivering audio, so a slow start means the device itself is slow to wake. Most systems suspend an idle microphone a few seconds after its last use, and USB mics (especially webcams) may then also be put into USB power saving — waking one can take a second or more. You'd notice that starts are instant when recordings are very close together but slower after a pause.
+
+- Enable **Keep microphone warm** on the Usability tab: Unhush holds the microphone open between recordings so it never gets suspended. Your system's microphone-in-use indicator will stay lit.
+- Each start is timed in the log (`Recording start: mic=…ms, …` in `~/.config/unhush/logs/unhush.log`); the `mic=` stage is the device wake.
+- Alternatively (advanced), you can prevent the kernel from USB-suspending a specific microphone. Find its vendor/product ID with `lsusb` (e.g. `ID 046d:0825` for a Logitech C270), then install a udev rule with your IDs substituted:
+
+  ```bash
+  echo 'ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="0825", ATTR{power/control}="on"' \
+    | sudo tee /etc/udev/rules.d/50-mic-no-autosuspend.rules
+  sudo udevadm control --reload-rules
+  ```
+
+  Then unplug and replug the device (or reboot). This disables USB power saving for that one device only; the extra idle draw of a microphone is negligible. See the [Arch wiki on USB autosuspend](https://wiki.archlinux.org/title/Power_management#USB_autosuspend) for background.
 </details>
 
 <details>

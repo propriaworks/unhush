@@ -22,6 +22,7 @@ function RecordingBar() {
     stopRecording,
     saveDebugBlob,
     playErrorSound,
+    releaseMic,
   } = useAudioRecorder();
 
   useEffect(() => {
@@ -57,12 +58,19 @@ function RecordingBar() {
   // clear the badge until the staleness window (up to an hour) lapsed.
   const recheckAfterSettingsClose = useCallback(() => {
     checkConfigWarnings();
+    // If "keep mic warm" was just turned off, release the held stream now rather than
+    // leaving the mic open (and its in-use indicator lit) until the next recording.
+    // Skip while recording or starting — the stream is in active use then.
+    if (localStorage.getItem("unhush_keep_mic_warm") !== "true" &&
+        !isRecording && !isStartingRef.current) {
+      releaseMic();
+    }
     const snapshot = getRelevantConfigSnapshot();
     if (snapshot !== lastRelevantConfigRef.current) {
       lastRelevantConfigRef.current = snapshot;
       void ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg), true);
     }
-  }, [checkConfigWarnings]);
+  }, [checkConfigWarnings, isRecording, releaseMic]);
 
   useEffect(() => {
     checkConfigWarnings();

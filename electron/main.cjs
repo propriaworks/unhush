@@ -469,6 +469,22 @@ ipcMain.handle("get-recording-state", async () => {
   return isRecording;
 });
 
+// Which PulseAudio/PipeWire source "default" currently resolves to. The renderer can't
+// tell on Linux — Chromium reports only a "Default" pseudo-device (no concrete label or
+// groupId) and fires no devicechange event when the system default changes — so the
+// keep-mic-warm reuse check asks us, to notice the user switched microphones while the
+// previous one was held open.
+ipcMain.handle("get-default-mic-source", () => {
+  if (process.platform !== "linux") return Promise.resolve("");
+  return new Promise((resolve) => {
+    const { execFile } = require("child_process");
+    execFile("pactl", ["get-default-source"], (err, stdout) => {
+      // pactl missing or failed — return unknown; the caller treats "" as "no change"
+      resolve(err ? "" : stdout.trim());
+    });
+  });
+});
+
 ipcMain.on("set-recording-state", (event, state) => {
   setRecordingActive(state);
 });

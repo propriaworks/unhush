@@ -11,6 +11,8 @@ declare global {
       onStopRecording: (callback: () => void) => void;
       setRecordingState: (state: boolean) => void;
       getRecordingState: () => Promise<boolean>;
+      // Name of the source the system "default" mic resolves to ("" if unknown/not Linux)
+      getDefaultMicSource: () => Promise<string>;
       copyToClipboard: (text: string) => Promise<boolean>;
       outputText: (text: string, method: OutputMethod) => Promise<boolean>;
       hideWindow: () => Promise<void>;
