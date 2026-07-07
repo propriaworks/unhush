@@ -33,6 +33,9 @@ Unhush provides seamless speech-to-text using AI transcription, allowing you to 
 - **ydotool** — Required for **Paste** (default) and **Type** output modes; not needed for **Clipboard** mode
   - `.deb` / `.rpm` / `.pacman` installs: ydotool is installed automatically as a package dependency
   - AppImage: install ydotool manually (see below)
+- **xprop** (X11 sessions only, optional) — enables the "sent ➜ \<app\>" tray indicator (see [System Tray](#system-tray)); harmless if absent, the tray just won't show a destination
+  - Usually already installed (it's a base X11 utility). `.deb` installs recommend it automatically; `.rpm`/`.pacman`/AppImage: install manually if missing — `x11-utils` (Debian/Ubuntu), `xprop` (Fedora/RHEL), `xorg-xprop` (Arch)
+  - Not applicable on Wayland sessions (see [Wayland Setup](#wayland-setup) for what's supported there instead)
 
 ## Installation
 
@@ -68,6 +71,8 @@ Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcri
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
 `ydotool` needs write access to `/dev/uinput`. At startup, Unhush will show a one-time dialog with setup instructions if it isn't already accessible.
+
+On X11 sessions, also install `xprop` if you want the tray's "sent ➜ \<app\>" indicator (package name varies by distro — see [Requirements](#requirements)); it's optional and everything else works fine without it.
 </details>
 
 <details>
@@ -134,6 +139,15 @@ The change takes effect on the next recording — no restart needed.
 
 - **Left-click**: Toggle recording (same as hotkey-press)
 - **Right-click**: Open menu (Settings, Copy last transcript, Quit)
+- After a **Paste**/**Type** output, the menu shows which app/window received it (e.g. "sent ➜ firefox — some title"), right under "Copy last". This is tray-only and never written to the log file, since window titles can contain sensitive content. Platform support varies:
+
+  | Platform | Support |
+  |---|---|
+  | X11 | Works via `xprop` (see [Requirements](#requirements)) |
+  | Sway / Hyprland | Works natively, no extra setup |
+  | GNOME (Wayland) | Requires the [Focused Window D-Bus](https://extensions.gnome.org/extension/5592/focused-window-d-bus/) extension — install it if you want this; otherwise no destination is shown, which is expected |
+  | KDE Plasma (Wayland) | Not yet supported — no destination shown (KDE X11 sessions work via the `xprop` path above) |
+
 - A **⚠ badge** appears on the tray icon for transcription failures, missing settings (API key, custom URL/model), or repeated LLM warm-up failures. Hover the icon or open the menu for details; each cause clears independently, and the badge itself clears once none remain.
 
 ## Wayland Setup
@@ -261,6 +275,7 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 | Key | Description | Default |
 |-----|-------------|---------|
 | `debug_audio` | Save each recording's audio segments and transcripts to `/tmp/unhush-debug/` for inspection | `false` |
+| `debug_logging` | Include "debug"-level messages in `~/.config/unhush/logs/unhush.log` (normally suppressed, since nothing currently filters log levels otherwise — see [Troubleshooting](#troubleshooting)) | `false` |
 | `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
 | `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
 | `provider_restart_stale_min` | Minutes since a custom server (transcription or LLM) was last successfully reached, after which Unhush will re-check it and, if unreachable, re-run its Start Command. Also triggers immediately after editing the Start Command, regardless of this interval | `60` |
@@ -308,6 +323,21 @@ If you're using **Paste** (default) or **Type** output mode, Unhush depends on y
 
 - Grant microphone permission in system settings
 - Check if another application has exclusive microphone access
+</details>
+
+<details>
+
+<summary>No output or bogus output</summary>
+
+- In your system sound settings, ensure that the correct microphone is selected, working, and sensitive enough.
+- Sometimes nearly silent input will lead to voice models trying too hard to divine what you said, leading it to output nonsense.
+</details>
+
+<details>
+
+<summary>Sometimes text doesn't appear</summary>
+
+- If the cursor is not in an active text box, terminal, or other place that can accept text input, the pasted / typed text may be dropped by the target app. In case this happens, you can right click on the system try icon to find out to which window it was sent (where possible -- not all Wayland compositors support this), and copy the transcription text to clipboard yourself so you can paste again where you need it.
 </details>
 
 <details>
@@ -388,7 +418,7 @@ A diagram of the recording, processing, chunking, postprocessing pipeline workfl
 
 ### Testing
 
-Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10), particularly with respect to the hotkey functionality.
+Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10), particularly with respect to the hotkey functionality, and with respect to the paste-destination tray indicator on Sway, Hyprland, and GNOME Wayland (with the Focused Window D-Bus extension installed) — none of these could be tested on the machine this was developed on. KDE Plasma Wayland support for this indicator isn't implemented yet.
 
 
 <details>
