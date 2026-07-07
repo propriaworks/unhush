@@ -453,11 +453,11 @@ The `.pacman` package is built in CI using an Arch Linux container and is not cr
 
 ### Releases
 
-Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and commit changes. Finally tag it, and push the commit along with the tag:
+Merge PR into main. Then **from the main branch**, pull and update version in `package.json`, update download links with `node scripts/sync-docs.mjs`, and add the modified files. Finally commit, tag it, and push the commit along with the tag:
 
 ```bash
 git commit -m "bump version"
-git tag v3.1.0 && git push origin main v3.1.0
+git tag v3.1.1 && git push origin main v3.1.1
 ```
 
 CI will be launched by github to build it, save release builds and update docs/index.html with version correct download links (if not already done). To test the CI, open a draft PR or do Actions -> CI -> Run workflow, and pick a branch (to rebuild a release, pick the tag instead).
