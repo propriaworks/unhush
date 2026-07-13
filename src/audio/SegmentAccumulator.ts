@@ -96,15 +96,22 @@ export class SegmentAccumulator {
   }
 
   /**
-   * Flush frames [0..count) as a WAV blob, subject to two VAD-based safeguards:
+   * Flush frames [0..count) as a WAV blob, subject to three VAD-based safeguards:
    *  - Gate: segments with fewer than minSpeechFrames of actual speech are VAD misfires
    *    (coughs, clicks) rather than transcribable content — discard rather than send.
-   *  - Trim: trailing silence beyond redemptionFrames past the last speech-adjacent frame is
-   *    cut from what's sent (but not from the frames considered "consumed" by this flush) —
-   *    this only matters for flushRemaining, since natural-pause flushes already end at
-   *    redemptionFrames past speech and hardCut picks its own low-score cut point.
-   * The trim anchors on negativeSpeechThreshold rather than positiveSpeechThreshold so that
-   * soft word endings (trailing fricatives etc., where Silero's score sags) aren't clipped.
+   *  - Trailing trim: silence beyond redemptionFrames past the last speech-adjacent frame is
+   *    cut from what's sent — mainly matters for flushRemaining, since natural-pause flushes
+   *    already end at redemptionFrames past speech and hardCut picks its own low-score cut point.
+   *  - Leading trim: silence before leadingPadFrames-worth-of-margin ahead of the first
+   *    speech-adjacent frame is cut — mainly matters for the first segment of a recording and
+   *    for segments starting right after a natural-pause flush, where a long thinking-pause
+   *    can otherwise sit at the head of the next segment.
+   * Neither trim affects which frames this flush "consumes" from the buffer (that bookkeeping
+   * below is unchanged) — only what's encoded into the WAV that gets sent.
+   * Trailing trim anchors on negativeSpeechThreshold (not positiveSpeechThreshold) so soft word
+   * endings aren't clipped. Leading trim uses a much larger pad because clipping speech onset
+   * (a plosive burst, a soft consonant) directly costs transcription accuracy, whereas keeping
+   * a bit of extra trailing silence is cheap — see vadConfig.ts for the asymmetry rationale.
    */
   private flush(frameCount: number): void {
     const framesInRange = this.frames.slice(0, frameCount);
@@ -122,6 +129,13 @@ export class SegmentAccumulator {
           `(${speechFrameCount} speech frame(s), need ${VAD_CONFIG.minSpeechFrames})`
       );
     } else {
+      let firstSpeechIdx = 0;
+      for (let i = 0; i < scoresInRange.length; i++) {
+        if (scoresInRange[i] >= VAD_CONFIG.negativeSpeechThreshold) {
+          firstSpeechIdx = i;
+          break;
+        }
+      }
       let lastSpeechIdx = scoresInRange.length - 1;
       for (let i = scoresInRange.length - 1; i >= 0; i--) {
         if (scoresInRange[i] >= VAD_CONFIG.negativeSpeechThreshold) {
@@ -129,12 +143,20 @@ export class SegmentAccumulator {
           break;
         }
       }
+
+      const trimStart = Math.max(0, firstSpeechIdx - VAD_CONFIG.leadingPadFrames);
       const trimEnd = Math.min(scoresInRange.length, lastSpeechIdx + 1 + VAD_CONFIG.redemptionFrames);
 
-      const framesToSend = framesInRange.slice(0, trimEnd);
+      const framesToSend = framesInRange.slice(trimStart, trimEnd);
       const durationSec = framesToSend.reduce((sum, f) => sum + f.length, 0) / VAD_CONFIG.sampleRate;
-      if (trimEnd < framesInRange.length) {
-        this.onLog?.("info", `flush: trimmed ${(totalDurationSec - durationSec).toFixed(2)}s of trailing silence`);
+
+      if (trimStart > 0 || trimEnd < framesInRange.length) {
+        const leadSec = framesInRange.slice(0, trimStart).reduce((sum, f) => sum + f.length, 0) / VAD_CONFIG.sampleRate;
+        const trailSec = framesInRange.slice(trimEnd).reduce((sum, f) => sum + f.length, 0) / VAD_CONFIG.sampleRate;
+        const parts: string[] = [];
+        if (leadSec > 0) parts.push(`${leadSec.toFixed(2)}s leading`);
+        if (trailSec > 0) parts.push(`${trailSec.toFixed(2)}s trailing`);
+        this.onLog?.("info", `flush: trimmed ${parts.join(" + ")} silence`);
       }
 
       const wavBlob = SegmentAccumulator.encodeWav(framesToSend, VAD_CONFIG.sampleRate);

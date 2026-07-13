@@ -3,10 +3,12 @@ import { SegmentAccumulator } from "./SegmentAccumulator";
 import { VAD_CONFIG } from "./vadConfig";
 
 // Covers the VAD-based safeguards in flush(): the minSpeechFrames misfire gate (discard
-// segments with too little actual speech — coughs, clicks) and the trailing-silence trim
+// segments with too little actual speech — coughs, clicks), the trailing-silence trim
 // (anchored on negativeSpeechThreshold + redemptionFrames padding, so soft word endings
-// aren't clipped). Exercised through the public addFrame()/flushRemaining() surface rather
-// than private state, since that's what production code paths actually drive.
+// aren't clipped), and the leading-silence trim (anchored the same way but with a much
+// larger leadingPadFrames margin, since clipping speech onset costs accuracy). Exercised
+// through the public addFrame()/flushRemaining() surface rather than private state, since
+// that's what production code paths actually drive.
 
 const FRAME_SEC = VAD_CONFIG.frameSizeSamples / VAD_CONFIG.sampleRate;
 const SPEECH = 0.9; // well above positiveSpeechThreshold
@@ -43,6 +45,54 @@ describe("SegmentAccumulator VAD safeguards", () => {
     expect(segmentIndex).toBe(0);
     expect(durationSec).toBeCloseTo((20 + VAD_CONFIG.redemptionFrames) * FRAME_SEC, 5);
     expect(onLog).toHaveBeenCalledWith("info", expect.stringContaining("trimmed"));
+  });
+
+  it("trims leading silence, keeping leadingPadFrames of padding before speech onset", () => {
+    const { acc, onFlush, onLog } = makeAccumulator();
+
+    feed(acc, SILENCE, 50); // long pause before the user starts speaking
+    feed(acc, SPEECH, VAD_CONFIG.minSpeechFrames + 5);
+    feed(acc, SILENCE, VAD_CONFIG.redemptionFrames); // exactly the redemption count -> no trailing trim
+
+    acc.flushRemaining();
+
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    const [, , durationSec] = onFlush.mock.calls[0];
+    const expectedFrames = VAD_CONFIG.leadingPadFrames + (VAD_CONFIG.minSpeechFrames + 5) + VAD_CONFIG.redemptionFrames;
+    expect(durationSec).toBeCloseTo(expectedFrames * FRAME_SEC, 5);
+    expect(onLog).toHaveBeenCalledWith("info", expect.stringContaining("leading"));
+  });
+
+  it("keeps all leading silence when it's shorter than leadingPadFrames", () => {
+    const { acc, onFlush, onLog } = makeAccumulator();
+
+    feed(acc, SILENCE, 5); // less than leadingPadFrames — nothing to clip
+    feed(acc, SPEECH, VAD_CONFIG.minSpeechFrames);
+
+    acc.flushRemaining();
+
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    const [, , durationSec] = onFlush.mock.calls[0];
+    expect(durationSec).toBeCloseTo((5 + VAD_CONFIG.minSpeechFrames) * FRAME_SEC, 5);
+    expect(onLog).not.toHaveBeenCalledWith("info", expect.stringContaining("trimmed"));
+  });
+
+  it("trims both leading and trailing silence in the same segment", () => {
+    const { acc, onFlush, onLog } = makeAccumulator();
+
+    feed(acc, SILENCE, 50); // pause before speaking
+    feed(acc, SPEECH, VAD_CONFIG.minSpeechFrames + 5);
+    feed(acc, SILENCE, 60); // long pause before hitting stop
+
+    acc.flushRemaining();
+
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    const [, , durationSec] = onFlush.mock.calls[0];
+    const expectedFrames = VAD_CONFIG.leadingPadFrames + (VAD_CONFIG.minSpeechFrames + 5) + VAD_CONFIG.redemptionFrames;
+    expect(durationSec).toBeCloseTo(expectedFrames * FRAME_SEC, 5);
+    const [, message] = onLog.mock.calls.find(([, msg]) => msg.includes("trimmed"))!;
+    expect(message).toContain("leading");
+    expect(message).toContain("trailing");
   });
 
   it("discards an all-silence tail instead of sending it", () => {
