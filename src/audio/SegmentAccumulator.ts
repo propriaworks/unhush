@@ -95,41 +95,62 @@ export class SegmentAccumulator {
     this.redemptionCounter = 0;
   }
 
-  /** Flush frames [0..count) as a WAV blob */
+  /**
+   * Flush frames [0..count) as a WAV blob, subject to two VAD-based safeguards:
+   *  - Gate: segments with fewer than minSpeechFrames of actual speech are VAD misfires
+   *    (coughs, clicks) rather than transcribable content — discard rather than send.
+   *  - Trim: trailing silence beyond redemptionFrames past the last speech-adjacent frame is
+   *    cut from what's sent (but not from the frames considered "consumed" by this flush) —
+   *    this only matters for flushRemaining, since natural-pause flushes already end at
+   *    redemptionFrames past speech and hardCut picks its own low-score cut point.
+   * The trim anchors on negativeSpeechThreshold rather than positiveSpeechThreshold so that
+   * soft word endings (trailing fricatives etc., where Silero's score sags) aren't clipped.
+   */
   private flush(frameCount: number): void {
-    const framesToFlush = this.frames.slice(0, frameCount);
+    const framesInRange = this.frames.slice(0, frameCount);
+    if (framesInRange.length === 0) return;
 
-    if (framesToFlush.length === 0) return;
+    const scoresInRange = this.scores.slice(0, frameCount);
+    const totalDurationSec = framesInRange.reduce((sum, f) => sum + f.length, 0) / VAD_CONFIG.sampleRate;
 
-    const totalSamples = framesToFlush.reduce((sum, f) => sum + f.length, 0);
-    const durationSec = totalSamples / VAD_CONFIG.sampleRate;
-    const wavBlob = SegmentAccumulator.encodeWav(framesToFlush, VAD_CONFIG.sampleRate);
-    const idx = this.segmentIndex++;
-    this.onFlush(wavBlob, idx, durationSec);
+    const speechFrameCount = scoresInRange.filter((s) => s >= VAD_CONFIG.positiveSpeechThreshold).length;
 
-    // If we flushed everything (natural pause), reset current segment
+    if (speechFrameCount < VAD_CONFIG.minSpeechFrames) {
+      this.onLog?.(
+        "info",
+        `flush: discarding ${totalDurationSec.toFixed(2)}s segment as VAD misfire ` +
+          `(${speechFrameCount} speech frame(s), need ${VAD_CONFIG.minSpeechFrames})`
+      );
+    } else {
+      let lastSpeechIdx = scoresInRange.length - 1;
+      for (let i = scoresInRange.length - 1; i >= 0; i--) {
+        if (scoresInRange[i] >= VAD_CONFIG.negativeSpeechThreshold) {
+          lastSpeechIdx = i;
+          break;
+        }
+      }
+      const trimEnd = Math.min(scoresInRange.length, lastSpeechIdx + 1 + VAD_CONFIG.redemptionFrames);
+
+      const framesToSend = framesInRange.slice(0, trimEnd);
+      const durationSec = framesToSend.reduce((sum, f) => sum + f.length, 0) / VAD_CONFIG.sampleRate;
+      if (trimEnd < framesInRange.length) {
+        this.onLog?.("info", `flush: trimmed ${(totalDurationSec - durationSec).toFixed(2)}s of trailing silence`);
+      }
+
+      const wavBlob = SegmentAccumulator.encodeWav(framesToSend, VAD_CONFIG.sampleRate);
+      const idx = this.segmentIndex++;
+      this.onFlush(wavBlob, idx, durationSec);
+    }
+
+    // If we flushed everything (natural pause / flushRemaining), reset current segment
     if (frameCount >= this.frames.length) {
       this.reset(false)
     }
   }
 
-  /** Flush whatever remains at end of recording */
+  /** Flush whatever remains at end of recording (subject to flush()'s misfire gate) */
   flushRemaining(): void {
     if (this.frames.length === 0) return;
-
-    const durationSec = this.sampleCount / VAD_CONFIG.sampleRate;
-    const hasSpeech = this.scores.some(
-      (s) => s >= VAD_CONFIG.positiveSpeechThreshold
-    );
-
-    if (!hasSpeech) {
-      this.onLog?.("info", `flushRemaining: discarding ${durationSec.toFixed(2)}s of trailing silence (no speech detected)`);
-      // Discard this segment but preserve segmentIndex so that totalSegments
-      // still reflects segments already flushed mid-recording
-      this.reset(false);
-      return;
-    }
-
     this.flush(this.frames.length);
   }
 

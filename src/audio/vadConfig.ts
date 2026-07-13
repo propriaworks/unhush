@@ -5,6 +5,8 @@ export const VAD_CONFIG = {
   minSegmentDuration: 15,       // seconds - flush on speech→silence if above this
   maxSegmentDuration: 29.9,     // seconds - forced cut
   hardCutLookback: 15,          // seconds to look back for best cut point
+  minSpeechFrames: 6,           // cumulative frames >= positiveSpeechThreshold required to send a segment
+                                 // (~192ms at 32ms/frame); below this it's a VAD misfire (cough, click) and is discarded
   maxConcurrentRequests: 3,
   retryAttempts: 2,
   retryBaseDelayMs: 1000,
