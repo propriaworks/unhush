@@ -57,11 +57,12 @@ const appIconWarning = path.join(__dirname, isDev ? "../assets/icon-dev-warning.
 
 let logFile = null;
 let debugLogging = false; // gates "debug"-level messages only — see settings.json's debug_logging
+const startedAt = Date.now();
 function log(level, message) {
   if (level === "debug" && !debugLogging) return;
   if (!logFile) {
-    // shouldn't happen — log() is only called after app is ready
-    console.error(`[pre-ready log] ${level.toUpperCase()}: ${message}`);
+    // shouldn't happen — initLogging() runs at module load, before anything calls log()
+    console.error(`[pre-init log] ${level.toUpperCase()}: ${message}`);
     return;
   }
   const now = new Date();
@@ -70,6 +71,46 @@ function log(level, message) {
   fs.appendFileSync(logFile, line);
   if (isDev) console.log(line.trimEnd());
 }
+
+// Opens the log at module load rather than in whenReady(), so everything from the very first
+// module initialisation onwards is recorded — the second-instance path and any startup failure
+// both happen before "ready" and used to vanish into console.error. app.getPath() and
+// app.getVersion() are documented as usable before "ready" (verified: the logs path is
+// identical before and after).
+function initLogging() {
+  try {
+    const logDir = app.getPath("logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    logFile = path.join(logDir, "unhush.log");
+  } catch (e) {
+    // Running at module load means a throw here would take the whole app down over a log file.
+    // Leave logFile null instead: log() then falls back to console.
+    console.error(`could not open log file: ${e.message}`);
+  }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8"));
+    debugLogging = cfg.debug_logging === true || cfg.debug_logging === "true";
+  } catch (e) {} // missing/invalid settings.json — debugLogging stays false
+}
+
+function uptimeString(ms) {
+  const s = Math.round(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h${m}m` : m ? `${m}m${s % 60}s` : `${s}s`;
+}
+
+// Logged once per real launch (not for the second-instance hotkey relaunches, which would
+// otherwise banner the log on every dictation toggle under the Wayland fallback).
+function logStartup() {
+  log("info", `=== Unhush ${app.getVersion()} starting: electron ${process.versions.electron}, ` +
+    `node ${process.versions.node}, pid ${process.pid}, ${isDev ? "dev" : "packaged"} ===`);
+  log("info", `platform: ${os.type()} ${os.release()} ${process.arch}, ` +
+    `session=${process.env.XDG_SESSION_TYPE || "?"}, desktop=${process.env.XDG_CURRENT_DESKTOP || "?"}, ` +
+    `logs=${logFile}`);
+}
+
+initLogging();
 waylandShortcut.init(log);
 ydotool.init(log);
 audioDucking.init(log, app.getName());
@@ -715,17 +756,10 @@ if (!gotTheLock) {
     }
   });
 
+  logStartup();
+
   app.whenReady().then(() => {
-    const logDir = app.getPath('logs');
-    fs.mkdirSync(logDir, { recursive: true });
-    logFile = path.join(logDir, 'unhush.log');
-
-    try {
-      const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
-      const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
-      debugLogging = cfg.debug_logging === true || cfg.debug_logging === "true";
-    } catch (e) {} // missing/invalid settings.json — debugLogging stays false
-
+    log("info", `app ready after ${Date.now() - startedAt}ms`);
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
@@ -799,6 +833,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  // First thing, so the shutdown is on record even if a teardown step below throws.
+  // Skipped for the second instance, which quits immediately and never really started.
+  if (gotTheLock) log("info", `=== Unhush shutting down after ${uptimeString(Date.now() - startedAt)} ===`);
   audioDucking.restoreSyncForQuit();
   globalShortcut.unregisterAll();
   // Our ydotoold must not outlive us — it holds an open /dev/uinput virtual keyboard.
@@ -818,9 +855,17 @@ app.on("will-quit", () => {
   }
 });
 
-process.on("SIGINT", () => {
-  app.quit();
-});
+// Chromium's browser process installs its own SIGINT/SIGTERM handling and shuts down cleanly
+// through "will-quit" on both, ahead of node's listeners -- measured, by sending each signal to
+// the main pid alone and finding the shutdown line present but the one below absent. These stay
+// only as a fallback for a signal arriving before that machinery is up (e.g. during module
+// load), and the log line is how we would find out that ever happens.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    log("info", `received ${sig} — quitting`);
+    app.quit();
+  });
+}
 
 app.on("before-quit", () => {
   if (tray) {
