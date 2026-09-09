@@ -14,6 +14,7 @@ const { exec, execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
+const ydotool = require("./ydotool.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const fs = require("fs");
@@ -70,6 +71,7 @@ function log(level, message) {
   if (isDev) console.log(line.trimEnd());
 }
 waylandShortcut.init(log);
+ydotool.init(log);
 audioDucking.init(log, app.getName());
 activeWindow.init(log);
 
@@ -355,6 +357,7 @@ ipcMain.handle("hide-window", async () => {
 
 ipcMain.handle("copy-to-clipboard", async (event, text) => {
   clipboard.writeText(text);
+  clipboard.writeText(text, 'selection'); // PRIMARY too, so middle-click paste works
   return true;
 });
 
@@ -456,7 +459,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
       // this same thread. Blocking here for the time ydotool takes to run risks stalling that
       // response right when it's needed most. Still awaited, so callers see the real outcome
       // and errors/timeouts are still caught below -- this isn't fire-and-forget.
-      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000 });
+      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000, env: ydotool.env() });
       log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
       log('error', `output-text paste key simulation failed: ${err.message}`);
@@ -490,7 +493,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
           await captureDestination();
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore', env: ydotool.env() });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }
@@ -585,52 +588,112 @@ ipcMain.handle("get-shortcut-mode", () => {
   return waylandShortcut.shortcutMode();
 });
 
-// Warn once if /dev/uinput isn't accessible (AppImage users, or post-install udev not yet active).
-// Skipped when output mode is 'clipboard' since ydotool isn't needed in that case.
-function checkUinputAccess() {
+// Check the ydotool paste path at startup and, if something is broken, show the setup window.
+// Skipped when output mode is 'clipboard', since ydotool isn't used in that case.
+//
+// The old version of this warned on a single fs.accessSync of /dev/uinput and latched a sentinel
+// file *before* showing the dialog, so a genuinely broken install was hidden forever after one
+// dismissal — and a package postinstall's asynchronous `udevadm trigger` could easily lose the
+// race against an installer's "Launch" button and warn about a permission that was about to
+// arrive. ydotool.preflight() retries, and diagnoses the daemon and the client binary too.
+let setupWindow = null;
+let lastSetupResult = null; // most recent preflight, so "don't show again" mutes what was on screen
+
+function setupMuteFile() {
+  return path.join(app.getPath("userData"), ".setup-dialog-muted");
+}
+
+function mutedProblems() {
+  try {
+    return new Set(JSON.parse(fs.readFileSync(setupMuteFile(), "utf8")));
+  } catch (e) {
+    // Pre-3.2 sentinel: the user dismissed the old uinput-only dialog, so honour that for uinput.
+    if (fs.existsSync(path.join(app.getPath("userData"), ".uinput-warned"))) return new Set(["uinput"]);
+    return new Set();
+  }
+}
+
+async function checkOutputPath() {
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8")); } catch (e) {}
+  if ((settings.outputMode || "paste") === "clipboard") return;
 
-  const outputMode = settings.outputMode || "paste";
-  if (outputMode === "clipboard") return;
+  const result = await ydotool.preflight();
+  lastSetupResult = result;
+  if (result.ok) return;
 
-  // Sentinel file so we only warn once
-  const warnedFlag = path.join(app.getPath("userData"), ".uinput-warned");
-  if (fs.existsSync(warnedFlag)) return;
-
-  try {
-    fs.accessSync("/dev/uinput", fs.constants.W_OK);
-    return; // accessible — nothing to do
-  } catch (e) {}
-
-  // Not accessible: show guidance
-  try { fs.writeFileSync(warnedFlag, ""); } catch (e) {}
-
-  const udevCmd = `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/80-uinput.rules`;
-  const reloadCmd = `sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput`;
-
-  dialog.showMessageBox({
-    type: "warning",
-    title: "Setup needed for ydotool",
-    message: "/dev/uinput is not accessible",
-    detail:
-      "Unhush uses ydotool to paste text, which requires\nwrite access to /dev/uinput.\n\n" +
-      "To give permission, run these two commands in a\nterminal (click 'Copy commands' to copy them):\n\n" +
-      `~~~~\n${udevCmd}\n\n` +
-      `${reloadCmd}\n~~~~\n\n` +
-      "On systemd-based systems this takes effect immediately.\n\n" +
-      "Alternatively, switch to Clipboard mode in Settings\n(then you paste manually with Ctrl+V).\n",
-    buttons: ["OK", "Copy commands", "Open Settings"],
-    defaultId: 0,
-  }).then(({ response }) => {
-    if (response === 1) {
-      clipboard.writeText(`${udevCmd}\n${reloadCmd}`);
-    } else if (response === 2) {
-      createSettingsWindow("usability");
-    }
-  });
+  // Only stay quiet if the user muted *these* problems; a new failure still deserves a warning.
+  const muted = mutedProblems();
+  if (result.problems.every((p) => muted.has(p.code))) {
+    log("info", `setup problems suppressed by user: ${result.problems.map((p) => p.code).join(", ")}`);
+    return;
+  }
+  showSetupWindow(result);
 }
+
+function showSetupWindow(result) {
+  if (setupWindow) {
+    setupWindow.webContents.send("setup-result", result);
+    setupWindow.focus();
+    return;
+  }
+  setupWindow = new BrowserWindow({
+    width: 640,
+    height: 620,
+    minWidth: 460,
+    minHeight: 320,
+    resizable: true,      // the problem list varies in length, so let it be resized
+    // It's a dialog, not an app window. `parent` is what actually does the work on Linux: it
+    // sets WM_TRANSIENT_FOR, and window managers then drop the minimise/maximise buttons.
+    // The minimizable/maximizable flags alone are documented as inconsistent on Linux.
+    parent: mainWindow || undefined,
+    minimizable: false,
+    maximizable: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+    icon: appIcon,
+    title: "Unhush Setup",
+  });
+  setupWindow.on("closed", () => { setupWindow = null; });
+  setupWindow.webContents.on("did-finish-load", () => {
+    setupWindow.webContents.send("setup-result", result);
+  });
+  setupWindow.loadFile(path.join(__dirname, "setup-dialog.html"));
+}
+
+ipcMain.handle("ydotool-preflight", async () => {
+  lastSetupResult = await ydotool.preflight();
+  return lastSetupResult;
+});
+
+ipcMain.handle("open-settings-window", (event, tab) => {
+  createSettingsWindow(tab || "usability");
+  return true;
+});
+
+ipcMain.on("close-setup-dialog", () => {
+  if (setupWindow) setupWindow.close();
+});
+
+// Remember which problems the user chose not to be warned about again, by code rather than as a
+// blanket flag, so an unrelated failure later still surfaces. Records what was actually on screen
+// when they ticked the box, rather than re-running the checks and possibly storing something else.
+ipcMain.on("set-setup-dialog-muted", (event, muted) => {
+  try {
+    if (!muted) { fs.unlinkSync(setupMuteFile()); return; }
+    const codes = (lastSetupResult ? lastSetupResult.problems : []).map((p) => p.code);
+    fs.writeFileSync(setupMuteFile(), JSON.stringify(codes));
+    log("info", `setup warnings muted for: ${codes.join(", ") || "(none)"}`);
+  } catch (e) {
+    log("warn", `could not update setup-dialog mute state: ${e.message}`);
+  }
+});
 
 // Single-instance toggle: on Wayland without portal support (GNOME < 48, wlroots compositors),
 // the global hotkey is a manual desktop env. keyboard shortcut that simply re-launches Unhush.
@@ -667,7 +730,7 @@ if (!gotTheLock) {
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
     createTray();
-    checkUinputAccess();
+    checkOutputPath();
 
     // Reposition the recording bar whenever the primary display's work area changes
     // (resolution change, taskbar resize, monitor added/removed, etc.)
@@ -738,6 +801,9 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   audioDucking.restoreSyncForQuit();
   globalShortcut.unregisterAll();
+  // Our ydotoold must not outlive us — it holds an open /dev/uinput virtual keyboard.
+  // No-op if we adopted someone else's daemon rather than starting one.
+  ydotool.stopDaemon();
   // Chromium doesn't reliably remove its Mojo IPC channel files from userData.
   // Only the main instance cleans up — the second instance must not touch files
   // that the main instance may still be using.

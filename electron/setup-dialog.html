@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Unhush Setup</title>
+    <style>
+      /* Deliberately self-contained: this window is loaded straight off disk with loadFile(),
+         so it must not depend on the Vite build or on any network font. */
+      :root {
+        --bg: #ffffff; --fg: #1a1a1a; --muted: #5c5c5c;
+        --card: #f4f4f5; --border: #d8d8dc; --accent: #2563eb; --ok: #15803d;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1c1e; --fg: #ececee; --muted: #a0a0a8;
+          --card: #262629; --border: #3a3a3f; --accent: #60a5fa; --ok: #4ade80;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 20px 22px; background: var(--bg); color: var(--fg);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 19px; margin: 0 0 8px; }
+      .intro { margin: 0 0 10px; }
+      .alt {
+        color: var(--muted); margin: 0 0 18px; padding-left: 12px;
+        border-left: 2px solid var(--border);
+      }
+      .problem { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; background: var(--card); }
+      .problem h2 { font-size: 14px; margin: 0 0 6px; }
+      .problem p { margin: 0 0 10px; color: var(--muted); }
+      /* Must out-specify `.problem p` above, which would otherwise win and zero the top margin. */
+      .problem p.note { font-size: 12.5px; margin: 18px 0 0; color: var(--muted); }
+      pre {
+        margin: 0; padding: 10px 12px; border-radius: 6px; overflow-x: auto;
+        background: var(--bg); border: 1px solid var(--border);
+        font: 12.5px/1.6 ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
+        user-select: text; white-space: pre-wrap; word-break: break-all;
+      }
+      .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+      button {
+        font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+        border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .copied { color: var(--ok); font-size: 12.5px; }
+      .footer { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+      .footer .spacer { flex: 1; }
+      label.dontshow { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12.5px; }
+      #status { margin: 0 0 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); }
+      #status.ok { color: var(--ok); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to Unhush</h1>
+    <p class="intro">
+      Unhush can type your dictation straight into whatever application you're using, but that
+      needs a one-time setup step on this system. Run the commands below in a terminal, then
+      click <strong>Re-check</strong> — no restart needed.
+    </p>
+    <p class="alt">
+      This is optional. <strong>Clipboard mode</strong> needs no setup at all: Unhush puts each
+      transcript on your clipboard and you paste it yourself with Ctrl+V. You can switch modes at
+      any time in Settings.
+    </p>
+
+    <div id="status" hidden></div>
+    <div id="problems"></div>
+
+    <div class="footer">
+      <button id="recheck" class="primary">Re-check</button>
+      <button id="settings">Use Clipboard mode instead</button>
+      <span class="spacer"></span>
+      <label class="dontshow"><input type="checkbox" id="dontshow" /> Don't show again</label>
+      <button id="close">Close</button>
+    </div>
+
+    <script>
+      const api = window.electronAPI;
+      const problemsEl = document.getElementById("problems");
+      const statusEl = document.getElementById("status");
+
+      const introEl = document.querySelector(".intro");
+      const altEl = document.querySelector(".alt");
+
+      function render(result) {
+        problemsEl.replaceChildren();
+        statusEl.hidden = true;
+        statusEl.className = "";
+        // The setup instructions are the whole point of the intro — drop it once they're moot.
+        introEl.hidden = result.ok;
+        altEl.hidden = result.ok;
+
+        if (result.ok) {
+          statusEl.hidden = false;
+          statusEl.className = "ok";
+          statusEl.textContent =
+            "All set — Unhush can now type your dictation directly into other applications.";
+          return;
+        }
+
+        for (const p of result.problems) {
+          const card = document.createElement("div");
+          card.className = "problem";
+
+          const h = document.createElement("h2");
+          h.textContent = p.title;
+          card.append(h);
+
+          const d = document.createElement("p");
+          d.textContent = p.detail;
+          card.append(d);
+
+          const pre = document.createElement("pre");
+          const text = p.commands.join("\n");
+          pre.textContent = text;
+          card.append(pre);
+
+          const row = document.createElement("div");
+          row.className = "row";
+          const btn = document.createElement("button");
+          btn.textContent = "Copy";
+          const flash = document.createElement("span");
+          flash.className = "copied";
+          // The whole point of this window: copying must not dismiss it, and must confirm.
+          btn.addEventListener("click", async () => {
+            await api.copyToClipboard(text);
+            flash.textContent = "Copied ✓";
+            setTimeout(() => { flash.textContent = ""; }, 2000);
+          });
+          row.append(btn, flash);
+          card.append(row);
+
+          if (p.note) {
+            const n = document.createElement("p");
+            n.className = "note";
+            n.textContent = p.note;
+            card.append(n);
+          }
+          problemsEl.append(card);
+        }
+      }
+
+      document.getElementById("recheck").addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "Checking…";
+        try {
+          render(await api.ydotoolPreflight());
+        } finally {
+          e.target.disabled = false;
+          e.target.textContent = "Re-check";
+        }
+      });
+      document.getElementById("settings").addEventListener("click", () => api.openSettings("usability"));
+      document.getElementById("close").addEventListener("click", () => api.closeSetupDialog());
+      document.getElementById("dontshow").addEventListener("change", (e) => api.setSetupDialogMuted(e.target.checked));
+
+      api.onSetupResult((_event, result) => render(result));
+    </script>
+  </body>
+</html>

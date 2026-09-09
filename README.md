@@ -70,7 +70,7 @@ Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcri
 
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
-`ydotool` needs write access to `/dev/uinput`. At startup, Unhush will show a one-time dialog with setup instructions if it isn't already accessible.
+`ydotool` needs write access to `/dev/uinput`. At startup Unhush checks for everything it needs to paste — the `ydotool` binary, `/dev/uinput` access, and the `ydotoold` daemon — and if anything is missing it opens a setup window naming the specific problem, with the commands to fix it and a **Re-check** button. Since AppImage installs run no post-install script, this is where you'll be told what to do.
 
 On X11 sessions, also install `xprop` if you want the tray's "sent ➜ \<app\>" indicator (package name varies by distro — see [Requirements](#requirements)); it's optional and everything else works fine without it.
 </details>
@@ -89,16 +89,26 @@ pnpm install
 # Run in development mode
 pnpm run electron:dev
 ```
-
-### Running `ydotoold` as a service (optional, recommended)
-
-Using the `ydotoold` daemon improves responsiveness and avoids the small startup delay on each dictation. If your package manager doesn't provide a service config (Ubuntu's doesn't), get the `systemd` config [here](https://github.com/ReimuNotMoe/ydotool/raw/refs/heads/master/Daemon/systemd/ydotoold.service.in). Save it as `$HOME/.config/systemd/user/ydotoold.service`, edit `ExecStart` to point to `which ydotoold`, then run once:
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable --now ydotoold
-```
 </details>
+
+### The `ydotoold` daemon
+
+Nothing to do — Unhush handles this. ydotool 1.x is only a client: it forwards keystrokes over a
+unix socket to the `ydotoold` daemon, which is what actually holds `/dev/uinput` open. At startup
+Unhush looks for a daemon it can use and, finding none, starts its own as a child process on a
+socket private to Unhush (`$XDG_RUNTIME_DIR/unhush-ydotool.sock`). It exits with the app.
+
+If a ydotoold is already running on ydotool's default socket — because you started one yourself,
+or enabled Debian's or Arch's `ydotool.service` — Unhush adopts that one instead of starting a
+second.
+
+Two distro notes:
+- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes
+  `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
+- As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does
+  not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds
+  `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in
+  `/run/user/<uid>/` and finds nothing. Leave it disabled.
 
 ## Usage
 
@@ -297,16 +307,23 @@ Unhush logs to `~/.config/unhush/logs/unhush.log` (Linux). When something goes w
 
 If you're using **Paste** (default) or **Type** output mode, Unhush depends on ydotool. Switch to **Clipboard** mode in Settings to eliminate this dependency entirely (you will need to paste the result yourself).
 
-- Test manually: `ydotool type "hello"` — the word should appear in your terminal
+Unhush diagnoses this itself: it checks the paste path at startup and opens a setup window naming
+whatever is broken, with the commands to fix it and a **Re-check** button. If you dismissed that
+window with "Don't show again", delete `~/.config/unhush/.setup-dialog-muted` to get it back.
+The checks it runs, if you'd rather do them by hand:
+
+- Test manually: `YDOTOOL_SOCKET=$XDG_RUNTIME_DIR/unhush-ydotool.sock ydotool type "hello"` — the word should appear in your terminal
 - Ensure ydotool is installed (`.deb`/`.rpm`/`.pacman` installs it automatically; AppImage users need to install it manually)
-- Ensure the daemon (`ydotoold`) is running — running it as a user systemd service is recommended (see [Install ydotool](#install-ydotool-appimage-only))
-- **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users will see a one-time setup dialog on first use; follow the instructions shown, or run:
+- Ensure the daemon runs. Unhush starts its own `ydotoold` and stops it on exit, so check while Unhush is running: `ydotool debug` exits 0 when it can reach a daemon. See [The `ydotoold` daemon](#the-ydotoold-daemon) — in particular, do **not** expect Fedora's packaged `ydotool.service` to help.
+- **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users need to do it themselves:
   ```bash
   echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
     | sudo tee /etc/udev/rules.d/80-uinput.rules
   sudo udevadm control --reload-rules && sudo udevadm trigger
   ```
-  In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>`.
+  If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
+
+  In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>` — but note that a running process can't pick up new group membership, so log out and back in afterwards.
 </details>
 
 <details>

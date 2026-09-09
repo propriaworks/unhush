@@ -17,6 +17,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
 
+  // Setup dialog (electron/setup-dialog.html) — see electron/ydotool.cjs
+  ydotoolPreflight: () => ipcRenderer.invoke("ydotool-preflight"),
+  openSettings: (tab) => ipcRenderer.invoke("open-settings-window", tab),
+  closeSetupDialog: () => ipcRenderer.send("close-setup-dialog"),
+  setSetupDialogMuted: (muted) => ipcRenderer.send("set-setup-dialog-muted", muted),
+  onSetupResult: (callback) => ipcRenderer.on("setup-result", callback),
+
   // Settings
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   onNavigateTab: (callback) => ipcRenderer.on("navigate-tab", callback),
