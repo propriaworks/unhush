@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
-import { ensureCustomServices, getLLMWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
+import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [slowLoadHint, setSlowLoadHint] = useState(false); // shown once transcribing runs long enough to look like a cold model load, not just normal processing
   const [error, setError] = useState<string | null>(null);
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
@@ -28,6 +29,24 @@ function RecordingBar() {
   useEffect(() => {
     if (fatalTranscriptionError && isRecording) handleStopRecording();
   }, [fatalTranscriptionError]);
+
+  // Surface a "loading model" hint once transcribing has run long enough that it's very
+  // unlikely to just be normal processing — but only when a warm-up we actually know about
+  // is still pending, so this can't misfire as a generic "it's just slow" message. A single
+  // check at the threshold is enough: cold loads run 10s-90s+, so if one is in flight at 3s
+  // it'll still be in flight, and this only needs to flip on, not track progress after that.
+  useEffect(() => {
+    if (!isTranscribing) {
+      setSlowLoadHint(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (getTranscriptionWarmupStatus() === "pending" || getLLMWarmupStatus() === "pending") {
+        setSlowLoadHint(true);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [isTranscribing]);
 
   // Known-bad settings (no API key, or no URL/model for a custom server) are static — no
   // need to wait for a live probe to fail before badging them. Unlike the runtime/warmup
@@ -260,12 +279,19 @@ function RecordingBar() {
     if (isTranscribing) {
       const metalPill = { background: "linear-gradient(to bottom, #1a3dbe, #a0b4ff 50%, #1a3dbe)" };
       return (
-        <div className="flex items-center gap-1.5 h-8">
-          <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
-          <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
-          <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
-          <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
-          <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1.5 h-8">
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
+          </div>
+          {slowLoadHint && (
+            <span className="text-white/60 text-[13px] whitespace-nowrap">
+              Loading model after being idle — this can take a bit
+            </span>
+          )}
         </div>
       );
     }

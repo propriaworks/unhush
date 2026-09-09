@@ -86,6 +86,11 @@ const ollamaCache = new Map<string, boolean>();
 // Tracks whether the most recent custom LLM warm-up succeeded
 let llmWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
 
+// Tracks whether the most recent custom transcription warm-up succeeded. Exposed so the UI
+// can tell "still transcribing, but this looks like a cold model load" apart from ordinary
+// per-utterance processing time.
+let transcriptionWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 // Suffixes previously expected in the "API URL" Settings field, back when it meant "the
@@ -518,10 +523,12 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
   // ── Phase 2: Warm-up (rate-limited per service kind) ─────────────────────────
 
   const now = Date.now();
-  const warmupPromises: Promise<void>[] = [];
 
-  for (const service of services) {
-    if (!service.model) continue;
+  // Returns null if this service isn't due for a warm-up right now (rate-limited or
+  // Phase 1 already knows it's unreachable); otherwise fires the request and returns a
+  // promise that resolves once it settles.
+  const runWarmup = (service: ServiceInfo): Promise<void> | null => {
+    if (!service.model) return null;
 
     const intervalKey =
       service.kind === "transcription"
@@ -535,48 +542,60 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     // short cooldown (HEALTHCHECK_FAILURE_RETRY_MS) and will flip this back to true — via
     // setUnreachable() or a warm-up success below — the moment it's actually reachable
     // again, which naturally unblocks warm-up on the next call.
-    if (!(lastHealthCheckOk.get(service.baseUrl) ?? true)) continue;
+    if (!(lastHealthCheckOk.get(service.baseUrl) ?? true)) return null;
 
     const warmupKey = `${service.baseUrl}:${service.kind}`;
     const lastWarmup = lastWarmupTime.get(warmupKey) ?? 0;
     const lastOk = lastWarmupOk.get(warmupKey) ?? false;
     const effectiveIntervalMs = lastOk ? intervalMs : WARMUP_FAILURE_RETRY_MS;
-    if (now - lastWarmup < effectiveIntervalMs && lastWarmupModel.get(warmupKey) === service.model) continue;
+    if (now - lastWarmup < effectiveIntervalMs && lastWarmupModel.get(warmupKey) === service.model) return null;
 
     lastWarmupTime.set(warmupKey, now);
     lastWarmupModel.set(warmupKey, service.model);
 
     if (service.kind === "transcription") {
-      warmupPromises.push(
-        warmUpTranscription(service.baseUrl, service.apiKey, service.model, log).then(
-          // A successful warm-up counts as recent contact, so an actively-used service
-          // never looks stale even though Phase 1 only re-probes it occasionally.
-          (ok) => {
-            lastWarmupOk.set(warmupKey, ok);
-            if (ok) {
-              lastServiceContact.set(service.baseUrl, Date.now());
-              lastHealthCheckOk.set(service.baseUrl, true);
-            }
-          },
-        ),
-      );
-    } else {
-      llmWarmupStatus = "pending";
-      warmupPromises.push(
-        warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then((ok) => {
-          llmWarmupStatus = ok ? "ready" : "failed";
+      transcriptionWarmupStatus = "pending";
+      return warmUpTranscription(service.baseUrl, service.apiKey, service.model, log).then(
+        // A successful warm-up counts as recent contact, so an actively-used service
+        // never looks stale even though Phase 1 only re-probes it occasionally.
+        (ok) => {
+          transcriptionWarmupStatus = ok ? "ready" : "failed";
           lastWarmupOk.set(warmupKey, ok);
           if (ok) {
             lastServiceContact.set(service.baseUrl, Date.now());
             lastHealthCheckOk.set(service.baseUrl, true);
           }
-        }),
+        },
       );
     }
-  }
 
-  // Fire warm-up in the background — caller has already been unblocked after Phase 1
-  Promise.allSettled(warmupPromises);
+    llmWarmupStatus = "pending";
+    return warmUpLLM(service.baseUrl, service.apiKey, service.model, log).then((ok) => {
+      llmWarmupStatus = ok ? "ready" : "failed";
+      lastWarmupOk.set(warmupKey, ok);
+      if (ok) {
+        lastServiceContact.set(service.baseUrl, Date.now());
+        lastHealthCheckOk.set(service.baseUrl, true);
+      }
+    });
+  };
+
+  const transcriptionServices = services.filter((s) => s.kind === "transcription");
+  const llmServices = services.filter((s) => s.kind === "llm");
+
+  // Fire warm-up in the background — caller has already been unblocked after Phase 1.
+  // Transcription runs to completion before LLM starts: a cold transcription load and a
+  // cold LLM load hitting the same local GPU at the same moment (e.g. the first recording
+  // after both have idled out) have been observed to each take far longer than either does
+  // alone — consistent with CUDA-driver-level contention over large VRAM allocations.
+  // Serializing them avoids that pile-up, and prioritizes transcription because dictation
+  // can't produce any output without it, whereas a not-yet-ready LLM step already degrades
+  // gracefully to the raw transcript (see llmNotReady in RecordingBar.tsx).
+  const isPromise = (p: Promise<void> | null): p is Promise<void> => p !== null;
+  void (async () => {
+    await Promise.allSettled(transcriptionServices.map(runWarmup).filter(isPromise));
+    await Promise.allSettled(llmServices.map(runWarmup).filter(isPromise));
+  })();
 }
 
 // ── Service contact invalidation ───────────────────────────────────────────────
@@ -599,6 +618,11 @@ export function invalidateServiceContact(baseUrl: string): void {
 /** Returns the status of the most recent custom LLM warm-up request. */
 export function getLLMWarmupStatus(): "idle" | "pending" | "ready" | "failed" {
   return llmWarmupStatus;
+}
+
+/** Returns the status of the most recent custom transcription warm-up request. */
+export function getTranscriptionWarmupStatus(): "idle" | "pending" | "ready" | "failed" {
+  return transcriptionWarmupStatus;
 }
 
 // ── Model cache access ─────────────────────────────────────────────────────────

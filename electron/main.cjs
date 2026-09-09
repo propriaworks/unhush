@@ -27,6 +27,7 @@ let isRecording = false;
 let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
+let lastHotkeyAt = 0; // when the toggle hotkey last fired — for paste-failure diagnostics timing
 // Reason-keyed warning registries. Each entry is one independent cause the renderer has
 // reported (bad settings, a runtime failure, a warm-up streak, etc.) — the tray badges
 // whenever either set is non-empty, and clears only once every reason in it has cleared,
@@ -91,7 +92,7 @@ async function registerShortcut(shortcut) {
   globalShortcut.unregisterAll();
 
   try {
-    await globalShortcut.register(shortcut, () => { toggleRecording(); });
+    await globalShortcut.register(shortcut, () => { lastHotkeyAt = Date.now(); toggleRecording(); });
   } catch (e) {}
 
   // On Wayland without portal support, globalShortcut does nothing.
@@ -420,22 +421,49 @@ ipcMain.handle("output-text", async (event, text, method) => {
   // read-back check just below skips it if that's no longer safe anyway.
   const RESTORE_CLIPBOARD_DELAY_MS = 3000;
 
+  // TEMPORARY DIAGNOSTICS (silent-paste-failure investigation), active only with debug_logging
+  // on: asks the X server what the selections actually serve, via xclip -- i.e. from *outside*
+  // our process, exercising the same owner-request path a pasting app uses, so a successful
+  // read also proves we are answering selection requests at that moment. Logs only
+  // lengths/match, never content.
+  // Only possible because the ydotool call below is async: while awaiting xclip, our event
+  // loop stays free to answer xclip's own selection request (execSync would deadlock here).
+  async function xSelectionDiag(label) {
+    if (!debugLogging || process.env.XDG_SESSION_TYPE === 'wayland') return;
+    const read = async (sel) => {
+      try {
+        const { stdout } = await execFileAsync('xclip', ['-o', '-selection', sel, '-t', 'UTF8_STRING'], { timeout: 500 });
+        return stdout;
+      } catch { return null; } // unowned/empty selection, xclip missing, or owner didn't answer in time
+    };
+    const [prim, clip] = await Promise.all([read('primary'), read('clipboard')]);
+    const fmt = (v) => v === null ? 'UNREADABLE' : (v === text ? `match(${v.length})` : `MISMATCH(len ${v.length})`);
+    log('debug', `paste-diag ${label}: primary=${fmt(prim)} clipboard=${fmt(clip)}`);
+  }
+
   async function doPaste() {
     const saved = saveClipboard();
     clipboard.writeText(text);
     clipboard.writeText(text, 'selection');
     await new Promise(resolve => setTimeout(resolve, 250));
     captureDestination();
+    await xSelectionDiag('pre-key');
+    const sinceHotkey = lastHotkeyAt ? Date.now() - lastHotkeyAt : -1;
+    const t0 = Date.now();
     try {
       // execFile (async), not execSync: this keeps the main process' event loop free to service
       // the target app's clipboard-selection request, which we must answer as clipboard owner on
       // this same thread. Blocking here for the time ydotool takes to run risks stalling that
       // response right when it's needed most. Still awaited, so callers see the real outcome
       // and errors/timeouts are still caught below -- this isn't fire-and-forget.
-      await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000 });
+      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000 });
+      log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
       log('error', `output-text paste key simulation failed: ${err.message}`);
     }
+    // One more reading after the paste should have landed, to catch ownership being lost/replaced
+    // in the window around the keystroke itself.
+    setTimeout(() => { xSelectionDiag('post-key+500ms'); }, 500);
     // Scheduled rather than awaited so this handler's promise resolves immediately instead of
     // keeping the renderer's invoke() pending for RESTORE_CLIPBOARD_DELAY_MS. Skips the restore
     // if the clipboard no longer holds our transcript: that means the user (or another process,
