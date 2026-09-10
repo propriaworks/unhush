@@ -92,6 +92,7 @@
       const introShortcutEl = document.getElementById("intro-shortcut");
       const altEl = document.querySelector(".alt");
       const settingsBtn = document.getElementById("settings");
+      const recheckBtn = document.getElementById("recheck");
 
       function render(result) {
         problemsEl.replaceChildren();
@@ -105,6 +106,11 @@
         introShortcutEl.hidden = result.ok || needsPasteSetup;
         altEl.hidden = result.ok || !needsPasteSetup;
         settingsBtn.hidden = result.ok || !needsPasteSetup;
+        // Re-check re-runs the ydotool preflight, which can genuinely change answer once the user
+        // has run the commands. It can't see a keyboard shortcut bound in someone's desktop
+        // settings, so with only that card on screen it would report the same thing forever --
+        // which reads as a broken button. Close is enough there.
+        recheckBtn.hidden = !result.ok && !needsPasteSetup;
 
         if (result.ok) {
           statusEl.hidden = false;
@@ -154,22 +160,10 @@
           });
           row.append(btn);
 
-          // Take the user to the right settings page rather than describing a menu path. Only
-          // offered when the desktop is one we recognise and its settings binary is installed —
-          // see shortcutSettingsCommand() in electron/waylandShortcut.cjs.
-          if (p.settingsCommand) {
-            const open = document.createElement("button");
-            open.textContent = "Open shortcut settings";
-            // Same acknowledgement as Copy, in the same place: the settings app can take seconds
-            // to draw its window, and an unacknowledged button reads as a broken one. "Opening",
-            // not "Opened" -- all we know is that the shell started.
-            open.addEventListener("click", async () => {
-              showFlash("Opening…", 5000);
-              const r = await api.spawnDetached(p.settingsCommand);
-              if (r && !r.ok) showFlash("Couldn't open settings", 5000, true);
-            });
-            row.append(open);
-          }
+          // No "open shortcut settings" button here: this card only appears when the desktop has
+          // no GlobalShortcuts portal, and that is also what would have opened its editor. The
+          // remaining desktops in that position (sway, river, Wayfire) have no shortcut GUI at
+          // all -- their keys live in a config file -- so the note tells the user where to look.
 
           row.append(flash);
           card.append(row);
@@ -184,7 +178,7 @@
         }
       }
 
-      document.getElementById("recheck").addEventListener("click", async (e) => {
+      recheckBtn.addEventListener("click", async (e) => {
         e.target.disabled = true;
         e.target.textContent = "Checking…";
         try {

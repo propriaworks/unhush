@@ -31,8 +31,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // How the global shortcut is managed here, plus the command a desktop-environment shortcut
   // should run (see electron/waylandShortcut.cjs and electron/commandFifo.cjs).
   getShortcutInfo: () => ipcRenderer.invoke("get-shortcut-info"),
-  setupGnomeShortcut: (shortcut) => ipcRenderer.invoke("setup-gnome-shortcut", shortcut),
-  removeGnomeShortcut: () => ipcRenderer.invoke("remove-gnome-shortcut"),
+  configureShortcut: () => ipcRenderer.invoke("configure-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
 
   // Remove listeners

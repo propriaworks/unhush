@@ -1,52 +1,47 @@
 // Global shortcut handling on Wayland sessions.
 //
-// We run under XWayland on Wayland (see the re-exec guard at the top of main.cjs), and a Wayland
-// compositor does not honour X11 key grabs from an XWayland client while a native window has focus.
-// So on Wayland the desktop environment owns the key binding, and it runs `unhush-toggle`, which
-// writes one line into our command fifo (electron/commandFifo.cjs).
+// There are exactly three paths, and the session type picks between the first two:
 //
-// That collapses what used to be a guessing game -- is the GlobalShortcuts portal available on this
-// compositor and version? -- into a single answer. The portal branches below are now reached only
-// by someone who forces --ozone-platform themselves, which is unsupported (native Wayland can't
-// keep the clipboard reliable on GNOME -- see the re-exec guard in main.cjs), but is still handled
-// correctly rather than left to misbehave.
+//   X11      globalShortcut.register() in main.cjs -- Chromium grabs the key itself, the Settings
+//            dropdown changes it freely, no consent dialog. Nothing in this file applies.
+//   Wayland  the XDG GlobalShortcuts portal, via our own D-Bus client (portalShortcuts.cjs). We
+//            bind one stable id and dispatch on the id the portal sends back.
+//   Fallback the user binds a key to `unhush-toggle` in their desktop, which writes one line into
+//            our command fifo (commandFifo.cjs). Reached when the portal isn't there at all.
 //
-// Key design note: we do NOT use globalShortcut.isRegistered() to detect portal availability. On
-// KDE and GNOME 48+ the portal interaction is asynchronous — register() returns false while the DE
-// permission dialog is pending, even though the portal will work once the user accepts.
+// Why our own D-Bus client rather than Electron's portal support: Electron/Chromium derives portal
+// shortcut ids locally from the accelerator string, so a restored binding is dead on arrival and a
+// rebind can abort the process. Ours is also reachable from an XWayland client -- D-Bus is
+// transport-agnostic -- which is what lets us keep the XWayland re-exec (see main.cjs) and still
+// bind the hotkey automatically.
+//
+// Portal rules that shape everything below, all measured on KDE Plasma 6 (see
+// https://github.com/jtbr/dbus_globalshortcut_portal): BindShortcuts on every launch, since a
+// restored session is listed but not armed; one stable id for the app's lifetime;
+// preferred_trigger honoured on the FIRST bind only, so the app can never change its own key
+// afterwards -- only the user can, through ConfigureShortcuts; and there is no unbind.
 //
 // Nothing here shows a dialog: first-run guidance belongs to the setup window
 // (electron/setup-dialog.html), and ongoing configuration to Settings.
 
-const path = require("path");
-const fs = require("fs");
-const { spawnSync } = require("child_process");
 const commandFifo = require("./commandFifo.cjs");
-const { which } = require("./which.cjs");
+const realPortal = require("./portalShortcuts.cjs");
 
 let log = () => {};
-let userDataPath = "";
-// userData is injected rather than pulled from electron's app, the same way audioDucking takes the
-// app name: it's the module's only reason to touch electron, and without that dependency this file
-// is directly testable outside an electron process.
-function init(logFn, userData) {
+// The portal client is injectable for the same reason userData used to be: vitest's vi.mock cannot
+// reach a require() inside a .cjs module, and without a stand-in every test of this file would open
+// a real D-Bus connection and answer differently on each machine. Production passes nothing.
+let portal = realPortal;
+function init(logFn, portalImpl) {
   log = logFn;
-  userDataPath = userData || "";
-  // Without it, gnomeFlagFile() resolves relative to the cwd and the GNOME opt-in silently stops
-  // being remembered — a caller that forgets the argument should hear about it, not limp on.
-  if (!userDataPath) log("warn", "waylandShortcut.init called without a userData path");
+  portal = portalImpl || realPortal;
+  portal.init(logFn);
 }
 
-// Desktop identity is still needed for two things: GNOME is the one desktop whose keybindings we
-// can set programmatically, and both names steer the "where do I click" hint. Everything else that
-// used to branch per compositor and per GNOME version is gone -- see needsFallback().
-const desktop = (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase();
-const isGnome = desktop.includes('gnome');
-const isKde   = desktop.includes('kde') || desktop.includes('plasma');
-
 const isWaylandSession = process.env.XDG_SESSION_TYPE === 'wayland';
-// True when we re-execed ourselves onto XWayland (see the guard at the top of main.cjs).
-const forcedX11 = process.argv.some(a => a.startsWith('--ozone-platform=x11'));
+
+const SHORTCUT_ID = 'toggle-recording';          // stable for the app's lifetime -- see header
+const SHORTCUT_DESCRIPTION = 'Start or stop dictation';
 
 // Which display backend we actually ended up on, for the startup log line -- the thing we
 // previously had to infer from symptoms (a centred, un-raisable recording bar meant Wayland-native).
@@ -56,14 +51,11 @@ function displayBackend() {
   return isWaylandSession ? 'wayland (native)' : 'x11';
 }
 
-// Returns true when a desktop-environment shortcut is needed because globalShortcut can't bind the
-// key itself. One condition, where there used to be a per-compositor, per-GNOME-version portal
-// capability matrix (including a `gnome-shell --version` probe): running under XWayland means
-// Chromium builds an X11 listener rather than a portal one, and a Wayland compositor won't deliver
-// X11 grabs to an XWayland client. The sole exception is a user who forces --ozone-platform
-// themselves, where Electron is a real Wayland client and the portal is live again.
-function needsFallback() {
-  return isWaylandSession && forcedX11;
+// True when the hotkey is the portal's business rather than globalShortcut's. Note this does not
+// consult --ozone-platform: we reach the portal over D-Bus, so it works the same whether Chromium
+// is running as an XWayland or a native Wayland client.
+function usesPortal() {
+  return isWaylandSession;
 }
 
 // The command to paste into a desktop environment's "run a command" shortcut.
@@ -71,185 +63,183 @@ function toggleCommand() {
   return commandFifo.toggleCommand();
 }
 
-// How to open the desktop's own keyboard-shortcut settings, so the setup window can take the user
-// straight there instead of describing a menu path and hoping. Ordered candidates per desktop,
-// because the binary names moved between major versions (Plasma 5 -> 6 especially); the first one
-// actually installed wins, and an unknown desktop simply gets no button rather than a dead one.
-const SHORTCUT_SETTINGS_CANDIDATES = [
-  { when: () => isKde, commands: [
-    "systemsettings kcm_keys",     // Plasma 6
-    "kcmshell6 kcm_keys",
-    "systemsettings5 kcm_keys",    // Plasma 5
-    "kcmshell5 kcm_keys",
-  ]},
-  { when: () => isGnome, commands: ["gnome-control-center keyboard"] },
-  { when: () => desktop.includes('xfce'), commands: ["xfce4-keyboard-settings"] },
-  { when: () => desktop.includes('cinnamon'), commands: ["cinnamon-settings keyboard"] },
-  { when: () => desktop.includes('mate'), commands: ["mate-keyboard-properties"] },
-  { when: () => desktop.includes('lxqt'), commands: ["lxqt-config-globalkeyshortcuts"] },
-  { when: () => desktop.includes('budgie'), commands: ["budgie-control-center keyboard"] },
-];
+// --- Electron accelerator -> XDG trigger syntax ------------------------------------------------
+// Modifiers are upper-case and joined with "+"; the key is an XKB keysym name, which is where the
+// surprises live: case matters ("space", but "F12" and "Insert"), and punctuation has spelled-out
+// names. Only the keys the Settings dropdown can produce strictly need to be here, but stored
+// values from older versions turn up too, so the common punctuation is mapped as well.
+const KEYSYMS = {
+  ' ': 'space', space: 'space', tab: 'Tab', enter: 'Return', return: 'Return', esc: 'Escape',
+  escape: 'Escape', backspace: 'BackSpace', delete: 'Delete', insert: 'Insert', home: 'Home',
+  end: 'End', pageup: 'Prior', pagedown: 'Next', up: 'Up', down: 'Down', left: 'Left',
+  right: 'Right', plus: 'plus',
+  '\\': 'backslash', '/': 'slash', '.': 'period', ',': 'comma', ';': 'semicolon',
+  "'": 'apostrophe', '[': 'bracketleft', ']': 'bracketright', '-': 'minus', '=': 'equal',
+  '`': 'grave',
+};
 
-let _settingsCommand; // cached: PATH doesn't change under a running process
-function shortcutSettingsCommand() {
-  if (_settingsCommand !== undefined) return _settingsCommand;
-  _settingsCommand = null;
-  for (const entry of SHORTCUT_SETTINGS_CANDIDATES) {
-    if (!entry.when()) continue;
-    for (const cmd of entry.commands) {
-      if (which(cmd.split(' ')[0])) { _settingsCommand = cmd; break; }
-    }
-    break;
-  }
-  if (_settingsCommand) log('info', `shortcut settings command: ${_settingsCommand}`);
-  return _settingsCommand;
-}
-
-// Convert Electron accelerator ("Shift+Space") to XKB format ("<Shift>space") for gsettings
-function electronToXkb(shortcut) {
-  const parts = shortcut.split('+');
-  const key = parts.pop().toLowerCase();
+function electronToXdgTrigger(accelerator) {
+  const parts = String(accelerator || '').split('+');
+  // A trailing "+" ("Ctrl+Alt++") splits into an empty last part; the plus key is what was meant.
+  const rawKey = parts.pop() || '+';
   const mods = parts.map(m => {
     switch (m.toLowerCase()) {
-      case 'shift':   return '<Shift>';
-      case 'ctrl':
-      case 'control': return '<Control>';
-      case 'alt':     return '<Alt>';
-      case 'super':
-      case 'meta':    return '<Super>';
-      default:        return `<${m}>`;
+      case 'ctrl': case 'control': case 'cmdorctrl': case 'commandorcontrol': return 'CTRL';
+      case 'alt': case 'option': return 'ALT';
+      case 'shift': return 'SHIFT';
+      case 'super': case 'meta': case 'cmd': case 'command': return 'SUPER';
+      default: return m.toUpperCase();
     }
   });
-  return mods.join('') + key;
+  const lower = rawKey.toLowerCase();
+  let key;
+  if (KEYSYMS[rawKey]) key = KEYSYMS[rawKey];
+  else if (KEYSYMS[lower]) key = KEYSYMS[lower];
+  else if (/^f\d{1,2}$/.test(lower)) key = lower.toUpperCase();  // F1-F24 keep their capital F
+  else key = lower;                                              // letters and digits
+  return [...mods, key].join('+');
 }
 
-const GNOME_BINDING_PATH = '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/unhush/';
-const GNOME_CUSTOM_SCHEMA = `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${GNOME_BINDING_PATH}`;
-const GNOME_MEDIA_SCHEMA = 'org.gnome.settings-daemon.plugins.media-keys';
+// --- Portal binding, and getting it back after a drop ------------------------------------------
+// The client reports an unexpected disconnect (bus crash, compositor or portal-backend restart,
+// suspend/resume) and deliberately does not reconnect itself: GlobalShortcuts has no restore token,
+// so a fresh session and a rebind are required anyway. Recovery is therefore ours, and it is just
+// start() again on a backoff.
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
 
-function gnomeFlagFile() {
-  return path.join(userDataPath, '.wayland-gnome-configured');
-}
+let mode = isWaylandSession ? 'manual' : 'native';
+let triggerDescription = null;
+let everBound = false;   // a binding has worked at least once this session -- see attemptBind()
+let retryIndex = 0;
+let retryTimer = null;
+let stopped = false;
+let options = null;      // {trigger, onActivated}, kept for retries
 
-function gsettingsRun(...args) {
-  const r = spawnSync('gsettings', args, { encoding: 'utf8', timeout: 3000 });
-  if (r.status !== 0) throw new Error(r.stderr?.trim() || `gsettings ${args[0]} failed`);
-  return r.stdout.trim();
-}
+// Resolves once the first bind attempt has settled either way, so the setup window doesn't decide
+// whether to nag before we know. Later retries don't touch it.
+let markSettled;
+const settledPromise = new Promise((resolve) => { markSettled = resolve; });
+// On X11 there is no attempt to wait for: resolve at load, or every caller would wait forever.
+if (!isWaylandSession) markSettled();
+function settled() { return settledPromise; }
 
-function updateGnomeShortcut(shortcut) {
-  try {
-    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'binding', electronToXkb(shortcut));
-    log('info', `GNOME shortcut updated to ${electronToXkb(shortcut)}`);
-  } catch (e) {
-    log('warn', `Failed to update GNOME shortcut: ${e.message}`);
+async function attemptBind() {
+  if (stopped) return;
+  const result = await portal.start({
+    id: SHORTCUT_ID,
+    description: SHORTCUT_DESCRIPTION,
+    preferredTrigger: options.trigger,
+    onActivated: options.onActivated,
+    onDisconnected: handleDisconnect,
+  });
+
+  if (result.ok) {
+    if (everBound) log('info', `portal shortcut rebound after ${retryIndex} attempt(s)`);
+    mode = 'portal';
+    triggerDescription = result.triggerDescription || '';
+    everBound = true;
+    retryIndex = 0;
+  } else if (!everBound) {
+    // A cold failure is an answer about this desktop, not about timing: 'unavailable' means no
+    // GlobalShortcuts backend here (sway and the rest of the wlroots family), and 'denied' means
+    // the user declined the consent dialog -- retrying that would just raise it again. Either way
+    // the manual command is the honest fallback.
+    mode = 'manual';
+    log(result.reason === 'denied' ? 'info' : 'warn',
+      `portal shortcut not bound (${result.reason}${result.error ? `: ${result.error}` : ''}) — ` +
+      `falling back to a desktop-bound ${toggleCommand()}`);
+  } else if (retryIndex < RETRY_DELAYS_MS.length) {
+    // The same reasons mean something else once a binding has worked: the bus or the backend is
+    // still coming back up. Even 'denied' is retried here -- permission is already on record, so a
+    // genuine refusal isn't plausible mid-restart.
+    scheduleRetry(`rebind failed (${result.reason})`);
+  } else {
+    mode = 'manual';
+    log('warn', 'portal rebind abandoned after repeated failures — the tray icon and ' +
+      `${toggleCommand()} still work; restart Unhush to try again`);
   }
+  markSettled();
 }
 
-// GNOME is the one desktop whose custom keybindings we can set programmatically. This runs only
-// when the user explicitly asks for it in Settings -- never on first run. It edits the user's
-// keybindings, and this path can't be exercised from either of our test machines, so it should not
-// fire on its own. Returns a result rather than showing a dialog; Settings reports the error.
-function setupGnomeShortcut(shortcut) {
-  const xkbBinding = electronToXkb(shortcut);
-  const command = toggleCommand();
-  try {
-    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'name', 'Unhush Toggle');
-    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'command', command);
-    gsettingsRun('set', GNOME_CUSTOM_SCHEMA, 'binding', xkbBinding);
-
-    // Add our path to the keybindings list if not already present
-    const existing = gsettingsRun('get', GNOME_MEDIA_SCHEMA, 'custom-keybindings');
-    if (!existing.includes('unhush')) {
-      const paths = existing === '@as []' ? [] :
-        existing.slice(1, -1).split(',').map(p => p.trim().replace(/'/g, '')).filter(Boolean);
-      paths.push(GNOME_BINDING_PATH);
-      gsettingsRun('set', GNOME_MEDIA_SCHEMA, 'custom-keybindings',
-        `[${paths.map(p => `'${p}'`).join(', ')}]`);
-    }
-
-    fs.writeFileSync(gnomeFlagFile(), '');
-    log('info', `GNOME shortcut configured: "${xkbBinding}" → ${command}`);
-    return { ok: true };
-  } catch (e) {
-    log('error', `Failed to configure GNOME shortcut: ${e.message}`);
-    return { ok: false, error: e.message };
-  }
+function scheduleRetry(why) {
+  const delay = RETRY_DELAYS_MS[retryIndex++];
+  log('warn', `portal: ${why}; retrying in ${delay / 1000}s`);
+  retryTimer = setTimeout(() => { retryTimer = null; attemptBind(); }, delay);
+  // Don't hold the event loop open on this alone.
+  if (typeof retryTimer.unref === 'function') retryTimer.unref();
 }
 
-// Undo setupGnomeShortcut, so switching away from automatic mode doesn't leave a stray keybinding
-// pointing at a command the user no longer wants (or, after an uninstall, doesn't have).
-function removeGnomeShortcut() {
-  try {
-    const existing = gsettingsRun('get', GNOME_MEDIA_SCHEMA, 'custom-keybindings');
-    if (existing.includes('unhush')) {
-      const paths = existing.slice(1, -1).split(',')
-        .map(p => p.trim().replace(/'/g, '')).filter(p => p && !p.includes('unhush'));
-      gsettingsRun('set', GNOME_MEDIA_SCHEMA, 'custom-keybindings',
-        paths.length ? `[${paths.map(p => `'${p}'`).join(', ')}]` : '@as []');
-    }
-    fs.rmSync(gnomeFlagFile(), { force: true });
-    log('info', 'GNOME shortcut removed');
-    return { ok: true };
-  } catch (e) {
-    log('warn', `Failed to remove GNOME shortcut: ${e.message}`);
-    return { ok: false, error: e.message };
-  }
+function handleDisconnect() {
+  if (stopped) return;
+  retryIndex = 0;
+  // mode deliberately stays 'portal' while retries are pending: the binding is expected back within
+  // seconds, and telling the user to go configure a shortcut by hand in the meantime would be wrong.
+  scheduleRetry('connection lost');
 }
 
-// Called on every shortcut change. Only keeps an already-opted-in GNOME binding in sync; users who
-// haven't opted in are told what to do by the setup window and Settings instead.
-function check(shortcut) {
-  if (isGnome && fs.existsSync(gnomeFlagFile())) updateGnomeShortcut(shortcut);
+// Bind the hotkey through the portal. Idempotent -- the first caller's accelerator is the one
+// offered as preferred_trigger, and the portal honours it on the first bind only anyway, so later
+// calls have nothing to do.
+async function startPortal(accelerator, onActivated) {
+  if (!usesPortal()) return;
+  if (options) return;
+  options = { trigger: electronToXdgTrigger(accelerator), onActivated };
+  log('info', `portal: binding ${SHORTCUT_ID} with preferred trigger ${options.trigger}`);
+  await attemptBind();
 }
 
-// How the global shortcut is managed on the current platform:
-//   'native'    — globalShortcut works directly (X11 sessions; native-Wayland KDE/GNOME 48+)
-//   'gsettings' — a GNOME custom keybinding we manage, after the user opted in
-//   'manual'    — the user binds the key in their desktop environment, running toggleCommand()
+// Opens the desktop's own shortcut editor, focused on our entry. This is how a user changes the
+// key: we can't, after the first bind.
+async function configure() {
+  return portal.configure();
+}
+
+function stopPortal() {
+  stopped = true;
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  portal.stop();
+}
+
+// How the global shortcut is managed on the current session:
+//   'native' — globalShortcut grabs the key itself (X11)
+//   'portal' — bound through the GlobalShortcuts portal; the desktop owns the key
+//   'manual' — no portal here (or it refused): the user binds toggleCommand() themselves
 function shortcutMode() {
-  if (!needsFallback()) return 'native';
-  if (isGnome && fs.existsSync(gnomeFlagFile())) return 'gsettings';
-  return 'manual';
+  return mode;
 }
 
 // A card for the first-run setup window, in the same shape as ydotool.cjs's preflight problems
-// ({code, title, detail, commands, note}). null when globalShortcut binds the key itself.
+// ({code, title, detail, commands, note}). null unless the user really does have to bind it.
 function shortcutProblem() {
-  // Nothing to prompt about when globalShortcut binds the key itself. Note the consequence on the
-  // unsupported native-Wayland path: we assume the portal binds it, so if the portal silently
-  // doesn't, no card appears -- Settings still shows the command either way.
-  if (!needsFallback()) return null;
-  const where = isKde
-    ? 'System Settings → Keyboard → Shortcuts → Add New → Command.'
-    : isGnome
-      ? 'Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → +.'
-      : 'Look for "custom shortcuts" or "key bindings" in your desktop settings.';
+  if (mode !== 'manual') return null;
   return {
     code: 'shortcut',
     title: 'Set the dictation shortcut in your desktop settings',
     detail:
-      'On Wayland only the desktop environment can bind a key that works in every application. ' +
-      'Add a custom shortcut that runs this command, using whichever key you prefer:',
+      "Unhush couldn't register a global shortcut with this desktop, so the key binding has to be " +
+      'yours. Add a shortcut that runs this command, using whichever key you prefer:',
     commands: [toggleCommand()],
-    settingsCommand: shortcutSettingsCommand(), // may be null; the dialog hides its button then
-    note: `${where}  Until then, click the tray icon to start and stop dictation.`,
+    note: 'Look for "custom shortcuts" or "key bindings" in your desktop settings — or, on a ' +
+      'compositor configured by hand (sway, river, Wayfire), in its config file.  Until then, ' +
+      'click the tray icon to start and stop dictation.',
   };
 }
 
-// Everything Settings needs to render the shortcut section in one round trip.
+// Everything Settings needs to render the shortcut section in one round trip. `trigger` is the
+// portal's own description of the live key ('' when every trigger has been unchecked, which leaves
+// the shortcut silently dead -- Settings says so).
 function shortcutInfo() {
   return {
-    mode: shortcutMode(),
+    mode,
     command: toggleCommand(),
-    canAutomate: isGnome && needsFallback(),
-    settingsCommand: shortcutSettingsCommand(),
+    trigger: triggerDescription,
+    canConfigure: mode === 'portal',
   };
 }
 
 module.exports = {
-  init, needsFallback, shortcutMode, shortcutInfo, shortcutProblem, check, displayBackend,
-  shortcutSettingsCommand,
-  setupGnomeShortcut, removeGnomeShortcut, toggleCommand,
-  _internal: { electronToXkb },
+  init, displayBackend, usesPortal, toggleCommand,
+  startPortal, configure, stopPortal, settled,
+  shortcutMode, shortcutInfo, shortcutProblem,
+  _internal: { electronToXdgTrigger, RETRY_DELAYS_MS },
 };

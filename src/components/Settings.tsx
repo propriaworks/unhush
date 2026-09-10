@@ -16,8 +16,12 @@ type Provider = "groq" | "openai" | "custom";
 type LLMProvider = "none" | "groq" | "openai" | "custom";
 type Tab = "transcription" | "llm" | "usability";
 
+const OUTPUT_METHODS: OutputMethod[] = ["paste", "type", "clipboard"];
+const isOutputMethod = (v: string | null): v is OutputMethod =>
+  OUTPUT_METHODS.includes(v as OutputMethod);
+
 const SHORTCUT_OPTIONS = [
-  "Shift+Space",
+  "Ctrl+Alt+\\",
   "Ctrl+Alt+Space",
   "Ctrl+Shift+Space",
   "Ctrl+Shift+Insert",
@@ -38,14 +42,16 @@ function Settings() {
   const [customModel, setCustomModel] = useState("");
   const [provider, setProvider] = useState<Provider>("groq");
   const [shortcut, setShortcut] = useState("Ctrl+Alt+Space");
-  const [shortcutMode, setShortcutMode] = useState<"native" | "gsettings" | "manual">("native");
+  // native: Unhush holds the key grab (X11). portal: the desktop holds it for us and only its own
+  // editor can change it. manual: no GlobalShortcuts portal here, so the user binds toggleCommand.
+  const [shortcutMode, setShortcutMode] = useState<"native" | "portal" | "manual">("native");
+  // The portal's description of the live key, e.g. "Ctrl+Alt+Space". "" means every trigger has
+  // been unchecked in the desktop's editor, which leaves the shortcut silently dead.
+  const [portalTrigger, setPortalTrigger] = useState<string | null>(null);
   // The command a desktop-environment shortcut should run to toggle recording (see
   // electron/commandFifo.cjs). Offered on every platform: it can bind keys this dropdown doesn't
   // list, and it's the only mechanism that works on Wayland.
   const [toggleCommand, setToggleCommand] = useState("");
-  const [canAutomate, setCanAutomate] = useState(false);
-  // Command that opens this desktop's own shortcut settings, or "" when we don't recognise it.
-  const [settingsCommand, setSettingsCommand] = useState("");
   // One transient status line shared by the buttons under the toggle command ("Copied ✓",
   // "Opening…"): each action needs the same acknowledgement, and only one can be the most
   // recent. The timer is held so a second click restarts it rather than inheriting the
@@ -100,12 +106,18 @@ function Settings() {
     const cachedL = getCachedModels(getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || ""));
     if (cachedL) setLlmModels(cachedL);
 
-    window.electronAPI?.getShortcutInfo().then((info) => {
-      setShortcutMode(info.mode);
-      setToggleCommand(info.command);
-      setCanAutomate(info.canAutomate);
-      setSettingsCommand(info.settingsCommand || "");
-    });
+    const loadShortcutInfo = () => {
+      window.electronAPI?.getShortcutInfo().then((info) => {
+        setShortcutMode(info.mode);
+        setToggleCommand(info.command);
+        setPortalTrigger(info.trigger);
+      });
+    };
+    loadShortcutInfo();
+    // Also whenever this window comes back to the front. On the portal path the key is edited in
+    // the desktop's own editor -- which is where "Change shortcut…" sends you -- so returning to
+    // Settings is exactly when the displayed key is most likely to be out of date.
+    window.addEventListener("focus", loadShortcutInfo);
 
     const handleNavigateTab = (_event: unknown, newTab: string) => {
       if (newTab === "transcription" || newTab === "llm" || newTab === "usability") {
@@ -113,7 +125,10 @@ function Settings() {
       }
     };
     window.electronAPI?.onNavigateTab(handleNavigateTab);
-    return () => { window.electronAPI?.removeAllListeners("navigate-tab"); };
+    return () => {
+      window.removeEventListener("focus", loadShortcutInfo);
+      window.electronAPI?.removeAllListeners("navigate-tab");
+    };
   }, []);
 
   const currentKey = provider === "groq" ? groqKey : provider === "openai" ? openaiKey : customKey;
@@ -163,7 +178,21 @@ function Settings() {
   const handleOutputMethodChange = (method: OutputMethod) => {
     setOutputMethod(method);
     localStorage.setItem("unhush_output_method", method);
+    window.electronAPI?.setOutputMethod(method);
   };
+
+  // The setup dialog's "Use Clipboard mode instead" doesn't just navigate here -- it asks for the
+  // mode to be selected. Routed through the click handler so it persists and tells main exactly as
+  // a click would. Declared after the hydrating effect above, so it wins the initial render.
+  useEffect(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get("output");
+    if (isOutputMethod(fromQuery)) handleOutputMethodChange(fromQuery);
+
+    window.electronAPI?.onSetOutputMode((_event, method) => {
+      if (isOutputMethod(method)) handleOutputMethodChange(method);
+    });
+    return () => window.electronAPI?.removeAllListeners("set-output-mode");
+  }, []);
 
   const handleShortcutChange = (newShortcut: string) => {
     setShortcut(newShortcut);
@@ -183,33 +212,19 @@ function Settings() {
     flashShortcutStatus("Copied ✓");
   };
 
-  // The desktop's own settings app can take several seconds to draw its first window -- with no
-  // acknowledgement the button looks dead and invites a second click, which on KDE raises a second
-  // System Settings instance. Says "Opening" rather than "Opened": spawn() only reports that the
-  // shell started, not that the window ever appeared. Held longer than the copy flash for the
-  // same reason -- it should still be on screen when the window finally is.
-  const openShortcutSettings = async () => {
+  // ConfigureShortcuts opens the desktop's own shortcut editor, focused on Unhush's entry. This is
+  // the only way a portal-bound key can be changed -- the portal honours our preferred trigger on
+  // the first bind and never again. The editor can take seconds to appear, and an unacknowledged
+  // button reads as a broken one; "Opening" rather than "Opened" because the call only tells us the
+  // request was accepted, not that a window was drawn.
+  const openShortcutEditor = async () => {
     setShortcutError("");
     flashShortcutStatus("Opening…", 5000);
-    const r = await window.electronAPI?.spawnDetached(settingsCommand);
+    const r = await window.electronAPI?.configureShortcut();
     if (r && !r.ok) {
       flashShortcutStatus("");
-      setShortcutError(r.error || "Could not open your desktop's shortcut settings.");
+      setShortcutError(r.error || "Could not open your desktop's shortcut editor.");
     }
-  };
-
-  const handleAutomateShortcut = async () => {
-    setShortcutError("");
-    const r = await window.electronAPI?.setupGnomeShortcut(shortcut);
-    if (r?.ok) setShortcutMode("gsettings");
-    else setShortcutError(r?.error || "Could not configure the shortcut.");
-  };
-
-  const handleRemoveAutomatedShortcut = async () => {
-    setShortcutError("");
-    const r = await window.electronAPI?.removeGnomeShortcut();
-    if (r?.ok) setShortcutMode("manual");
-    else setShortcutError(r?.error || "Could not remove the shortcut.");
   };
 
   const handleDuckingAmountChange = (newAmount: number) => {
@@ -387,7 +402,7 @@ function Settings() {
                 Output
               </label>
               <div className="flex gap-2">
-                {(["paste", "type", "clipboard"] as OutputMethod[]).map((m) => (
+                {OUTPUT_METHODS.map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -413,36 +428,50 @@ function Settings() {
               <label className="block text-white/70 text-xs font-medium mb-2">
                 Shortcut
               </label>
-              <select
-                value={shortcut}
-                onChange={(e) => handleShortcutChange(e.target.value)}
-                disabled={shortcutMode === "manual"}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {SHORTCUT_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt} className="bg-gray-800">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-              {shortcutMode === "manual" && (
-                <p className="text-white/40 text-xs mt-1">
-                  On Wayland the key binding belongs to your desktop environment, not to Unhush.
-                  Add a custom shortcut there that runs the command below.
-                </p>
+              {/* Only the native path can offer a list: on the portal path the desktop owns the
+                  key and hands back its own description of it, and in manual mode there is no key
+                  to show until the user binds one. */}
+              {shortcutMode === "native" && (
+                <select
+                  value={shortcut}
+                  onChange={(e) => handleShortcutChange(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500 appearance-none cursor-pointer"
+                >
+                  {SHORTCUT_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt} className="bg-gray-800">
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               )}
-              {shortcutMode === "gsettings" && (
-                <p className="text-white/40 text-xs mt-1">
-                  Unhush keeps your GNOME keyboard shortcut in sync with this setting.
+              {shortcutMode === "portal" && (
+                <>
+                  <div className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white">
+                    {portalTrigger || "None — every shortcut is disabled"}
+                  </div>
+                  <p className="text-white/40 text-xs mt-1">
+                    {portalTrigger
+                      ? "On Wayland your desktop owns this key. Unhush can suggest one the first " +
+                        "time it runs, but only your desktop's own editor can change it afterwards."
+                      : "Your desktop has this shortcut registered but every key for it is " +
+                        "switched off, so nothing will happen when you press one. Open the editor " +
+                        "to enable a key, or use the tray icon."}
+                  </p>
+                </>
+              )}
+              {shortcutMode === "manual" && (
+                <p className="text-white/40 text-xs">
+                  This desktop couldn't register a shortcut for Unhush, so the key binding has to be
+                  yours: add one that runs the command below.
                 </p>
               )}
 
               {/* Works on every session type, so it's always offered: it's how you bind a key this
                   list doesn't include, and how scripts can start and stop dictation. */}
               <p className="text-white/40 text-xs mt-2">
-                {shortcutMode === "native"
-                  ? "To use a key not listed here, bind this command in your desktop environment:"
-                  : "Command to run:"}
+                {shortcutMode === "manual"
+                  ? "Command to run:"
+                  : "To use a key not listed here, bind this command in your desktop environment:"}
               </p>
               <pre className="mt-1 px-2 py-1.5 bg-black/30 border border-white/10 rounded-lg text-white/70 text-[11px] font-mono whitespace-pre-wrap break-all select-text">
                 {toggleCommand}
@@ -454,28 +483,12 @@ function Settings() {
                 >
                   Copy
                 </button>
-                {canAutomate && shortcutMode === "manual" && (
+                {shortcutMode === "portal" && (
                   <button
-                    onClick={handleAutomateShortcut}
+                    onClick={openShortcutEditor}
                     className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
                   >
-                    Set up automatically
-                  </button>
-                )}
-                {shortcutMode === "gsettings" && (
-                  <button
-                    onClick={handleRemoveAutomatedShortcut}
-                    className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
-                  >
-                    Remove automatic shortcut
-                  </button>
-                )}
-                {settingsCommand && shortcutMode !== "native" && (
-                  <button
-                    onClick={openShortcutSettings}
-                    className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
-                  >
-                    Open shortcut settings
+                    Change shortcut…
                   </button>
                 )}
                 {shortcutFlash && <span className="text-green-400 text-xs">{shortcutFlash}</span>}

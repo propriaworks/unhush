@@ -153,8 +153,10 @@ function RecordingBar() {
           if (llmResult !== undefined) {
             llmLatencyMs = llmResult.latencyMs;
             if (llmOutput!.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
+              // Print lengths only in main log to protect privacy.
               window.electronAPI.log("warn",
-                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
+                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding${
+                  localStorage.getItem("unhush_debug_audio") === "true" ? " (full text in llm-pass.json)" : ""}`);
               llmStatus = "rejected_over_length";
             } else {
               llmStatus = "ok";

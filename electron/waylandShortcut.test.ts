@@ -1,211 +1,302 @@
 // @vitest-environment node
 //
-// This module decides, from the session type and our own argv, whether Unhush can bind the global
-// hotkey itself or whether the desktop environment has to. That decision used to be a
-// per-compositor, per-GNOME-version matrix; it is now a single condition, and these tests pin it
-// down across the combinations that actually occur -- including the ones neither development
-// machine can run (GNOME, wlroots), which is precisely why they're worth having.
+// This module decides which of three mechanisms owns the dictation hotkey -- Chromium's own X11
+// grab, the XDG GlobalShortcuts portal, or the user's own desktop binding -- and, when the portal
+// path drops out mid-session, how hard to try to get it back. None of that can be exercised on the
+// dev box (X11/Cinnamon, no GlobalShortcuts backend), which is exactly why it is tested here.
+//
+// The portal client is injected through init(): vitest's vi.mock cannot reach a require() inside a
+// .cjs module (measured -- see the note in waylandShortcut.cjs), and without a stand-in every case
+// below would open a real D-Bus connection and answer differently per machine.
 //
 // Session type and argv are read once at module load, so each case loads the module afresh.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fs from "fs";
-import os from "os";
-import path from "path";
-
-// No electron mock needed: the module takes its userData path through init(), so it runs as plain
-// node. (It previously required electron for app.getPath, which vi.mock cannot intercept from a
-// .cjs require -- require("electron") outside an electron process just yields the binary path.)
-const state = { userDataDir: "" };
 
 const savedEnv = { ...process.env };
 const savedArgv = process.argv;
 
-type Case = { session?: string; desktop?: string; xwayland?: boolean };
+type StartResult =
+  | { ok: true; triggerDescription?: string }
+  | { ok: false; reason: "unavailable" | "denied" | "error"; error?: string };
 
-async function load({ session, desktop, xwayland }: Case) {
+// Stands in for portalShortcuts.cjs. `results` is consumed one call at a time (the last entry
+// repeats), so a case can say "fail, fail, then succeed" and let the retry loop drive it.
+function fakePortal(results: StartResult[]) {
+  const calls: any[] = [];
+  return {
+    calls,
+    stopped: 0,
+    configured: 0,
+    fire: () => calls[calls.length - 1].onActivated(),
+    drop: () => calls[calls.length - 1].onDisconnected(),
+    init() {},
+    async start(opts: any) {
+      calls.push(opts);
+      return results[Math.min(calls.length - 1, results.length - 1)];
+    },
+    stop() { this.stopped += 1; },
+    async configure() { this.configured += 1; return { ok: true }; },
+  };
+}
+
+type Case = { session?: string; xwayland?: boolean; results?: StartResult[] };
+
+async function load({ session, xwayland, results = [{ ok: true, triggerDescription: "Ctrl+Alt+Space" }] }: Case = {}) {
   vi.resetModules();
   process.env.XDG_SESSION_TYPE = session ?? "x11";
-  process.env.XDG_CURRENT_DESKTOP = desktop ?? "X-Cinnamon";
-  process.env.XDG_RUNTIME_DIR = state.userDataDir;
   // The re-exec guard in main.cjs is what puts this on our command line.
   process.argv = ["/opt/Unhush/unhush", ...(xwayland ? ["--ozone-platform=x11"] : [])];
   const mod: any = await import("./waylandShortcut.cjs");
   const m = mod.default ?? mod;
-  m.init(() => {}, state.userDataDir);
-  return m;
+  const portal = fakePortal(results);
+  m.init(() => {}, portal);
+  return { m, portal };
 }
 
 // A Wayland session as Unhush actually runs on one: re-execed onto XWayland.
-const wayland = (desktop: string): Case => ({ session: "wayland", desktop, xwayland: true });
+const wayland = (results?: StartResult[]): Case => ({ session: "wayland", xwayland: true, results });
 
-beforeEach(() => {
-  state.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "unhush-shortcut-test-"));
-});
+beforeEach(() => { vi.useRealTimers(); });
 
 afterEach(() => {
   process.env = { ...savedEnv };
   process.argv = savedArgv;
-  fs.rmSync(state.userDataDir, { recursive: true, force: true });
-});
-
-describe("needsFallback", () => {
-  it("is false on an X11 session, where globalShortcut grabs the key itself", async () => {
-    const m = await load({ session: "x11", desktop: "KDE" });
-    expect(m.needsFallback()).toBe(false);
-  });
-
-  it.each(["KDE", "GNOME", "sway", "Hyprland", ""])(
-    "is true on a Wayland session under XWayland, whatever the compositor (%s)",
-    async (desktop) => {
-      const m = await load(wayland(desktop));
-      expect(m.needsFallback()).toBe(true);
-    }
-  );
-
-  it("is false on a forced native-Wayland run, where the portal is live again", async () => {
-    // Not re-execed => no --ozone-platform=x11 => Electron is a real Wayland client.
-    const m = await load({ session: "wayland", desktop: "KDE", xwayland: false });
-    expect(m.needsFallback()).toBe(false);
-  });
+  vi.useRealTimers();
 });
 
 // The startup log line reports this, so that a Fedora/KDE report says which backend was live
 // instead of leaving it to be inferred from symptoms, as it was the first time round.
 describe("displayBackend", () => {
   it("reports plain x11 on an X11 session", async () => {
-    expect((await load({ session: "x11" })).displayBackend()).toBe("x11");
+    expect((await load({ session: "x11" })).m.displayBackend()).toBe("x11");
   });
 
   it("marks the backend as forced when we re-execed onto XWayland", async () => {
-    expect((await load(wayland("KDE"))).displayBackend()).toBe("x11 (forced)");
+    expect((await load(wayland())).m.displayBackend()).toBe("x11 (forced)");
   });
 
   it("says wayland (native) when the escape hatch left us as a Wayland client", async () => {
-    const m = await load({ session: "wayland", desktop: "KDE", xwayland: false });
+    const { m } = await load({ session: "wayland", xwayland: false });
     expect(m.displayBackend()).toBe("wayland (native)");
   });
 });
 
-describe("shortcutMode", () => {
-  it("reports native on X11", async () => {
-    const m = await load({ session: "x11" });
+describe("usesPortal", () => {
+  it("is false on X11, where Chromium grabs the key itself", async () => {
+    expect((await load({ session: "x11" })).m.usesPortal()).toBe(false);
+  });
+
+  // The portal is reached over D-Bus, which does not care which display protocol Chromium speaks.
+  it.each([true, false])("is true on any Wayland session (xwayland=%s)", async (xwayland) => {
+    expect((await load({ session: "wayland", xwayland })).m.usesPortal()).toBe(true);
+  });
+});
+
+describe("electronToXdgTrigger", () => {
+  it.each([
+    ["Ctrl+Alt+Space", "CTRL+ALT+space"],
+    ["Ctrl+Alt+\\", "CTRL+ALT+backslash"],   // the option that replaced Shift+Space
+    ["Ctrl+Shift+Insert", "CTRL+SHIFT+Insert"],
+    ["Alt+F12", "ALT+F12"],                  // F-keys keep their capital F; "space" must not
+    ["Super+D", "SUPER+d"],
+    ["Shift+Space", "SHIFT+space"],          // a value stored by an older version
+    ["F13", "F13"],                          // no modifiers at all
+  ])("converts %s to %s", async (accelerator, expected) => {
+    const { m } = await load();
+    expect(m._internal.electronToXdgTrigger(accelerator)).toBe(expected);
+  });
+});
+
+describe("startPortal", () => {
+  it("does nothing at all on X11", async () => {
+    const { m, portal } = await load({ session: "x11" });
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(portal.calls).toHaveLength(0);
     expect(m.shortcutMode()).toBe("native");
   });
 
-  it("reports manual on Wayland until the user opts into automation", async () => {
-    const m = await load(wayland("KDE"));
+  it("binds one stable id with the user's key as the preferred trigger", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Alt+F12", () => {});
+    expect(portal.calls[0]).toMatchObject({ id: "toggle-recording", preferredTrigger: "ALT+F12" });
+    expect(m.shortcutMode()).toBe("portal");
+    expect(m.shortcutInfo()).toMatchObject({ trigger: "Ctrl+Alt+Space", canConfigure: true });
+  });
+
+  // preferred_trigger is honoured on the first bind only, so a second call has nothing to offer --
+  // and re-binding for every accelerator change is what broke Electron's own portal path.
+  it("is idempotent: a later accelerator change does not rebind", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    await m.startPortal("Alt+F12", () => {});
+    expect(portal.calls).toHaveLength(1);
+  });
+
+  it("routes Activated to the callback it was given", async () => {
+    const { m, portal } = await load(wayland());
+    let fired = 0;
+    await m.startPortal("Ctrl+Alt+Space", () => { fired += 1; });
+    portal.fire();
+    expect(fired).toBe(1);
+  });
+
+  it("keeps portal mode when every trigger has been unchecked, reporting no key", async () => {
+    // The bind succeeds and the shortcut is registered; it simply cannot fire. Settings needs to
+    // say that rather than show a key that does nothing.
+    const { m } = await load(wayland([{ ok: true }]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(m.shortcutMode()).toBe("portal");
+    expect(m.shortcutInfo().trigger).toBe("");
+  });
+});
+
+describe("a cold failure", () => {
+  it("falls back to the manual command when there is no GlobalShortcuts backend", async () => {
+    const { m } = await load(wayland([{ ok: false, reason: "unavailable" }]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(m.shortcutMode()).toBe("manual");
+    const p = m.shortcutProblem();
+    expect(p.code).toBe("shortcut");
+    expect(p.commands).toEqual([m.toggleCommand()]);
+    expect(p.note).toContain("tray icon");
+    // The per-desktop settings-binary table is gone; nothing should still advertise one.
+    expect(p.settingsCommand).toBeUndefined();
+  });
+
+  // Retrying a refusal would re-raise the consent dialog the user just dismissed.
+  it("never retries a denial", async () => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland([{ ok: false, reason: "denied" }]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(portal.calls).toHaveLength(1);
     expect(m.shortcutMode()).toBe("manual");
   });
 
-  it("reports gsettings on GNOME once the opt-in flag exists", async () => {
-    const m = await load(wayland("GNOME"));
-    fs.writeFileSync(path.join(state.userDataDir, ".wayland-gnome-configured"), "");
-    expect(m.shortcutMode()).toBe("gsettings");
+  it("resolves settled() either way, so the setup window isn't left waiting", async () => {
+    const { m } = await load(wayland([{ ok: false, reason: "error", error: "boom" }]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    await expect(m.settled()).resolves.toBeUndefined();
   });
 
-  it("does not report gsettings on KDE even with a stale flag file", async () => {
-    const m = await load(wayland("KDE"));
-    fs.writeFileSync(path.join(state.userDataDir, ".wayland-gnome-configured"), "");
+  it("is already settled on X11, where no attempt is ever made", async () => {
+    const { m } = await load({ session: "x11" });
+    await expect(m.settled()).resolves.toBeUndefined();
+  });
+});
+
+describe("a mid-session drop", () => {
+  it("rebinds on the first backoff step", async () => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.drop();
+    expect(portal.calls).toHaveLength(1);        // nothing immediate
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(portal.calls).toHaveLength(2);
+    expect(m.shortcutMode()).toBe("portal");
+  });
+
+  // The same reasons that mean "this desktop can't do it" when cold mean "not back yet" here --
+  // including denied, since permission is already on record.
+  it.each(["unavailable", "error", "denied"] as const)("retries a %s answer", async (reason) => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland([
+      { ok: true, triggerDescription: "Ctrl+Alt+Space" },
+      { ok: false, reason },
+      { ok: true, triggerDescription: "Ctrl+Alt+Space" },
+    ]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.drop();
+    await vi.advanceTimersByTimeAsync(1000);     // first retry: fails
+    expect(portal.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2000);     // second: succeeds
+    expect(portal.calls).toHaveLength(3);
+    expect(m.shortcutMode()).toBe("portal");
+  });
+
+  // Telling the user to go bind a key by hand, seconds before the binding comes back on its own,
+  // would be worse than the outage.
+  it("does not switch to manual while retries are still pending", async () => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland([
+      { ok: true, triggerDescription: "Ctrl+Alt+Space" },
+      { ok: false, reason: "unavailable" },
+    ]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.drop();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(m.shortcutMode()).toBe("portal");
+    expect(m.shortcutProblem()).toBeNull();
+  });
+
+  it("gives up after the whole backoff, then reports manual", async () => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland([
+      { ok: true, triggerDescription: "Ctrl+Alt+Space" },
+      { ok: false, reason: "unavailable" },
+    ]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.drop();
+    const total = m._internal.RETRY_DELAYS_MS.reduce((a: number, b: number) => a + b, 0);
+    await vi.advanceTimersByTimeAsync(total + 1000);
+    expect(portal.calls).toHaveLength(1 + m._internal.RETRY_DELAYS_MS.length);
     expect(m.shortcutMode()).toBe("manual");
+    expect(m.shortcutProblem()).not.toBeNull();
+  });
+
+  it("stops retrying once we are quitting", async () => {
+    vi.useFakeTimers();
+    const { m, portal } = await load(wayland([
+      { ok: true, triggerDescription: "Ctrl+Alt+Space" },
+      { ok: false, reason: "unavailable" },
+    ]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.drop();
+    m.stopPortal();
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(portal.calls).toHaveLength(1);
+    expect(portal.stopped).toBe(1);
   });
 });
 
 describe("shortcutInfo", () => {
   it("offers the fifo command on X11 too, for keys the dropdown doesn't list", async () => {
-    const m = await load({ session: "x11" });
-    const info = m.shortcutInfo();
-    expect(info.mode).toBe("native");
-    expect(info.command).toBeTruthy();
-    expect(info.canAutomate).toBe(false);
+    const { m } = await load({ session: "x11" });
+    expect(m.shortcutInfo()).toMatchObject({ mode: "native", canConfigure: false });
+    expect(m.shortcutInfo().command).toBeTruthy();
   });
 
-  it("advertises automation only on GNOME, the one desktop we can configure", async () => {
-    expect((await load(wayland("GNOME"))).shortcutInfo().canAutomate).toBe(true);
-    expect((await load(wayland("KDE"))).shortcutInfo().canAutomate).toBe(false);
-    expect((await load(wayland("sway"))).shortcutInfo().canAutomate).toBe(false);
+  it("offers the desktop's editor only on the portal path", async () => {
+    const bound = await load(wayland());
+    await bound.m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(bound.m.shortcutInfo().canConfigure).toBe(true);
+
+    const unbound = await load(wayland([{ ok: false, reason: "unavailable" }]));
+    await unbound.m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(unbound.m.shortcutInfo().canConfigure).toBe(false);
   });
 });
 
 describe("shortcutProblem", () => {
   it("is null on X11, so the setup window stays shut", async () => {
-    const m = await load({ session: "x11" });
+    const { m } = await load({ session: "x11" });
     expect(m.shortcutProblem()).toBeNull();
   });
 
-  it("carries the command to bind, in the setup window's problem shape", async () => {
-    const m = await load(wayland("KDE"));
-    const p = m.shortcutProblem();
-    expect(p.code).toBe("shortcut");
-    expect(p.title).toBeTruthy();
-    expect(p.detail).toBeTruthy();
-    expect(p.commands).toEqual([m.toggleCommand()]);
-  });
-
-  it("names the right settings path per desktop", async () => {
-    expect((await load(wayland("KDE"))).shortcutProblem().note).toContain("System Settings");
-    expect((await load(wayland("GNOME"))).shortcutProblem().note).toContain("Custom Shortcuts");
-    // An unknown compositor still gets something actionable rather than nothing.
-    expect((await load(wayland("sway"))).shortcutProblem().note).toContain("custom shortcuts");
-  });
-
-  it("tells the user what still works in the meantime", async () => {
-    const p = (await load(wayland("KDE"))).shortcutProblem();
-    expect(p.note).toContain("tray icon");
+  it("is null once the portal has bound the key for us", async () => {
+    const { m } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    expect(m.shortcutProblem()).toBeNull();
   });
 });
 
-// A button that opens the desktop's own shortcut editor, rather than describing a menu path. The
-// binary has to actually exist, or the button would do nothing — so on this machine most desktops
-// resolve to null, and the assertions are about the shape of the decision, not a fixed command.
-describe("shortcutSettingsCommand", () => {
-  it("offers nothing for a desktop we don't recognise", async () => {
-    const m = await load(wayland("some-unknown-compositor"));
-    expect(m.shortcutSettingsCommand()).toBeNull();
-  });
-
-  it("picks a command from the matching desktop's candidates, or nothing if none is installed", async () => {
-    for (const [desktop, expectedBinary] of [
-      ["KDE", /systemsettings|kcmshell/],
-      ["GNOME", /gnome-control-center/],
-      ["XFCE", /xfce4-keyboard-settings/],
-    ] as const) {
-      const cmd = (await load(wayland(desktop))).shortcutSettingsCommand();
-      if (cmd !== null) expect(cmd).toMatch(expectedBinary);
-    }
-  });
-
-  it("is reported alongside the shortcut command, so the UI can render both", async () => {
-    const info = (await load(wayland("KDE"))).shortcutInfo();
-    expect(info).toHaveProperty("settingsCommand");
-    const problem = (await load(wayland("KDE"))).shortcutProblem();
-    expect(problem).toHaveProperty("settingsCommand");
-  });
-});
-
-describe("electronToXkb", () => {
-  it.each([
-    ["Ctrl+Alt+Space", "<Control><Alt>space"],
-    ["Shift+Space", "<Shift>space"],
-    ["Ctrl+Shift+Insert", "<Control><Shift>insert"],
-    ["Alt+F12", "<Alt>f12"],
-    ["Super+D", "<Super>d"],
-  ])("converts %s to %s", async (accelerator, expected) => {
-    const m = await load({ session: "x11" });
-    expect(m._internal.electronToXkb(accelerator)).toBe(expected);
-  });
-
-  it("handles a bare key with no modifiers", async () => {
-    const m = await load({ session: "x11" });
-    expect(m._internal.electronToXkb("F12")).toBe("f12");
-  });
-});
-
-describe("check", () => {
-  it("does nothing when the user never opted into GNOME automation", async () => {
-    const m = await load(wayland("GNOME"));
-    // No flag file: must not shell out to gsettings, and must not throw.
-    expect(() => m.check("Ctrl+Alt+Space")).not.toThrow();
-    expect(fs.existsSync(path.join(state.userDataDir, ".wayland-gnome-configured"))).toBe(false);
+describe("configure", () => {
+  it("hands off to the portal's own editor", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    await m.configure();
+    expect(portal.configured).toBe(1);
   });
 });
