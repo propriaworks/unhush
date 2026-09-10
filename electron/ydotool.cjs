@@ -23,13 +23,22 @@
 // are harmless -- each opens its own virtual keyboard and they never interact. It also keeps us
 // out of /tmp/.ydotool_socket, the one location shared between users.
 
-const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn, spawnSync } = require("child_process");
+const { which } = require("./which.cjs");
 
 let log = () => {};
-function init(logFn) { log = logFn; }
+let userDataPath = "";
+// userData is injected rather than read from electron's app: it is this module's only reason to
+// depend on electron, and without it the socket-path and distro logic is testable as plain node.
+function init(logFn, userData) {
+  log = logFn;
+  userDataPath = userData || "";
+  // Only reached when there's no XDG_RUNTIME_DIR, so a missing path here would go unnoticed until
+  // the socket landed somewhere relative to the cwd. Say so instead.
+  if (!userDataPath) log("warn", "ydotool.init called without a userData path");
+}
 
 // The socket we ended up using -- ours, or one we adopted. env() pins clients to it.
 let resolvedSocket = null;
@@ -53,7 +62,7 @@ function managedSocketPath() {
   const xrd = process.env.XDG_RUNTIME_DIR;
   const preferred = xrd
     ? path.join(xrd, "unhush-ydotool.sock")
-    : path.join(app.getPath("userData"), "ydotool.sock");
+    : path.join(userDataPath, "ydotool.sock");
   // AF_UNIX sun_path holds 108 bytes and both ydotool and ydotoold *silently* truncate to it, so
   // two different long paths can collide after truncation and the daemon then refuses to start.
   // The normal path (/run/user/<uid>/unhush-ydotool.sock) is nowhere near this; the fallback is
@@ -85,12 +94,6 @@ function probeSocket(p) {
     timeout: 3000,
   });
   return r.status === 0;
-}
-
-function which(bin) {
-  const r = spawnSync("which", [bin], { encoding: "utf8", timeout: 3000 });
-  const out = (r.stdout || "").trim();
-  return r.status === 0 && out ? out : null;
 }
 
 // ---------------------------------------------------------------------------- daemon lifecycle
@@ -229,15 +232,18 @@ function distro() {
   return _distro;
 }
 
-const isRpmDistro = () => /fedora|rhel|centos/.test(distro());
+const isRpmDistroFor = (d) => /fedora|rhel|centos/.test(d);
+const isRpmDistro = () => isRpmDistroFor(distro());
 
 // Distro-appropriate install command, for the "ydotool isn't installed" case (mostly AppImage).
-function installCommand() {
-  if (isRpmDistro()) return "sudo dnf install ydotool";
-  if (/arch/.test(distro())) return "sudo pacman -S ydotool";
-  if (/suse/.test(distro())) return "sudo zypper install ydotool";
+// Split from distro() so the mapping can be checked without an /etc/os-release to match.
+function installCommandFor(d) {
+  if (isRpmDistroFor(d)) return "sudo dnf install ydotool";
+  if (/arch/.test(d)) return "sudo pacman -S ydotool";
+  if (/suse/.test(d)) return "sudo zypper install ydotool";
   return "sudo apt install ydotool"; // debian/ubuntu, and a reasonable default
 }
+function installCommand() { return installCommandFor(distro()); }
 
 const UDEV_CMD =
   `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' ` +
@@ -300,4 +306,7 @@ async function preflight() {
   return { ok: problems.length === 0, problems };
 }
 
-module.exports = { init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon };
+module.exports = {
+  init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon,
+  _internal: { defaultSocketPath, managedSocketPath, installCommandFor, isRpmDistroFor },
+};

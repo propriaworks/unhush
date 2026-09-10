@@ -20,7 +20,7 @@ Unhush provides seamless speech-to-text using AI transcription, allowing you to 
 - **Multilingual** - Supports 99+ languages with automatic detection
 - **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
-- **Wayland & X11 Support** - Works on both display servers
+- **Wayland & X11 Support** - Works on both display servers (on Wayland it runs under XWayland, and the hotkey is bound in your desktop settings — see [Wayland Setup](#wayland-setup))
 - **Privacy First** - Records locally before sending to API. Both the transcription and formatting endpoints can be local for *total privacy* — see [Using Local Models](docs/local-models.md)
 - **Auto-start & Warm-up** - Unhush can start local servers automatically on first use and pre-load models into GPU memory to reduce first-request latency
 - **Attenuate Background Audio** - Optionally lowers other apps' volume while recording (with a smooth ramp, not an abrupt cut), so ambient music or notifications don't compete with your voice
@@ -160,29 +160,46 @@ The change takes effect on the next recording — no restart needed.
 
 - A **⚠ badge** appears on the tray icon for transcription failures, missing settings (API key, custom URL/model), or repeated LLM warm-up failures. Hover the icon or open the menu for details; each cause clears independently, and the badge itself clears once none remain.
 
-## Wayland Setup
+### Wayland Setup
 
-Global shortcut handling on X11 works seemlessly. On Wayland it depends on your desktop environment.
+On a Wayland session Unhush runs itself under **XWayland**, and you bind the global shortcut in your
+desktop environment rather than Unhush doing it for you. Using native Wayland would interfere with core features, such as being able to write seemlessly to the clipboard, put the recording indicator above other windows and place it at the bottom of the screen. But the use of XWayland should be transparent to users, with one exception: if your primary display uses fractional dpi scaling (like 125%), Unhush may appear slightly blurry.
+
 
 <details>
-<summary>Wayland Shortcut Setup</summary>
+<summary>Setting the global shortcut on Wayland</summary>
 
-| Desktop | Behaviour |
+In order to start / stop recording under wayland, the user must add a custom keyboard shortcut that will run:
+
+```
+unhush-toggle
+```
+
+That helper is installed by the deb/rpm/pacman packages. This tool will toggle recording on/off, or, if Unhush isn't running, it starts it. On an **AppImage** or custom build, there's no installer to place the helper, so use the [command it wraps instead](#the-command-pipe) — Unhush shows the exact line to use in **Settings → Usability**, and in the setup window on first run.
+
+Where to add it:
+
+| Desktop | Where |
 |---|---|
-| **KDE Plasma** | Works automatically via the XDG GlobalShortcuts portal. On first launch, KDE shows a dialog to confirm the shortcut binding. |
-| **GNOME 48+** (Ubuntu 25.04+, Fedora 42+) | Works automatically via the portal, same as KDE. |
-| **GNOME < 48** (Ubuntu 24.04 LTS) | On first launch, Unhush automatically configures a desktop keyboard shortcut via `gsettings`. |
-| **Other compositors** (Sway, Hyprland, etc.) | On first launch, Unhush shows a one-time dialog with instructions to manually add a custom shortcut using your compositor's config. |
+| **KDE Plasma** | System Settings → Keyboard → Shortcuts → Add New → Command |
+| **GNOME** | Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → **+**. Unhush can also do this for you: **Settings → Usability → Set up automatically** |
+| **Sway / Hyprland / others** | Your compositor config, or its "custom shortcuts" settings |
 
-### Manual shortcut setup
+The shortcut dropdown in Settings is disabled on Wayland, because the key belongs to the desktop
+environment — pick whichever key you like there.
 
-**Note**: Running Unhush again while it's already running will ***toggle** recording*. This is what the keyboard shortcut calls — no matter how Unhush was installed, the shortcut just runs `unhush` (or the AppImage path) again.
+### The command pipe
 
-If you need to configure the shortcut yourself, add a custom keyboard shortcut in your Desktop Evironment's settings with the command:
+Unhush listens on a named pipe at `$XDG_RUNTIME_DIR/unhush.fifo` on every session type, X11
+included. Anything that can write a line can drive it:
 
-- **Package install**: `unhush`
-- **AppImage**: `/path/to/Unhush.AppImage` (add `--no-sandbox` if Unhush fails to start)
-- **Development**: `pnpm run -C /path/to/unhushrepo electron:dev`
+```sh
+printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"
+```
+
+This is useful beyond Wayland — it lets you bind a key the Settings dropdown doesn't offer, or start
+and stop dictation from a script. The pipe is created mode 0600 inside your own runtime directory,
+and is removed when Unhush exits.
 </details>
 
 ## Auto-starting Unhush
@@ -257,7 +274,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
 | Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
-| Shortcut | Usability tab | Global hotkey |
+| Shortcut | Usability tab | Global hotkey (X11 sessions; on Wayland the key is bound in your desktop settings — the tab shows the command to use) |
 | Chimes | Usability tab | Play a short chime when recording starts and stops: `On` (default) or `Off` |
 | Attenuate other audio | Usability tab | Lowers other apps' volume while recording, then ramps back up when you stop: `Off`, `40%`, `60%`, or `Mute` (default `40%`). Your own start/stop chimes are never attenuated. Requires PulseAudio or PipeWire (i.e. virtually all Linux desktops) |
 | Keep microphone warm | Usability tab | Keeps the microphone open between recordings so the next one starts instantly: `On` or `Off` (default). Useful for microphones that are slow to wake from power saving (common with USB webcam mics). While on, your system's microphone-in-use indicator stays lit, though audio isn't processed or saved except while transcribing |
@@ -329,10 +346,13 @@ The checks it runs, if you'd rather do them by hand:
 <details>
 <summary>Global shortcut not working on Wayland</summary>
 
-- **KDE / GNOME 48+**: On first launch, a system dialog should appear asking you to confirm the shortcut. If you dismissed it, restart Unhush to re-trigger it.
-- **GNOME < 48**: Unhush configures this automatically on first launch. If it failed, set it up manually in GNOME Settings → Keyboard → Custom Shortcuts (see [Manual shortcut setup](#manual-shortcut-setup)).
-- **Other compositors**: Add a custom shortcut in your compositor config that runs `unhush` (or the AppImage path).
-- Running `unhush` again from the command line always toggles recording regardless of how shortcuts are configured.
+On Wayland the key binding belongs to your desktop environment, not to Unhush — the shortcut
+dropdown in Settings does not bind anything there. See [Wayland Setup](#wayland-setup).
+
+- Check that your desired shortcut key is bound to run `unhush-toggle` (or, for an AppImage, the command shown in **Settings → Usability**).
+- Test the pipe directly: `printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"` while Unhush is
+  running should start or stop recording. If that works but your key doesn't, the problem is the desktop shortcut, not Unhush.
+- If the pipe doesn't exist, check the log for `command fifo listening` (`~/.config/unhush/logs/`).
 </details>
 
 <details>
@@ -435,7 +455,9 @@ A diagram of the recording, processing, chunking, postprocessing pipeline workfl
 
 ### Testing
 
-Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10), particularly with respect to the hotkey functionality, and with respect to the paste-destination tray indicator on Sway, Hyprland, and GNOME Wayland (with the Focused Window D-Bus extension installed) — none of these could be tested on the machine this was developed on. KDE Plasma Wayland support for this indicator isn't implemented yet.
+Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10).
+
+Most Wayland testing has been on KDE. Your experience with GNOME on Wayland are particularly interesting, especially the **Set up automatically** button (which writes a `gsettings` custom keybinding for you; the manual command works regardless), and the paste-destination tray indicator on Sway, Hyprland, and GNOME Wayland with the Focused Window D-Bus extension installed. KDE Plasma Wayland support for that indicator isn't implemented yet.
 
 
 <details>

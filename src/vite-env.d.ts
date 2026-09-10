@@ -20,7 +20,14 @@ declare global {
       onOpenSettings: (callback: () => void) => void;
       onNavigateTab: (callback: (event: unknown, tab: string) => void) => void;
       updateShortcut: (shortcut: string) => Promise<boolean>;
-      getShortcutMode: () => Promise<"native" | "gsettings" | "manual">;
+      getShortcutInfo: () => Promise<{
+        mode: "native" | "gsettings" | "manual";
+        command: string;
+        canAutomate: boolean;
+        settingsCommand: string | null;
+      }>;
+      setupGnomeShortcut: (shortcut: string) => Promise<{ ok: boolean; error?: string }>;
+      removeGnomeShortcut: () => Promise<{ ok: boolean; error?: string }>;
       setDuckingConfig: (config: { amount: number }) => void;
       removeAllListeners: (channel: string) => void;
       log: (level: "debug" | "info" | "warn" | "error", message: string) => void;

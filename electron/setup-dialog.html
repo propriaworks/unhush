@@ -46,6 +46,8 @@
       button:hover { border-color: var(--accent); }
       button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
       .copied { color: var(--ok); font-size: 12.5px; }
+      /* Same span, failure case -- readable on both the light and dark palettes above. */
+      .copied.bad { color: #e05252; }
       .footer { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
       .footer .spacer { flex: 1; }
       label.dontshow { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12.5px; }
@@ -56,12 +58,15 @@
   </head>
   <body>
     <h1>Welcome to Unhush</h1>
-    <p class="intro">
+    <p class="intro" id="intro-paste" hidden>
       Unhush can type your dictation straight into whatever application you're using, but that
       needs a one-time setup step on this system. Run the commands below in a terminal, then
       click <strong>Re-check</strong> — no restart needed.
     </p>
-    <p class="alt">
+    <p class="intro" id="intro-shortcut" hidden>
+      Unhush needs one setup step on this system before its keyboard shortcut will work.
+    </p>
+    <p class="alt" hidden>
       This is optional. <strong>Clipboard mode</strong> needs no setup at all: Unhush puts each
       transcript on your clipboard and you paste it yourself with Ctrl+V. You can switch modes at
       any time in Settings.
@@ -83,16 +88,23 @@
       const problemsEl = document.getElementById("problems");
       const statusEl = document.getElementById("status");
 
-      const introEl = document.querySelector(".intro");
+      const introPasteEl = document.getElementById("intro-paste");
+      const introShortcutEl = document.getElementById("intro-shortcut");
       const altEl = document.querySelector(".alt");
+      const settingsBtn = document.getElementById("settings");
 
       function render(result) {
         problemsEl.replaceChildren();
         statusEl.hidden = true;
         statusEl.className = "";
-        // The setup instructions are the whole point of the intro — drop it once they're moot.
-        introEl.hidden = result.ok;
-        altEl.hidden = result.ok;
+        // The two kinds of problem need different framing: the ydotool ones are terminal commands
+        // that Re-check can verify, and that Clipboard mode genuinely avoids; the shortcut one is a
+        // command to paste into a desktop settings dialog, which Clipboard mode does nothing about.
+        const needsPasteSetup = result.problems.some((p) => p.code !== "shortcut");
+        introPasteEl.hidden = result.ok || !needsPasteSetup;
+        introShortcutEl.hidden = result.ok || needsPasteSetup;
+        altEl.hidden = result.ok || !needsPasteSetup;
+        settingsBtn.hidden = result.ok || !needsPasteSetup;
 
         if (result.ok) {
           statusEl.hidden = false;
@@ -125,13 +137,41 @@
           btn.textContent = "Copy";
           const flash = document.createElement("span");
           flash.className = "copied";
+          // Both buttons below acknowledge in this one span, so they share a helper: it also holds
+          // the timer, or a second click would inherit the first one's remaining time and vanish
+          // early.
+          let flashTimer;
+          const showFlash = (text, ms, bad) => {
+            clearTimeout(flashTimer);
+            flash.textContent = text;
+            flash.className = bad ? "copied bad" : "copied";
+            flashTimer = setTimeout(() => { flash.textContent = ""; }, ms);
+          };
           // The whole point of this window: copying must not dismiss it, and must confirm.
           btn.addEventListener("click", async () => {
             await api.copyToClipboard(text);
-            flash.textContent = "Copied ✓";
-            setTimeout(() => { flash.textContent = ""; }, 2000);
+            showFlash("Copied ✓", 2000);
           });
-          row.append(btn, flash);
+          row.append(btn);
+
+          // Take the user to the right settings page rather than describing a menu path. Only
+          // offered when the desktop is one we recognise and its settings binary is installed —
+          // see shortcutSettingsCommand() in electron/waylandShortcut.cjs.
+          if (p.settingsCommand) {
+            const open = document.createElement("button");
+            open.textContent = "Open shortcut settings";
+            // Same acknowledgement as Copy, in the same place: the settings app can take seconds
+            // to draw its window, and an unacknowledged button reads as a broken one. "Opening",
+            // not "Opened" -- all we know is that the shell started.
+            open.addEventListener("click", async () => {
+              showFlash("Opening…", 5000);
+              const r = await api.spawnDetached(p.settingsCommand);
+              if (r && !r.ok) showFlash("Couldn't open settings", 5000, true);
+            });
+            row.append(open);
+          }
+
+          row.append(flash);
           card.append(row);
 
           if (p.note) {

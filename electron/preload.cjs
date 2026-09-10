@@ -28,7 +28,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   onNavigateTab: (callback) => ipcRenderer.on("navigate-tab", callback),
   updateShortcut: (shortcut) => ipcRenderer.invoke("update-shortcut", shortcut),
-  getShortcutMode: () => ipcRenderer.invoke("get-shortcut-mode"),
+  // How the global shortcut is managed here, plus the command a desktop-environment shortcut
+  // should run (see electron/waylandShortcut.cjs and electron/commandFifo.cjs).
+  getShortcutInfo: () => ipcRenderer.invoke("get-shortcut-info"),
+  setupGnomeShortcut: (shortcut) => ipcRenderer.invoke("setup-gnome-shortcut", shortcut),
+  removeGnomeShortcut: () => ipcRenderer.invoke("remove-gnome-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
 
   // Remove listeners

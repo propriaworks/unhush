@@ -15,11 +15,86 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
 const ydotool = require("./ydotool.cjs");
+const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+
+// Defined here because the re-exec guard below needs it too, and that runs before initLogging().
+function logFilePath() {
+  const logDir = app.getPath("logs");
+  fs.mkdirSync(logDir, { recursive: true });
+  return path.join(logDir, "unhush.log");
+}
+
+// Where the re-exec'd child's stdout/stderr should go: the log file, always. Chromium writes its
+// own diagnostics from C++ straight to fd 2 -- GPU failures, "Failed to connect to Wayland
+// display", crash output -- so none of it passes through log() and none of it would otherwise
+// land in our file. Inheriting the terminal instead was worse than it sounds: the parent has
+// already exited and handed the prompt back, so the child's output arrives *after* the prompt,
+// interleaved with whatever the user typed next, for as long as the app runs. To watch that
+// stream live rather than in the log, launch with --ozone-platform=x11 yourself -- the guard
+// below then leaves the process alone and its output stays attached to the terminal.
+function childStdio() {
+  try {
+    const fd = fs.openSync(logFilePath(), "a");
+    return ["ignore", fd, fd];
+  } catch (e) {
+    // Nowhere to put it. Discard rather than inherit: a terminal the user has already got back
+    // is not a log, and this only happens when the log directory itself is unusable.
+    return "ignore";
+  }
+}
+
+// --- Run under XWayland on Wayland sessions ---------------------------------------------------
+// Electron 38.2+ is a native Wayland client by default. Wayland forbids placing its own window
+// (the recording pill lands centre-screen), keeping it above
+// other windows, and owning the clipboard while unfocused -- wl_data_device.set_selection needs a
+// serial from a recent input event, and the pill is focusable:false, so transcripts reached the
+// clipboard only sporadically. All three work under XWayland exactly as on an X11 session, and we
+// already sidestep Wayland's input model anyway by injecting keystrokes through /dev/uinput.
+//
+// Chromium picks its ozone platform long before this script runs, so appendSwitch() is far too
+// late -- the flag must be on the real command line, which means re-execing ourselves. (Putting it
+// in the packaged .desktop Exec line instead would avoid that, but electron-builder refuses to
+// override Exec: "Please specify executable name as linux.executableName instead".) One mechanism
+// covering every launch style is the simpler outcome anyway; it costs one extra Electron init,
+// only on Wayland, and only up to this point -- no window is created before we exit.
+//
+// This runs before requestSingleInstanceLock() below, so the process about to die never takes it.
+if (
+  process.env.XDG_SESSION_TYPE === "wayland" &&
+  // The opt-out is disabled, not removed. Native Wayland cannot deliver a reliable clipboard on
+  // GNOME: setting a selection while unfocused needs ext-data-control-v1 (the protocol wl-copy
+  // uses), Mutter implements neither it nor its wlr- predecessor and has said it won't, and
+  // wl-clipboard's only fallback there is to briefly take focus -- which would break the very
+  // paste we are setting up. A mode whose core function can't work on half the Linux desktop
+  // isn't one to offer. Re-enable this line if that ever changes.
+  // process.env.UNHUSH_NATIVE_WAYLAND !== "1" &&
+  !process.env.UNHUSH_REEXEC && // belt-and-braces against an exec loop
+  // Someone who passes the flag themselves is still honoured -- unsupported, but not fought.
+  !process.argv.some((a) => a.startsWith("--ozone-platform"))
+) {
+  const { spawn } = require("child_process");
+  spawn(process.execPath, ["--ozone-platform=x11", ...process.argv.slice(1)], {
+    detached: true,
+    stdio: childStdio(),
+    env: { ...process.env, UNHUSH_REEXEC: "1" },
+  }).unref();
+  // The parent exits the instant the child is spawned, so from a terminal `unhush` looks like it
+  // failed: the prompt comes straight back before the child has drawn anything. Say what actually
+  // happened -- but only when someone is there to read it. With no TTY this is nobody's business:
+  // the child's own startup banner records the same facts in the log.
+  if (process.stderr.isTTY) {
+    process.stderr.write(
+      `Unhush ${app.getVersion()}: Wayland session — relaunching under XWayland.\n` +
+      `Starting in the background; look for the tray icon.\n`
+    );
+  }
+  process.exit(0);
+}
 
 let mainWindow = null;
 let settingsWindow = null;
@@ -79,9 +154,7 @@ function log(level, message) {
 // identical before and after).
 function initLogging() {
   try {
-    const logDir = app.getPath("logs");
-    fs.mkdirSync(logDir, { recursive: true });
-    logFile = path.join(logDir, "unhush.log");
+    logFile = logFilePath();
   } catch (e) {
     // Running at module load means a throw here would take the whole app down over a log file.
     // Leave logFile null instead: log() then falls back to console.
@@ -107,12 +180,15 @@ function logStartup() {
     `node ${process.versions.node}, pid ${process.pid}, ${isDev ? "dev" : "packaged"} ===`);
   log("info", `platform: ${os.type()} ${os.release()} ${process.arch}, ` +
     `session=${process.env.XDG_SESSION_TYPE || "?"}, desktop=${process.env.XDG_CURRENT_DESKTOP || "?"}, ` +
-    `logs=${logFile}`);
+    `ozone=${waylandShortcut.displayBackend()}, logs=${logFile}`);
 }
 
 initLogging();
-waylandShortcut.init(log);
-ydotool.init(log);
+// waylandShortcut and ydotool take the userData path rather than requiring electron themselves —
+// it's their only reason to, and without it they're testable as plain node.
+waylandShortcut.init(log, app.getPath("userData"));
+ydotool.init(log, app.getPath("userData"));
+commandFifo.init(log);
 audioDucking.init(log, app.getName());
 activeWindow.init(log);
 
@@ -120,29 +196,46 @@ app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
 app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
 
-let isWayland = false;
-try {
-  isWayland = process.env.XDG_SESSION_TYPE === "wayland";
-} catch (e) {}
+// Session-type and compositor knowledge now lives entirely in waylandShortcut.cjs, which is the
+// only place that acts on it.
+//
+// No GlobalShortcutsPortal switch here any more. We force XWayland, where Chromium builds an X11
+// listener and never touches the portal; and on a forced native-Wayland run the switch would
+// still be pointless, since Chromium enables kGlobalShortcutsPortal by default and Electron
+// adds GlobalShortcutsPortalPreferredTrigger itself on Linux. It was also appended too late to
+// affect the feature list, which is built before this script runs.
 
-if (isWayland) {
-  // Enable XDG GlobalShortcuts portal so globalShortcut works on Wayland
-  // via the desktop environment (KDE, GNOME 48+).
-  app.commandLine.appendSwitch("enable-features", "GlobalShortcutsPortal");
-}
+let shortcutRegistered = false;
 
 async function registerShortcut(shortcut) {
+  // Re-registering is not free. On Wayland's portal path Chromium answers any change to the
+  // command set by closing and recreating its whole D-Bus session, leaving the hotkey dead for the
+  // round trip -- and the renderer used to call this on every recording start/stop (a React
+  // dependency leak, see RecordingBar.tsx), which is what made the second press of a toggle do
+  // nothing. Harmless on X11, but there is no reason to re-grab a key we already hold.
+  if (shortcut === currentShortcut && shortcutRegistered) return;
+
   globalShortcut.unregisterAll();
+  shortcutRegistered = false;
 
   try {
-    await globalShortcut.register(shortcut, () => { lastHotkeyAt = Date.now(); toggleRecording(); });
+    const ok = await globalShortcut.register(shortcut, () => {
+      // Logged like the fifo's "fifo: toggle", so a dead hotkey can be told apart from a live one
+      // that toggled nothing. On the portal path this is the only evidence the desktop's Activated
+      // signal actually reached us -- registration succeeding says nothing about delivery.
+      log("info", `global shortcut fired: ${shortcut}`);
+      lastHotkeyAt = Date.now();
+      toggleRecording();
+    });
+    shortcutRegistered = ok !== false;
   } catch (e) {}
+  log("info", `global shortcut ${shortcutRegistered ? "registered" : "NOT registered"}: ${shortcut}`);
 
-  // On Wayland without portal support, globalShortcut does nothing.
-  // Prompt the user to configure a desktop environment shortcut instead.
-  if (isWayland && waylandShortcut.needsFallback()) {
-    waylandShortcut.check(shortcut);
-  }
+  // Keeps a desktop-environment binding in step with the choice above. Called unconditionally: it
+  // already no-ops unless the user opted into GNOME automation, and gating it on needsFallback()
+  // would strand an existing binding at the old key for anyone who later forced a native-Wayland
+  // run.
+  waylandShortcut.check(shortcut);
 
   currentShortcut = shortcut;
   updateTrayMenu();
@@ -221,6 +314,9 @@ function setRecordingActive(active) {
 
 // Toggle recording: show+record or stop+hide
 function toggleRecording() {
+  // The only way a delivered hotkey/fifo command can still do nothing: say so rather than no-op
+  // silently, since from outside that is indistinguishable from the trigger never arriving.
+  if (!mainWindow) log("warn", "toggleRecording: no main window, ignoring");
   if (mainWindow) {
     if (!isRecording) {
       mainWindow.setIgnoreMouseEvents(false);
@@ -624,10 +720,13 @@ ipcMain.handle("update-shortcut", async (event, shortcut) => {
   return true;
 });
 
-ipcMain.handle("get-shortcut-mode", () => {
-  if (!isWayland) return "native";
-  return waylandShortcut.shortcutMode();
-});
+// Reports mode "native" on X11, where globalShortcut grabs the key itself. The fifo command comes
+// back on every platform, since it works everywhere and can bind keys the dropdown doesn't list.
+ipcMain.handle("get-shortcut-info", () => waylandShortcut.shortcutInfo());
+
+// GNOME is the one desktop whose keybindings we can set for the user. Explicit-action only.
+ipcMain.handle("setup-gnome-shortcut", (_event, shortcut) => waylandShortcut.setupGnomeShortcut(shortcut));
+ipcMain.handle("remove-gnome-shortcut", () => waylandShortcut.removeGnomeShortcut());
 
 // Check the ydotool paste path at startup and, if something is broken, show the setup window.
 // Skipped when output mode is 'clipboard', since ydotool isn't used in that case.
@@ -654,13 +753,26 @@ function mutedProblems() {
   }
 }
 
+// The setup window shows one card per problem. The ydotool paste path and the global shortcut are
+// independent concerns, so they're gathered here rather than either module knowing about the other.
+let setupIncludesYdotool = true;
+
+async function setupPreflight() {
+  const problems = setupIncludesYdotool ? (await ydotool.preflight()).problems : [];
+  // Needed whatever the output mode, unlike the ydotool checks. Returns null unless a
+  // desktop-environment shortcut is actually required.
+  const shortcut = waylandShortcut.shortcutProblem();
+  if (shortcut) problems.push(shortcut);
+  return { ok: problems.length === 0, problems };
+}
+
 async function checkOutputPath() {
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8")); } catch (e) {}
-  if ((settings.outputMode || "paste") === "clipboard") return;
+  setupIncludesYdotool = (settings.outputMode || "paste") !== "clipboard";
 
-  const result = await ydotool.preflight();
+  const result = await setupPreflight();
   lastSetupResult = result;
   if (result.ok) return;
 
@@ -709,7 +821,7 @@ function showSetupWindow(result) {
 }
 
 ipcMain.handle("ydotool-preflight", async () => {
-  lastSetupResult = await ydotool.preflight();
+  lastSetupResult = await setupPreflight();
   return lastSetupResult;
 });
 
@@ -765,6 +877,7 @@ if (!gotTheLock) {
     createWindow(offsetFromBottom);
     createTray();
     checkOutputPath();
+    commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
 
     // Reposition the recording bar whenever the primary display's work area changes
     // (resolution change, taskbar resize, monitor added/removed, etc.)
@@ -832,15 +945,28 @@ app.on("window-all-closed", () => {
   // Keep app running in tray
 });
 
+// Teardown steps are independent: a throw in one must not skip the rest. Quitting mid-recording
+// was doing exactly that -- the shutdown line appeared but the command fifo survived, and on a
+// machine where we spawned ydotoold it would have been orphaned holding a uinput keyboard. The
+// label tells us which step failed rather than leaving it to be inferred.
+function tryTeardown(label, fn) {
+  const t0 = Date.now();
+  try { fn(); } catch (e) { log("warn", `teardown step "${label}" failed: ${e.message}`); }
+  log("debug", `teardown: ${label} (${Date.now() - t0}ms)`);
+}
+
 app.on("will-quit", () => {
   // First thing, so the shutdown is on record even if a teardown step below throws.
   // Skipped for the second instance, which quits immediately and never really started.
   if (gotTheLock) log("info", `=== Unhush shutting down after ${uptimeString(Date.now() - startedAt)} ===`);
-  audioDucking.restoreSyncForQuit();
-  globalShortcut.unregisterAll();
+  tryTeardown("audio ducking", () => audioDucking.restoreSyncForQuit());
+  tryTeardown("global shortcuts", () => globalShortcut.unregisterAll());
   // Our ydotoold must not outlive us — it holds an open /dev/uinput virtual keyboard.
   // No-op if we adopted someone else's daemon rather than starting one.
-  ydotool.stopDaemon();
+  tryTeardown("ydotoold", () => ydotool.stopDaemon());
+  // Leaving the pipe behind would make `unhush-toggle` block on a fifo with no reader.
+  tryTeardown("command fifo", () => commandFifo.stop());
+  log("debug", "teardown: complete");
   // Chromium doesn't reliably remove its Mojo IPC channel files from userData.
   // Only the main instance cleans up — the second instance must not touch files
   // that the main instance may still be using.

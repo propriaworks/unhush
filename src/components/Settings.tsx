@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { LLM_DEFAULT_CUSTOM_URL, LLM_DEFAULT_MODELS, LLM_DEFAULT_SYSTEM_PROMPT } from "../audio/llmApi";
 import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
 import {
@@ -39,6 +39,20 @@ function Settings() {
   const [provider, setProvider] = useState<Provider>("groq");
   const [shortcut, setShortcut] = useState("Ctrl+Alt+Space");
   const [shortcutMode, setShortcutMode] = useState<"native" | "gsettings" | "manual">("native");
+  // The command a desktop-environment shortcut should run to toggle recording (see
+  // electron/commandFifo.cjs). Offered on every platform: it can bind keys this dropdown doesn't
+  // list, and it's the only mechanism that works on Wayland.
+  const [toggleCommand, setToggleCommand] = useState("");
+  const [canAutomate, setCanAutomate] = useState(false);
+  // Command that opens this desktop's own shortcut settings, or "" when we don't recognise it.
+  const [settingsCommand, setSettingsCommand] = useState("");
+  // One transient status line shared by the buttons under the toggle command ("Copied ✓",
+  // "Opening…"): each action needs the same acknowledgement, and only one can be the most
+  // recent. The timer is held so a second click restarts it rather than inheriting the
+  // first click's remaining time.
+  const [shortcutFlash, setShortcutFlash] = useState("");
+  const shortcutFlashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [shortcutError, setShortcutError] = useState("");
   const [outputMethod, setOutputMethod] = useState<OutputMethod>("paste");
   const [duckingAmount, setDuckingAmount] = useState(40);
   const [chimesEnabled, setChimesEnabled] = useState(true);
@@ -86,7 +100,12 @@ function Settings() {
     const cachedL = getCachedModels(getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || ""));
     if (cachedL) setLlmModels(cachedL);
 
-    window.electronAPI?.getShortcutMode().then(setShortcutMode);
+    window.electronAPI?.getShortcutInfo().then((info) => {
+      setShortcutMode(info.mode);
+      setToggleCommand(info.command);
+      setCanAutomate(info.canAutomate);
+      setSettingsCommand(info.settingsCommand || "");
+    });
 
     const handleNavigateTab = (_event: unknown, newTab: string) => {
       if (newTab === "transcription" || newTab === "llm" || newTab === "usability") {
@@ -150,6 +169,47 @@ function Settings() {
     setShortcut(newShortcut);
     localStorage.setItem("unhush_shortcut", newShortcut);
     window.electronAPI?.updateShortcut(newShortcut);
+  };
+
+  const flashShortcutStatus = (message: string, ms = 2000) => {
+    clearTimeout(shortcutFlashTimer.current);
+    setShortcutFlash(message);
+    shortcutFlashTimer.current = setTimeout(() => setShortcutFlash(""), ms);
+  };
+  useEffect(() => () => clearTimeout(shortcutFlashTimer.current), []);
+
+  const copyToggleCommand = async () => {
+    await window.electronAPI?.copyToClipboard(toggleCommand);
+    flashShortcutStatus("Copied ✓");
+  };
+
+  // The desktop's own settings app can take several seconds to draw its first window -- with no
+  // acknowledgement the button looks dead and invites a second click, which on KDE raises a second
+  // System Settings instance. Says "Opening" rather than "Opened": spawn() only reports that the
+  // shell started, not that the window ever appeared. Held longer than the copy flash for the
+  // same reason -- it should still be on screen when the window finally is.
+  const openShortcutSettings = async () => {
+    setShortcutError("");
+    flashShortcutStatus("Opening…", 5000);
+    const r = await window.electronAPI?.spawnDetached(settingsCommand);
+    if (r && !r.ok) {
+      flashShortcutStatus("");
+      setShortcutError(r.error || "Could not open your desktop's shortcut settings.");
+    }
+  };
+
+  const handleAutomateShortcut = async () => {
+    setShortcutError("");
+    const r = await window.electronAPI?.setupGnomeShortcut(shortcut);
+    if (r?.ok) setShortcutMode("gsettings");
+    else setShortcutError(r?.error || "Could not configure the shortcut.");
+  };
+
+  const handleRemoveAutomatedShortcut = async () => {
+    setShortcutError("");
+    const r = await window.electronAPI?.removeGnomeShortcut();
+    if (r?.ok) setShortcutMode("manual");
+    else setShortcutError(r?.error || "Could not remove the shortcut.");
   };
 
   const handleDuckingAmountChange = (newAmount: number) => {
@@ -367,13 +427,61 @@ function Settings() {
               </select>
               {shortcutMode === "manual" && (
                 <p className="text-white/40 text-xs mt-1">
-                  Configure the shortcut in your desktop environment's settings.
+                  On Wayland the key binding belongs to your desktop environment, not to Unhush.
+                  Add a custom shortcut there that runs the command below.
                 </p>
               )}
               {shortcutMode === "gsettings" && (
                 <p className="text-white/40 text-xs mt-1">
-                  Updates your GNOME keyboard shortcut automatically.
+                  Unhush keeps your GNOME keyboard shortcut in sync with this setting.
                 </p>
+              )}
+
+              {/* Works on every session type, so it's always offered: it's how you bind a key this
+                  list doesn't include, and how scripts can start and stop dictation. */}
+              <p className="text-white/40 text-xs mt-2">
+                {shortcutMode === "native"
+                  ? "To use a key not listed here, bind this command in your desktop environment:"
+                  : "Command to run:"}
+              </p>
+              <pre className="mt-1 px-2 py-1.5 bg-black/30 border border-white/10 rounded-lg text-white/70 text-[11px] font-mono whitespace-pre-wrap break-all select-text">
+                {toggleCommand}
+              </pre>
+              <div className="flex items-center gap-2 mt-1.5">
+                <button
+                  onClick={copyToggleCommand}
+                  className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
+                >
+                  Copy
+                </button>
+                {canAutomate && shortcutMode === "manual" && (
+                  <button
+                    onClick={handleAutomateShortcut}
+                    className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
+                  >
+                    Set up automatically
+                  </button>
+                )}
+                {shortcutMode === "gsettings" && (
+                  <button
+                    onClick={handleRemoveAutomatedShortcut}
+                    className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
+                  >
+                    Remove automatic shortcut
+                  </button>
+                )}
+                {settingsCommand && shortcutMode !== "native" && (
+                  <button
+                    onClick={openShortcutSettings}
+                    className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 text-xs"
+                  >
+                    Open shortcut settings
+                  </button>
+                )}
+                {shortcutFlash && <span className="text-green-400 text-xs">{shortcutFlash}</span>}
+              </div>
+              {shortcutError && (
+                <p className="text-red-400 text-xs mt-1">{shortcutError}</p>
               )}
             </div>
 
