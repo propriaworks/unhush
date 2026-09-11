@@ -1,4 +1,4 @@
-// Vendored from https://github.com/jtbr/dbus_globalshortcut_portal (published, unmaintained).
+// Vendored from https://github.com/jtbr/dbus_globalshortcut_client (published, unmaintained).
 // That repo is where this was developed and tested standalone; this copy is the living one --
 // change it here, and port back only if the upstream is ever revived.
 

@@ -19,7 +19,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Setup dialog (electron/setup-dialog.html) — see electron/ydotool.cjs
   ydotoolPreflight: () => ipcRenderer.invoke("ydotool-preflight"),
-  openSettings: (tab) => ipcRenderer.invoke("open-settings-window", tab),
+  // outputMethod, when given, is the mode Settings should select on arrival (see
+  // "Use Clipboard mode instead"): the renderer owns that setting, so it does the write.
+  openSettings: (tab, outputMethod) =>
+    ipcRenderer.invoke("open-settings-window", tab, outputMethod),
   closeSetupDialog: () => ipcRenderer.send("close-setup-dialog"),
   setSetupDialogMuted: (muted) => ipcRenderer.send("set-setup-dialog-muted", muted),
   onSetupResult: (callback) => ipcRenderer.on("setup-result", callback),
@@ -27,12 +30,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Settings
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   onNavigateTab: (callback) => ipcRenderer.on("navigate-tab", callback),
+  onSetOutputMethodUiSetting: (callback) => ipcRenderer.on("set-output-method-ui-setting", callback),
   updateShortcut: (shortcut) => ipcRenderer.invoke("update-shortcut", shortcut),
   // How the global shortcut is managed here, plus the command a desktop-environment shortcut
   // should run (see electron/waylandShortcut.cjs and electron/commandFifo.cjs).
   getShortcutInfo: () => ipcRenderer.invoke("get-shortcut-info"),
   configureShortcut: () => ipcRenderer.invoke("configure-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
+  setOutputMethod: (method) => ipcRenderer.send("set-output-method", method),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

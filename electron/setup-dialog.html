@@ -116,7 +116,7 @@
           statusEl.hidden = false;
           statusEl.className = "ok";
           statusEl.textContent =
-            "All set — Unhush can now type your dictation directly into other applications.";
+            "All set — Unhush can now output your dictation correctly as requested.";
           return;
         }
 
@@ -188,7 +188,20 @@
           e.target.textContent = "Re-check";
         }
       });
-      document.getElementById("settings").addEventListener("click", () => api.openSettings("usability"));
+      // Actually switches the mode, rather than only pointing at the control that does: the
+      // renderer owns that setting, so Settings performs the write when it opens. Then re-check,
+      // so this window turns into the "All set" banner instead of leaving the ydotool instructions
+      // the user just opted out of on screen. Safe to do immediately: the main process records the
+      // requested mode before resolving, so the preflight already skips the ydotool checks.
+      settingsBtn.addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+          await api.openSettings("usability", "clipboard");
+          render(await api.ydotoolPreflight());
+        } finally {
+          e.target.disabled = false;
+        }
+      });
       document.getElementById("close").addEventListener("click", () => api.closeSetupDialog());
       document.getElementById("dontshow").addEventListener("change", (e) => api.setSetupDialogMuted(e.target.checked));
 

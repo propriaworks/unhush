@@ -181,17 +181,36 @@ function Settings() {
     window.electronAPI?.setOutputMethod(method);
   };
 
+  // Briefly highlights whichever output button was just selected *for* the user (as opposed to
+  // one they clicked themselves, which is already visibly selected the instant they touch it).
+  // Cleared on a timer rather than an animationend listener so a second external change while one
+  // is still fading restarts the clock instead of leaving it stuck (or racing a stale un-set).
+  const [justSetOutput, setJustSetOutput] = useState<OutputMethod | null>(null);
+  const justSetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const applyExternalOutputMethod = (method: OutputMethod) => {
+    handleOutputMethodChange(method);
+    clearTimeout(justSetTimer.current);
+    setJustSetOutput(null);
+    // Restart from "no highlight" on the next frame so a repeat of the same method still restarts
+    // the CSS animation (an unchanged class name otherwise wouldn't replay it).
+    requestAnimationFrame(() => setJustSetOutput(method));
+    justSetTimer.current = setTimeout(() => setJustSetOutput(null), 5000);
+  };
+
   // The setup dialog's "Use Clipboard mode instead" doesn't just navigate here -- it asks for the
   // mode to be selected. Routed through the click handler so it persists and tells main exactly as
   // a click would. Declared after the hydrating effect above, so it wins the initial render.
   useEffect(() => {
     const fromQuery = new URLSearchParams(window.location.search).get("output");
-    if (isOutputMethod(fromQuery)) handleOutputMethodChange(fromQuery);
+    if (isOutputMethod(fromQuery)) applyExternalOutputMethod(fromQuery);
 
-    window.electronAPI?.onSetOutputMode((_event, method) => {
-      if (isOutputMethod(method)) handleOutputMethodChange(method);
+    window.electronAPI?.onSetOutputMethodUiSetting((_event, method) => {
+      if (isOutputMethod(method)) applyExternalOutputMethod(method);
     });
-    return () => window.electronAPI?.removeAllListeners("set-output-mode");
+    return () => {
+      window.electronAPI?.removeAllListeners("set-output-method-ui-setting");
+      clearTimeout(justSetTimer.current);
+    };
   }, []);
 
   const handleShortcutChange = (newShortcut: string) => {
@@ -411,7 +430,7 @@ function Settings() {
                       outputMethod === m
                         ? "bg-primary-500 text-white"
                         : "bg-white/5 text-white/60 hover:bg-white/10"
-                    }`}
+                    } ${justSetOutput === m ? "animate-halo" : ""}`}
                   >
                     {m.charAt(0).toUpperCase() + m.slice(1)}
                   </button>
@@ -461,8 +480,8 @@ function Settings() {
               )}
               {shortcutMode === "manual" && (
                 <p className="text-white/40 text-xs">
-                  This desktop couldn't register a shortcut for Unhush, so the key binding has to be
-                  yours: add one that runs the command below.
+                  This desktop couldn't register a shortcut key for Unhush, so you need to set
+                  one for yourself: add one that runs the command below.
                 </p>
               )}
 
@@ -471,7 +490,7 @@ function Settings() {
               <p className="text-white/40 text-xs mt-2">
                 {shortcutMode === "manual"
                   ? "Command to run:"
-                  : "To use a key not listed here, bind this command in your desktop environment:"}
+                  : "Alternatively, you can run this command to toggle recording (bound to a system shortcut key, e.g.):"}
               </p>
               <pre className="mt-1 px-2 py-1.5 bg-black/30 border border-white/10 rounded-lg text-white/70 text-[11px] font-mono whitespace-pre-wrap break-all select-text">
                 {toggleCommand}

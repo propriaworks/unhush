@@ -1,6 +1,6 @@
 // @vitest-environment node
-//
-// Vendored from https://github.com/jtbr/dbus_globalshortcut_portal (published, unmaintained).
+
+// Vendored from https://github.com/jtbr/dbus_globalshortcut_client (published, unmaintained).
 // That repo is where this was developed and tested standalone; this copy is the living one --
 // change it here, and port back only if the upstream is ever revived.
 
@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 const {
   parseSignature, marshal, unmarshal, variant, dictToObject, buildMessage, tryParseMessage, MESSAGE_TYPE,
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
 } = require('./dbusWire.cjs');
 
 describe('parseSignature', () => {
@@ -47,17 +47,14 @@ describe('exact byte offsets and padding', () => {
     expect(buf.readUInt32LE(8)).toBe(0xdeadbeef);
   });
 
-  // Disabled type codes still need this same alignment-padding coverage in principle; kept here,
-  // commented out, alongside the dbusWire.cjs code they exercised (int32 'i' isn't wired up --
-  // see the note by BASIC_TYPE_CODES in dbusWire.cjs).
-  // it('pads a byte then int32 to a 4-byte boundary, then reads int32 with no further pad', () => {
-  //   const buf = marshal('yiu', [0x42, -7, 0xdeadbeef]);
-  //   expect(buf.length).toBe(12);
-  //   expect(buf.readUInt8(0)).toBe(0x42);
-  //   expect(buf.subarray(1, 4)).toEqual(Buffer.alloc(3)); // padding, all zero
-  //   expect(buf.readInt32LE(4)).toBe(-7);
-  //   expect(buf.readUInt32LE(8)).toBe(0xdeadbeef);
-  // });
+  it('pads a byte then int32 to a 4-byte boundary, then reads int32 with no further pad', () => {
+    const buf = marshal('yiu', [0x42, -7, 0xdeadbeef]);
+    expect(buf.length).toBe(12);
+    expect(buf.readUInt8(0)).toBe(0x42);
+    expect(buf.subarray(1, 4)).toEqual(Buffer.alloc(3)); // padding, all zero
+    expect(buf.readInt32LE(4)).toBe(-7);
+    expect(buf.readUInt32LE(8)).toBe(0xdeadbeef);
+  });
 
   it('pads a byte then boolean to a 4-byte boundary, wire form is uint32 not a single byte', () => {
     const buf = marshal('yb', [0x42, true]);
@@ -78,16 +75,14 @@ describe('exact byte offsets and padding', () => {
     expect(buf.readBigUInt64LE(16)).toBe(2n);
   });
 
-  // Disabled: int64 'x' isn't wired up (see the note by BASIC_TYPE_CODES in dbusWire.cjs), but
-  // this is the same test against the signed variant, kept for when it's re-enabled.
-  // it('excludes the length-to-first-element pad from the array length (int64 element)', () => {
-  //   const buf = marshal('ax', [[1n, 2n]]);
-  //   expect(buf.length).toBe(4 + 4 + 16);
-  //   expect(buf.readUInt32LE(0)).toBe(16);
-  //   expect(buf.subarray(4, 8)).toEqual(Buffer.alloc(4));
-  //   expect(buf.readBigInt64LE(8)).toBe(1n);
-  //   expect(buf.readBigInt64LE(16)).toBe(2n);
-  // });
+  it('excludes the length-to-first-element pad from the array length (int64 element)', () => {
+    const buf = marshal('ax', [[1n, 2n]]);
+    expect(buf.length).toBe(4 + 4 + 16);
+    expect(buf.readUInt32LE(0)).toBe(16);
+    expect(buf.subarray(4, 8)).toEqual(Buffer.alloc(4));
+    expect(buf.readBigInt64LE(8)).toBe(1n);
+    expect(buf.readBigInt64LE(16)).toBe(2n);
+  });
 
   it('signature (g) uses a 1-byte length, unlike string/object-path (s/o)', () => {
     const sigBuf = marshal('g', ['a{sv}']);
@@ -197,6 +192,27 @@ describe('round-trip encoding through decoding', () => {
     const { values } = unmarshal('b', marshal('u', [42]));
     expect(values).toEqual([true]);
   });
+
+  it('round-trips int16 and uint16, including negative and out-of-int16-range values', () => {
+    expect(roundTrip('n', [-1])).toEqual([-1]);
+    expect(roundTrip('n', [-32768])).toEqual([-32768]);
+    expect(roundTrip('q', [65535])).toEqual([65535]);
+  });
+
+  it('round-trips int32', () => {
+    expect(roundTrip('i', [-2147483648])).toEqual([-2147483648]);
+    expect(roundTrip('i', [2147483647])).toEqual([2147483647]);
+  });
+
+  it('round-trips int64 as a bigint', () => {
+    expect(roundTrip('x', [-1n])).toEqual([-1n]);
+    expect(roundTrip('x', [9223372036854775807n])).toEqual([9223372036854775807n]);
+  });
+
+  it('round-trips a double, including fractional values', () => {
+    expect(roundTrip('d', [3.14159])).toEqual([3.14159]);
+    expect(roundTrip('d', [-0.5])).toEqual([-0.5]);
+  });
 });
 
 describe('message framing over a byte stream', () => {
@@ -250,5 +266,37 @@ describe('message framing over a byte stream', () => {
     expect(message.replySerial).toBe(3);
     expect(message.errorName).toBe('org.freedesktop.DBus.Error.Failed');
     expect(message.body).toEqual(['no GlobalShortcuts backend']);
+  });
+});
+
+// The portal is two processes, and watching only the frontend let a backend
+// restart kill the binding silently -- this predicate exists to prevent regressing
+const {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  _internal: { ownerChangeAffectsSession },
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+} = require('./portalShortcuts.cjs');
+
+describe('ownerChangeAffectsSession', () => {
+  it('matches the portal frontend', () => {
+    expect(ownerChangeAffectsSession('org.freedesktop.portal.Desktop')).toBe(true);
+  });
+
+  it('matches any desktop backend, whichever implements GlobalShortcuts', () => {
+    for (const backend of ['kde', 'gnome', 'hyprland', 'wlr', 'cosmic']) {
+      expect(ownerChangeAffectsSession(`org.freedesktop.impl.portal.desktop.${backend}`)).toBe(true);
+    }
+  });
+
+  it('ignores unrelated names, including a merely string-prefixed one', () => {
+    for (const name of [
+      'org.freedesktop.impl.portal.PermissionStore',
+      'org.freedesktop.impl.portal.desktopOther',
+      'org.freedesktop.portal.Documents',
+      'org.kde.KWin',
+      ':1.42',
+    ]) {
+      expect(ownerChangeAffectsSession(name)).toBe(false);
+    }
   });
 });

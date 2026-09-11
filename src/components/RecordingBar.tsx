@@ -300,6 +300,11 @@ function RecordingBar() {
     window.electronAPI.setDuckingConfig({
       amount: parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10),
     });
+    // The main process can't read localStorage, and its first-run setup check needs to know
+    // whether the ydotool paste path is even in use before it decides whether to nag about it.
+    window.electronAPI.setOutputMethod(
+      (localStorage.getItem("unhush_output_method") as OutputMethod) || "paste"
+    );
   }, []);
 
   const renderContent = () => {

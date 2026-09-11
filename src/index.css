@@ -25,6 +25,20 @@
   --animate-pulse-ring: pulse-ring 1.33s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-wave: wave 1s ease-in-out infinite;
   --animate-fade-in: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  /* Marks a control that was just changed *for* the user (e.g. by the setup dialog), rather than
+     one they clicked themselves -- that one is already visibly selected the instant they touch it.
+     One shot, not infinite like pulse-ring above: it should read as "this just happened", not as
+     an ongoing indicator. */
+  --animate-halo: halo 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+
+  @keyframes halo {
+    0% {
+      box-shadow: 0 0 0 0 rgba(46, 91, 255, 0.9);
+    }
+    100% {
+      box-shadow: 0 0 0 8px rgba(46, 91, 255, 0);
+    }
+  }
 
   @keyframes pulse-ring {
     0% {

@@ -39,14 +39,13 @@ const BUS_NAME = 'org.freedesktop.DBus';
 
 // The portal is two processes, not one. `org.freedesktop.portal.Desktop` is the frontend, which
 // routes each interface to a backend that claims `org.freedesktop.impl.portal.desktop.<desktop>`
-// (`.kde`, `.gnome`, `.hyprland`, ...). GlobalShortcuts is managed entirely by the backend, so
-// restarting *it* kills our session even while the frontend keeps its name and its owner -- so
-// watching the frontend alone is insufficient. Matched as a namespace because we cannot know
-// which backend is in play; the bus treats this as a dotted-prefix match, so a
+// (`.kde`, `.gnome`, `.hyprland`, ...). GlobalShortcuts lives entirely in the backend, so
+// restarting *it* kills our session while the frontend keeps its name and its owner -- invisible
+// to a watch on the frontend alone. Matched as a namespace because we cannot know which backend
+// is in play, and it is not ours to choose; the bus treats this as a dotted-prefix match, so a
 // merely string-prefixed name like `...desktopSomethingElse` does not match (verified on the
 // session bus).
 const BACKEND_NAMESPACE = 'org.freedesktop.impl.portal.desktop';
-const BUS_PATH = '/org/freedesktop/DBus';
 
 // Whether a NameOwnerChanged for `name` means the GlobalShortcuts session we hold is gone. The
 // match rules already narrow the traffic, but the bus is free to send more than was asked for and
@@ -56,6 +55,7 @@ const BUS_PATH = '/org/freedesktop/DBus';
 function ownerChangeAffectsSession(name) {
   return name === PORTAL_NAME || name.startsWith(`${BACKEND_NAMESPACE}.`);
 }
+const BUS_PATH = '/org/freedesktop/DBus';
 
 const REQUEST_TIMEOUT_MS = 120000; // the consent dialog is a human in the loop; bound every wait
 
@@ -233,7 +233,7 @@ async function start({
     // ConfigureShortcuts answers "AccessDenied: Invalid session". Our own socket is untouched by
     // any of that (we are connected to the bus, not to the portal), so the socket-level disconnect
     // below never sees it. NameOwnerChanged is what does: the bus tells us the well-known name has
-    // a new owner. Both names have to be watched -- see BACKEND_NAMESPACE. Tested on KDE Plasma 6:
+    // a new owner. Both names have to be watched -- see BACKEND_NAMESPACE. Measured on KDE Plasma 6:
     // restarting xdg-desktop-portal.service is caught by the first rule, and
     // plasma-xdg-desktop-portal-kde.service only by the second.
     await c.addMatch(
@@ -322,8 +322,9 @@ async function start({
   }
 }
 
-// The live shortcuts, straight from the portal. ShortcutsChanged should alert us to edits made
-// while we are running; and this covers everything else by performing a direct query
+// The live shortcuts, straight from the portal. ShortcutsChanged covers edits made while we are
+// running; this covers everything else -- notably a UI opening long after the fact, and any change
+// the desktop made without telling us.
 async function list() {
   if (!conn || !session) return { ok: false, reason: 'error', error: 'not started' };
   try {

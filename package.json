@@ -63,6 +63,7 @@
     "deb": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
+      "fpm": ["--before-remove", "scripts/preremove.sh"],
       "depends": [
         "ydotool"
       ],
@@ -73,6 +74,7 @@
     "rpm": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
+      "fpm": ["--before-remove", "scripts/preremove.sh"],
       "depends": [
         "ydotool"
       ]
@@ -80,6 +82,7 @@
     "pacman": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
+      "fpm": ["--before-remove", "scripts/preremove.sh"],
       "depends": [
         "ydotool"
       ]

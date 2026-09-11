@@ -28,15 +28,32 @@ function fakePortal(results: StartResult[]) {
     calls,
     stopped: 0,
     configured: 0,
+    // What ListShortcuts would report now; set it to simulate an edit made in the desktop's editor.
+    listTrigger: "Ctrl+Alt+Space" as string | null,
+    listOk: true,
     fire: () => calls[calls.length - 1].onActivated(),
     drop: () => calls[calls.length - 1].onDisconnected(),
+    change: (trigger: string) => calls[calls.length - 1].onShortcutsChanged(trigger),
     init() {},
     async start(opts: any) {
       calls.push(opts);
       return results[Math.min(calls.length - 1, results.length - 1)];
     },
+    async list() {
+      if (!this.listOk) return { ok: false, reason: "error", error: "no session" };
+      return { ok: true, shortcuts: [["toggle-recording", { trigger_description: this.listTrigger }]] };
+    },
     stop() { this.stopped += 1; },
-    async configure() { this.configured += 1; return { ok: true }; },
+    // configureFails: answer the first call the way a portal with a dead session does.
+    configureFails: false,
+    async configure() {
+      this.configured += 1;
+      if (this.configureFails) {
+        this.configureFails = false;
+        return { ok: false, reason: "error", error: "org.freedesktop.DBus.Error.AccessDenied: Invalid session" };
+      }
+      return { ok: true };
+    },
   };
 }
 
@@ -261,6 +278,56 @@ describe("a mid-session drop", () => {
   });
 });
 
+// The key can change under us at any time: the portal honours our preferred trigger once, and from
+// then on the desktop's own editor owns it. Showing the trigger we were handed at startup for the
+// rest of the run would mean the UI ends up lying about which key works.
+describe("keeping the displayed trigger current", () => {
+  it("follows a ShortcutsChanged signal", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.change("Meta+D");
+    expect(m.shortcutInfo().trigger).toBe("Meta+D");
+  });
+
+  it("tells the caller, so the tray menu can follow too", async () => {
+    const { m, portal } = await load(wayland());
+    let changes = 0;
+    await m.startPortal("Ctrl+Alt+Space", () => {}, () => { changes += 1; });
+    portal.change("Meta+D");
+    expect(changes).toBe(1);
+  });
+
+  it("reports an empty trigger, which means every key was switched off", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.change("");
+    expect(m.shortcutInfo().trigger).toBe("");
+  });
+
+  it("re-reads from the portal on refresh(), for a UI opening later", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.listTrigger = "Ctrl+Alt+Y";
+    await m.refresh();
+    expect(m.shortcutInfo().trigger).toBe("Ctrl+Alt+Y");
+  });
+
+  it("keeps the last known trigger when the portal can't answer", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.listOk = false;
+    await m.refresh();
+    expect(m.shortcutInfo().trigger).toBe("Ctrl+Alt+Space");
+  });
+
+  it("does nothing on the manual path, where there is no session to ask", async () => {
+    const { m } = await load(wayland([{ ok: false, reason: "unavailable" }]));
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    await expect(m.refresh()).resolves.toBeUndefined();
+    expect(m.shortcutMode()).toBe("manual");
+  });
+});
+
 describe("shortcutInfo", () => {
   it("offers the fifo command on X11 too, for keys the dropdown doesn't list", async () => {
     const { m } = await load({ session: "x11" });
@@ -298,5 +365,25 @@ describe("configure", () => {
     await m.startPortal("Ctrl+Alt+Space", () => {});
     await m.configure();
     expect(portal.configured).toBe(1);
+  });
+
+  // Measured on Fedora/KDE: after `systemctl --user restart xdg-desktop-portal`, ConfigureShortcuts
+  // answers "AccessDenied: Invalid session" -- the portal takes every session down with it.
+  it("rebinds and retries when the session died under it", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.configureFails = true;
+    const result = await m.configure();
+    expect(result).toMatchObject({ ok: true });
+    expect(portal.calls).toHaveLength(2);   // rebound before the second attempt
+    expect(portal.configured).toBe(2);
+  });
+
+  it("does not rebind for an unrelated failure", async () => {
+    const { m, portal } = await load(wayland());
+    await m.startPortal("Ctrl+Alt+Space", () => {});
+    portal.configure = async () => ({ ok: false, reason: "error", error: "no editor installed" });
+    await m.configure();
+    expect(portal.calls).toHaveLength(1);
   });
 });

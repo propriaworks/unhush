@@ -19,16 +19,26 @@ declare global {
       resizeWindow: (width: number, height: number) => void;
       onOpenSettings: (callback: () => void) => void;
       onNavigateTab: (callback: (event: unknown, tab: string) => void) => void;
+      // Tells Settings' output-method buttons which one to select in the UI, sent when the
+      // settings window is already open (a fresh one gets it in the query string instead -- see
+      // createSettingsWindow). Distinct from setOutputMethod below: that one *reports* the real,
+      // persisted setting from Settings to main; this one *commands* Settings to select a value.
+      onSetOutputMethodUiSetting: (callback: (event: unknown, method: string) => void) => void;
       updateShortcut: (shortcut: string) => Promise<boolean>;
       getShortcutInfo: () => Promise<{
-        mode: "native" | "gsettings" | "manual";
+        // native: we hold the key grab (X11). portal: the desktop holds it for us (Wayland).
+        // manual: no portal here, so the user binds `command` themselves.
+        mode: "native" | "portal" | "manual";
         command: string;
-        canAutomate: boolean;
-        settingsCommand: string | null;
+        // The portal's own description of the live key; "" means every trigger is disabled.
+        trigger: string | null;
+        canConfigure: boolean;
       }>;
-      setupGnomeShortcut: (shortcut: string) => Promise<{ ok: boolean; error?: string }>;
-      removeGnomeShortcut: () => Promise<{ ok: boolean; error?: string }>;
+      configureShortcut: () => Promise<{ ok: boolean; error?: string }>;
       setDuckingConfig: (config: { amount: number }) => void;
+      // Reported at mount and on change: the main process can't read localStorage, and the
+      // first-run setup check skips the ydotool problems entirely in clipboard mode.
+      setOutputMethod: (method: OutputMethod) => void;
       removeAllListeners: (channel: string) => void;
       log: (level: "debug" | "info" | "warn" | "error", message: string) => void;
       saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string, subdir?: string, filename?: string) => Promise<string | null>;

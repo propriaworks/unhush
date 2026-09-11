@@ -23,10 +23,21 @@ const os = require("os");
 const crypto = require("crypto");
 
 // Defined here because the re-exec guard below needs it too, and that runs before initLogging().
+//
+// Owner-only, both logfile and log.
+// To maintain privacy, nothing here logs dictated text (although debug_audio does, if opted in)
 function logFilePath() {
   const logDir = app.getPath("logs");
-  fs.mkdirSync(logDir, { recursive: true });
-  return path.join(logDir, "unhush.log");
+  fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
+  const file = path.join(logDir, "unhush.log");
+  try {
+    // The mode arguments above only apply at creation, so an install that predates this keeps
+    // whatever the umask gave it. Both are ours alone, so narrow them in place.
+    if ((fs.statSync(logDir).mode & 0o077) !== 0) fs.chmodSync(logDir, 0o700);
+    fs.closeSync(fs.openSync(file, "a", 0o600));
+    if ((fs.statSync(file).mode & 0o077) !== 0) fs.chmodSync(file, 0o600);
+  } catch (e) { /* the caller's own open will report anything that really matters */ }
+  return file;
 }
 
 // Where the re-exec'd child's stdout/stderr should go: the log file, always. Chromium writes its
@@ -39,7 +50,7 @@ function logFilePath() {
 // below then leaves the process alone and its output stays attached to the terminal.
 function childStdio() {
   try {
-    const fd = fs.openSync(logFilePath(), "a");
+    const fd = fs.openSync(logFilePath(), "a", 0o600);
     return ["ignore", fd, fd];
   } catch (e) {
     // Nowhere to put it. Discard rather than inherit: a terminal the user has already got back
@@ -184,9 +195,9 @@ function logStartup() {
 }
 
 initLogging();
-// waylandShortcut and ydotool take the userData path rather than requiring electron themselves —
-// it's their only reason to, and without it they're testable as plain node.
-waylandShortcut.init(log, app.getPath("userData"));
+// ydotool takes the userData path rather than requiring electron itself — it's its only reason
+// to, and without it it's testable as plain node. waylandShortcut needs nothing from electron.
+waylandShortcut.init(log);
 ydotool.init(log, app.getPath("userData"));
 commandFifo.init(log);
 audioDucking.init(log, app.getName());
@@ -208,11 +219,26 @@ app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
 let shortcutRegistered = false;
 
 async function registerShortcut(shortcut) {
-  // Re-registering is not free. On Wayland's portal path Chromium answers any change to the
-  // command set by closing and recreating its whole D-Bus session, leaving the hotkey dead for the
-  // round trip -- and the renderer used to call this on every recording start/stop (a React
-  // dependency leak, see RecordingBar.tsx), which is what made the second press of a toggle do
-  // nothing. Harmless on X11, but there is no reason to re-grab a key we already hold.
+  // On Wayland the portal owns the binding, and it honors a "preferred trigger" on the first bind
+  // only -- so this call exists to hand the user's stored accelerator to that first bind, and does
+  // nothing afterwards. Changing the key from here is impossible by design; Settings offers the
+  // desktop's own editor instead for this purpose (waylandShortcut.configure()).
+  if (waylandShortcut.usesPortal()) {
+    await waylandShortcut.startPortal(
+      shortcut,
+      () => {
+        log("info", "portal shortcut fired");
+        lastHotkeyAt = Date.now();
+        toggleRecording();
+      },
+      // The tray menu names the key, so it has to follow the desktop's editor too.
+      () => updateTrayMenu(),
+    );
+    currentShortcut = shortcut;
+    updateTrayMenu();
+    return;
+  }
+
   if (shortcut === currentShortcut && shortcutRegistered) return;
 
   globalShortcut.unregisterAll();
@@ -220,22 +246,13 @@ async function registerShortcut(shortcut) {
 
   try {
     const ok = await globalShortcut.register(shortcut, () => {
-      // Logged like the fifo's "fifo: toggle", so a dead hotkey can be told apart from a live one
-      // that toggled nothing. On the portal path this is the only evidence the desktop's Activated
-      // signal actually reached us -- registration succeeding says nothing about delivery.
-      log("info", `global shortcut fired: ${shortcut}`);
+      log("debug", `global shortcut fired: ${shortcut}`);
       lastHotkeyAt = Date.now();
       toggleRecording();
     });
     shortcutRegistered = ok !== false;
   } catch (e) {}
   log("info", `global shortcut ${shortcutRegistered ? "registered" : "NOT registered"}: ${shortcut}`);
-
-  // Keeps a desktop-environment binding in step with the choice above. Called unconditionally: it
-  // already no-ops unless the user opted into GNOME automation, and gating it on needsFallback()
-  // would strand an existing binding at the old key for anyone who later forced a native-Wayland
-  // run.
-  waylandShortcut.check(shortcut);
 
   currentShortcut = shortcut;
   updateTrayMenu();
@@ -260,6 +277,16 @@ function updateTrayIcon() {
   tray.setToolTip(lines.length ? `${base}\n${lines.join("\n")}` : base);
 }
 
+// What to call the hotkey in the tray menu. Ours to name only while we hold the grab: on the
+// portal path the desktop decides, and in manual mode there may be no key bound at all.
+function shortcutLabel() {
+  switch (waylandShortcut.shortcutMode()) {
+    case "portal": return waylandShortcut.shortcutInfo().trigger || "";
+    case "manual": return "";
+    default: return currentShortcut;
+  }
+}
+
 function updateTrayMenu() {
   if (!tray) return;
   const preview = lastTranscript
@@ -271,7 +298,9 @@ function updateTrayMenu() {
   const warningLines = activeWarningLines();
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: `Toggle Recording (${currentShortcut})`,
+      // On the portal path the live key is whatever the desktop says it is -- the user may have
+      // added their own trigger and unchecked ours, and an empty description means there is no trigger.
+      label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
       click: () => { toggleRecording(); },
     },
     { type: "separator" },
@@ -419,9 +448,14 @@ function createWindow(offsetFromBottom) {
   });
 }
 
-function createSettingsWindow(tab = null) {
+// outputMethod, when given, is a mode for Settings to select as it opens -- the setup dialog's
+// "Use Clipboard mode instead" uses it. It travels in the query string rather than as an IPC
+// message because a freshly created window would still be mounting React when the send arrived;
+// the already-open branch below has no such race and uses an event, exactly as `tab` does.
+function createSettingsWindow(tab = null, outputMethod = null) {
   if (settingsWindow) {
     if (tab) settingsWindow.webContents.send("navigate-tab", tab);
+    if (outputMethod) settingsWindow.webContents.send("set-output-method-ui-setting", outputMethod);
     settingsWindow.focus();
     return;
   }
@@ -450,13 +484,15 @@ function createSettingsWindow(tab = null) {
     title: "Unhush Settings",
   });
 
+  const query = {};
+  if (tab) query.tab = tab;
+  if (outputMethod) query.output = outputMethod;
+  const search = new URLSearchParams(query).toString();
+
   if (isDev) {
-    settingsWindow.loadURL(`http://localhost:5173/settings.html${tab ? `?tab=${tab}` : ""}`);
+    settingsWindow.loadURL(`http://localhost:5173/settings.html${search ? `?${search}` : ""}`);
   } else {
-    settingsWindow.loadFile(
-      path.join(__dirname, "../dist/settings.html"),
-      tab ? { query: { tab } } : {}
-    );
+    settingsWindow.loadFile(path.join(__dirname, "../dist/settings.html"), { query });
   }
 
   settingsWindow.on("closed", () => {
@@ -622,10 +658,13 @@ ipcMain.handle("output-text", async (event, text, method) => {
         await doPaste();
         break;
       case "type": {
-        // Use a random temp filename to prevent symlink race attacks on a predictable path
-        const tempFile = path.join(os.tmpdir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
+        // The dictated text is written to disk, because `ydotool type` needs to read it from a file.
+        // Only one ever exists at a time and it is unlinked in the finally below. It is written
+        // into XDG_RUNTIME_DIR (0700, tmpfs, cleared at logout -- if it exists) rather than /tmp.
+        // Random name also guards against symlink races, 0600 in case the fallback puts us in /tmp after all.
+        const tempFile = path.join(commandFifo.runtimeDir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
         try {
-          fs.writeFileSync(tempFile, text);
+          fs.writeFileSync(tempFile, text, { mode: 0o600 });
           await new Promise(resolve => setTimeout(resolve, 250));
           await captureDestination();
           const timeout = Math.max(5000, text.length * 50);
@@ -715,18 +754,37 @@ ipcMain.on("set-ducking-config", (event, config) => {
   audioDucking.setConfig(config);
 });
 
+// The renderer's output method, reported as it mounts and whenever the user changes it in Settings.
+// Only the setup check needs it -- output-text carries the method with each request.
+let reportOutputMethod;
+const outputMethodKnown = new Promise((resolve) => { reportOutputMethod = resolve; });
+// Single place that records the mode, so no caller can update one half of it and not the other.
+// Also keeps the setup window's Re-check honest if the user switches mode while it is open.
+function noteOutputMethod(method) {
+  reportOutputMethod(method);
+  setupIncludesYdotool = method !== "clipboard";
+}
+ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));
+
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
   await registerShortcut(shortcut);
   return true;
 });
 
-// Reports mode "native" on X11, where globalShortcut grabs the key itself. The fifo command comes
-// back on every platform, since it works everywhere and can bind keys the dropdown doesn't list.
-ipcMain.handle("get-shortcut-info", () => waylandShortcut.shortcutInfo());
+// Reports mode "native" on X11, where globalShortcut grabs the key itself, "portal" where the
+// desktop holds the binding for us, and "manual" when the user has to bind it. Awaits the first
+// bind attempt so Settings never renders a mode that's about to change under it. The fifo command
+// comes back in every mode, since it works everywhere and can bind keys the dropdown doesn't list.
+ipcMain.handle("get-shortcut-info", async () => {
+  await waylandShortcut.settled();
+  // Ask the portal what the key is *now*: the user may have added their own trigger, or unchecked
+  // ours, since the bind at startup. One round trip, and only when a settings window opens.
+  await waylandShortcut.refresh();
+  return waylandShortcut.shortcutInfo();
+});
 
-// GNOME is the one desktop whose keybindings we can set for the user. Explicit-action only.
-ipcMain.handle("setup-gnome-shortcut", (_event, shortcut) => waylandShortcut.setupGnomeShortcut(shortcut));
-ipcMain.handle("remove-gnome-shortcut", () => waylandShortcut.removeGnomeShortcut());
+// The only way to change a portal-bound key: the desktop's own editor, focused on our entry.
+ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
 
 // Check the ydotool paste path at startup and, if something is broken, show the setup window.
 // Skipped when output mode is 'clipboard', since ydotool isn't used in that case.
@@ -759,8 +817,12 @@ let setupIncludesYdotool = true;
 
 async function setupPreflight() {
   const problems = setupIncludesYdotool ? (await ydotool.preflight()).problems : [];
-  // Needed whatever the output mode, unlike the ydotool checks. Returns null unless a
-  // desktop-environment shortcut is actually required.
+  // Wait for the first portal bind to settle before deciding: on a Wayland first run that means
+  // waiting out the desktop's consent dialog, and telling the user to bind a key by hand while
+  // that dialog is on screen would be exactly wrong. Already resolved on X11.
+  await waylandShortcut.settled();
+  // Needed whatever the output mode, unlike the ydotool checks. Returns null unless the user
+  // really does have to bind the key themselves.
   const shortcut = waylandShortcut.shortcutProblem();
   if (shortcut) problems.push(shortcut);
   return { ok: problems.length === 0, problems };
@@ -770,7 +832,20 @@ async function checkOutputPath() {
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8")); } catch (e) {}
-  setupIncludesYdotool = (settings.outputMode || "paste") !== "clipboard";
+  // The renderer owns this setting, in localStorage, so wait to be told rather than guess.
+  // Don't nag a Clipboard-mode user about ydotool. The renderer reports it as it mounts
+  // (see RecordingBar.tsx); the timeout covers a renderer that never gets there, and
+  // settings.json is the last resort -- its keys are the localStorage names
+  // minus the `unhush_` prefix (see the injection in createWindow), so it is `output_method`.
+  const { method, source } = await Promise.race([
+    outputMethodKnown.then((m) => ({ method: m, source: "renderer" })),
+    new Promise((resolve) => setTimeout(() => resolve(settings.output_method
+      ? { method: settings.output_method, source: "settings.json" }
+      : { method: "paste", source: "default" }), 3000).unref?.()),
+  ]);
+  noteOutputMethod(method);
+  // Name the source as well as the answer for better clarity
+  log("debug", `setup check: output method ${method} (${source}), ydotool checks ${setupIncludesYdotool ? "included" : "skipped"}`);
 
   const result = await setupPreflight();
   lastSetupResult = result;
@@ -825,8 +900,12 @@ ipcMain.handle("ydotool-preflight", async () => {
   return lastSetupResult;
 });
 
-ipcMain.handle("open-settings-window", (event, tab) => {
-  createSettingsWindow(tab || "usability");
+ipcMain.handle("open-settings-window", (event, tab, outputMethod) => {
+  // Record the requested mode now rather than waiting for Settings to mount and report it back:
+  // the setup dialog re-checks as soon as this resolves, and would otherwise still be told the
+  // ydotool problems it just opted out of. A mounting renderer re-reports the truth regardless.
+  if (outputMethod) noteOutputMethod(outputMethod);
+  createSettingsWindow(tab || "usability", outputMethod || null);
   return true;
 });
 
@@ -841,7 +920,7 @@ ipcMain.on("set-setup-dialog-muted", (event, muted) => {
   try {
     if (!muted) { fs.unlinkSync(setupMuteFile()); return; }
     const codes = (lastSetupResult ? lastSetupResult.problems : []).map((p) => p.code);
-    fs.writeFileSync(setupMuteFile(), JSON.stringify(codes));
+    fs.writeFileSync(setupMuteFile(), JSON.stringify(codes), { mode: 0o600 });
     log("info", `setup warnings muted for: ${codes.join(", ") || "(none)"}`);
   } catch (e) {
     log("warn", `could not update setup-dialog mute state: ${e.message}`);
@@ -879,6 +958,15 @@ if (!gotTheLock) {
     checkOutputPath();
     commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
 
+    // The renderer normally supplies the accelerator (it holds the stored setting) by calling
+    // update-shortcut as it mounts, and that first call is what binds the portal shortcut. If the
+    // renderer never gets there -- a crash, a very slow first paint -- the hotkey would simply
+    // never exist, so bind the default rather than let the UI's health decide. Idempotent: whoever
+    // arrives first wins, and the portal honours a preferred trigger on the first bind only anyway.
+    setTimeout(() => {
+      void registerShortcut(currentShortcut);
+    }, 3000).unref?.();
+
     // Reposition the recording bar whenever the primary display's work area changes
     // (resolution change, taskbar resize, monitor added/removed, etc.)
     let repositionTimer = null;
@@ -912,28 +1000,36 @@ if (!gotTheLock) {
   });
 }
 
+// Under userData (~/.config/unhush/debug), rather than a publicly accessible location like /tmp,
+// since this holds recordings of the user's voice and the transcripts made from them.
+//
+// $XDG_STATE_HOME would be the spec-correct home for state like this, but Electron already puts
+// userData -- settings, LevelDB, caches and the log -- under the config directory on Linux, and
+// splitting one directory out of that would only mean two places to find, document and delete.
+function debugAudioDir() {
+  return path.join(app.getPath("userData"), "debug");
+}
+
 ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, filename) => {
   try {
     let extension, filePath;
+    const BASE_DEBUG_DIR = debugAudioDir();
     if (subdir && filename) {
-      // New style: save to /tmp/unhush-debug/{subdir}/{filename}
       // Validate that both subdir and filename stay within the debug root (prevent path traversal)
-      const BASE_DEBUG_DIR = "/tmp/unhush-debug";
       const debugDir = path.resolve(path.join(BASE_DEBUG_DIR, subdir));
       if (!debugDir.startsWith(BASE_DEBUG_DIR + path.sep) && debugDir !== BASE_DEBUG_DIR)
         throw new Error("Path traversal attempt in subdir");
-      fs.mkdirSync(debugDir, { recursive: true });
+      fs.mkdirSync(debugDir, { recursive: true, mode: 0o700 });
       filePath = path.join(debugDir, path.basename(filename)); // basename prevents traversal via filename
     } else {
       // Legacy style: auto-generate filename from timestamp
       extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
       const now = new Date();
       const timestamp = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1).replace(/[:.]/g, "-");
-      const debugDir = "/tmp/unhush-debug";
-      fs.mkdirSync(debugDir, { recursive: true });
-      filePath = path.join(debugDir, `recording-${timestamp}.${extension}`);
+      fs.mkdirSync(BASE_DEBUG_DIR, { recursive: true, mode: 0o700 });
+      filePath = path.join(BASE_DEBUG_DIR, `recording-${timestamp}.${extension}`);
     }
-    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    fs.writeFileSync(filePath, Buffer.from(arrayBuffer), { mode: 0o600 });
     return filePath;
   } catch (err) {
     console.error("Failed to save debug audio:", err);
@@ -961,6 +1057,9 @@ app.on("will-quit", () => {
   if (gotTheLock) log("info", `=== Unhush shutting down after ${uptimeString(Date.now() - startedAt)} ===`);
   tryTeardown("audio ducking", () => audioDucking.restoreSyncForQuit());
   tryTeardown("global shortcuts", () => globalShortcut.unregisterAll());
+  // Closes the D-Bus connection and cancels any pending rebind, so quitting can't be chased by a
+  // retry. The binding itself survives in the desktop's settings -- the portal has no unbind.
+  tryTeardown("portal shortcuts", () => waylandShortcut.stopPortal());
   // Our ydotoold must not outlive us — it holds an open /dev/uinput virtual keyboard.
   // No-op if we adopted someone else's daemon rather than starting one.
   tryTeardown("ydotoold", () => ydotool.stopDaemon());

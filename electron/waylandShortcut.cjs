@@ -15,8 +15,8 @@
 // transport-agnostic -- which is what lets us keep the XWayland re-exec (see main.cjs) and still
 // bind the hotkey automatically.
 //
-// Portal rules that shape everything below, all measured on KDE Plasma 6 (see
-// https://github.com/jtbr/dbus_globalshortcut_portal): BindShortcuts on every launch, since a
+// Portal rules that shape everything below, all derived from testing on KDE Plasma 6 (see
+// https://github.com/jtbr/dbus_globalshortcut_client): BindShortcuts on every launch, since a
 // restored session is listed but not armed; one stable id for the app's lifetime;
 // preferred_trigger honoured on the FIRST bind only, so the app can never change its own key
 // afterwards -- only the user can, through ConfigureShortcuts; and there is no unbind.
@@ -113,7 +113,7 @@ let everBound = false;   // a binding has worked at least once this session -- s
 let retryIndex = 0;
 let retryTimer = null;
 let stopped = false;
-let options = null;      // {trigger, onActivated}, kept for retries
+let options = null;      // {trigger, onActivated, onChanged}, kept for retries
 
 // Resolves once the first bind attempt has settled either way, so the setup window doesn't decide
 // whether to nag before we know. Later retries don't touch it.
@@ -131,6 +131,12 @@ async function attemptBind() {
     preferredTrigger: options.trigger,
     onActivated: options.onActivated,
     onDisconnected: handleDisconnect,
+    // The user can change the key in the desktop's own editor at any time; this is how we hear
+    // about it rather than showing the trigger we were given at startup for the rest of the run.
+    onShortcutsChanged: (trigger) => {
+      triggerDescription = trigger;
+      if (options.onChanged) options.onChanged();
+    },
   });
 
   if (result.ok) {
@@ -180,10 +186,10 @@ function handleDisconnect() {
 // Bind the hotkey through the portal. Idempotent -- the first caller's accelerator is the one
 // offered as preferred_trigger, and the portal honours it on the first bind only anyway, so later
 // calls have nothing to do.
-async function startPortal(accelerator, onActivated) {
+async function startPortal(accelerator, onActivated, onChanged) {
   if (!usesPortal()) return;
   if (options) return;
-  options = { trigger: electronToXdgTrigger(accelerator), onActivated };
+  options = { trigger: electronToXdgTrigger(accelerator), onActivated, onChanged };
   log('info', `portal: binding ${SHORTCUT_ID} with preferred trigger ${options.trigger}`);
   await attemptBind();
 }
@@ -191,7 +197,29 @@ async function startPortal(accelerator, onActivated) {
 // Opens the desktop's own shortcut editor, focused on our entry. This is how a user changes the
 // key: we can't, after the first bind.
 async function configure() {
+  const result = await portal.configure();
+  if (result && result.ok) return result;
+  // "AccessDenied: Invalid session" means the portal process was replaced since we bound -- every
+  // session it held died with it. The NameOwnerChanged watch rebinds within a second or so on its
+  // own, but the user is waiting on a dialog *now*, so pre-empt it and try once more.
+  const stale = /invalid session|accessdenied/i.test(String((result && result.error) || ''));
+  if (!stale || mode !== 'portal' || !options) return result;
+  log('info', 'portal: session was stale when opening the editor; rebinding first');
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  portal.stop();
+  await attemptBind();
   return portal.configure();
+}
+
+// Re-read the live trigger from the portal. ShortcutsChanged already keeps us current while we are
+// running, so this is belt and braces for the case that matters most -- a UI about to display the
+// key -- and it costs one D-Bus round trip.
+async function refresh() {
+  if (mode !== 'portal') return;
+  const result = await portal.list();
+  if (!result.ok) return; // keep the last known value; list() has logged why
+  const mine = result.shortcuts.find(([id]) => id === SHORTCUT_ID);
+  triggerDescription = mine ? (mine[1].trigger_description || '') : '';
 }
 
 function stopPortal() {
@@ -239,7 +267,7 @@ function shortcutInfo() {
 
 module.exports = {
   init, displayBackend, usesPortal, toggleCommand,
-  startPortal, configure, stopPortal, settled,
+  startPortal, configure, refresh, stopPortal, settled,
   shortcutMode, shortcutInfo, shortcutProblem,
   _internal: { electronToXdgTrigger, RETRY_DELAYS_MS },
 };
