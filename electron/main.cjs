@@ -8,6 +8,7 @@ const {
   clipboard,
   globalShortcut,
   dialog,
+  shell,
 } = require("electron");
 const path = require("path");
 const { exec, execFile } = require("child_process");
@@ -68,6 +69,24 @@ function childStdio() {
   }
 }
 
+// Whether *this exact process* is currently running inside unhush.service's own cgroup -- used by
+// the tray Quit handler to decide whether to route through systemctl. Deliberately not just
+// `process.env.INVOCATION_ID`: that's an ordinary environment variable, inherited like any other,
+// so it can end up truthy in a plain CLI launch too -- e.g. left over from an earlier
+// `systemd-run`/manual-testing session that exported it into the same shell. That previously made
+// a non-systemd instance's Quit button try to stop a unit it had nothing to do with, doing
+// nothing. Reading our own cgroup membership directly can't be spoofed that way: it reflects where
+// systemd actually placed this process at spawn time, not what some ancestor shell happened to
+// have set. cgroup v2's /proc/self/cgroup is a single "0::/some/path" line; a --user unit's path
+// ends in "/<unit-name>.service" (verified against a live user-manager session on this machine).
+function isRunningAsUnhushService() {
+  try {
+    return fs.readFileSync("/proc/self/cgroup", "utf8").includes("/unhush.service");
+  } catch (e) {
+    return false; // no /proc/self/cgroup (non-Linux, or something unusual) -- assume not systemd
+  }
+}
+
 // --- Run under XWayland on Wayland sessions ---------------------------------------------------
 // Electron 38.2+ is a native Wayland client by default. Wayland forbids placing its own window
 // (the recording pill lands centre-screen), keeping it above
@@ -98,11 +117,41 @@ if (
   !process.argv.some((a) => a.startsWith("--ozone-platform"))
 ) {
   const { spawn } = require("child_process");
-  spawn(process.execPath, ["--ozone-platform=x11", ...process.argv.slice(1)], {
-    detached: true,
+  // Detached everywhere except under systemd (see below for why). NOT detached there: a plain
+  // fork+exit (spawn a detached child, exit this process) makes the child an orphan reparented to
+  // PID 1, not to systemd -- outside systemd's own process-tree supervision entirely, regardless
+  // of any MAINPID reassignment attempted afterwards. That was tried first and confirmed broken by
+  // systemd's own diagnostic for exactly this situation: "Supervising process N which is not our
+  // child. We'll most likely not notice when it exits." Unable to reliably tell when the real app
+  // exits, `systemctl stop`/`restart` became racy -- observed sending SIGKILL to the whole cgroup
+  // almost immediately rather than a clean SIGTERM-driven shutdown, sometimes killing only one
+  // process, sometimes the whole tree. See [[project_unhush_wayland_reexec_systemd]].
+  const underSystemd = isRunningAsUnhushService();
+  const child = spawn(process.execPath, ["--ozone-platform=x11", ...process.argv.slice(1)], {
+    detached: !underSystemd,
     stdio: childStdio(),
     env: { ...process.env, UNHUSH_REEXEC: "1" },
-  }).unref();
+  });
+
+  if (underSystemd) {
+    // Stay alive as a thin supervisor instead: this process is the one systemd actually forked
+    // via ExecStart=, so keeping it around for the child's whole life (rather than exiting the
+    // instant the child is spawned) keeps it a real, waitpid()-able parent throughout -- systemd's
+    // default Type=simple tracking of *this* process then just works, exactly as it already does
+    // for the X11 case where no re-exec happens at all. Forward whatever KillMode=mixed sends us
+    // (see scripts/postinstall.sh) to the real child, then exit with its status once it's gone.
+    for (const sig of ["SIGTERM", "SIGINT"]) {
+      process.on(sig, () => { try { child.kill(sig); } catch (e) {} });
+    }
+    child.on("exit", (code, signal) => {
+      process.exit(signal ? 1 : (code ?? 0));
+    });
+    return; // nothing below this point runs in the supervisor -- that's the child's job
+  }
+
+  // Separate statement, not chained: unref() returns undefined (not the ChildProcess), so
+  // chaining it onto the assignment above left `child` undefined and crashed the next line.
+  child.unref();
   // The parent exits the instant the child is spawned, so from a terminal `unhush` looks like it
   // failed: the prompt comes straight back before the child has drawn anything. Say what actually
   // happened -- but only when someone is there to read it. With no TTY this is nobody's business:
@@ -120,6 +169,9 @@ let mainWindow = null;
 let settingsWindow = null;
 let tray = null;
 let isRecording = false;
+// Tray "Quit" fallback -- see the click handler below. Sticky once set: a systemd-managed quit
+// attempt is only ever trusted once per run.
+let systemdQuitAttempted = false;
 let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
@@ -334,15 +386,39 @@ function updateTrayMenu() {
     {
       label: "Quit",
       click: () => {
-        if (process.env.INVOCATION_ID) {
+        if (isRunningAsUnhushService() && !systemdQuitAttempted) {
           // systemd set this only because it started us -- ask it to stop us too, so systemd's
           // view of "is it running" is never ambiguous, whether the stop was user- or
           // externally-initiated. No app.quit() here: the resulting SIGTERM drives the shutdown,
           // and Chromium's own SIGTERM handling already runs ahead of node's and shuts down
           // cleanly through "will-quit" (see the SIGINT/SIGTERM fallback below) -- no new
           // receiving-side code needed.
-          require("child_process").spawn("systemctl", ["--user", "stop", "unhush.service"], { detached: true, stdio: "ignore" }).unref();
+          //
+          // Belt-and-braces given how much has gone sideways with this unit already (see
+          // [[project_unhush_wayland_reexec_systemd]]): if this path doesn't actually work, Quit
+          // must not just silently do nothing forever. Set *before* spawning -- the tray menu
+          // click handler can fire again before this one returns.
+          systemdQuitAttempted = true;
+          const stop = require("child_process")
+            .spawn("systemctl", ["--user", "stop", "unhush.service"], { detached: true, stdio: "ignore" });
+          // Couldn't even launch systemctl (missing binary, no --user manager, etc.) -- that's a
+          // failure we can detect immediately, so don't make the user click Quit twice for it.
+          // Logged (not just silently falling back) so a bad interaction with this unit shows up
+          // in the log rather than just "Quit felt slow that one time" -- see
+          // [[project_unhush_wayland_reexec_systemd]] for how much has already gone sideways here.
+          stop.on("error", (err) => {
+            log("warn", `Quit: could not launch systemctl --user stop (${err.message}) -- falling back to app.quit()`);
+            app.quit();
+          });
+          stop.unref();
         } else {
+          // Either not systemd-managed (the common case -- nothing to log), or Quit was already
+          // tried the systemd way and clearly didn't work (we're still here to receive a second
+          // click) -- stop trusting systemctl and exit directly instead of leaving Quit looking
+          // like a dead button.
+          if (isRunningAsUnhushService()) {
+            log("warn", "Quit: systemctl --user stop didn't take effect -- falling back to app.quit()");
+          }
           app.quit();
         }
       },

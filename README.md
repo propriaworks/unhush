@@ -241,14 +241,22 @@ This can be done in several ways, depending partly upon how you installed:
   - **Other**: most have an Autostart or Session Startup settings configuration; add Unhush as `/usr/local/bin/unhush`
 
 - **AppImage**: no installer, so no systemd service is provided — use the Desktop Environment approach,
-  or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command
-  (add `--no-sandbox` if Unhush fails to start):
+  or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command.
+  Service unit notes:
+  - `--no-sandbox` is AppImage-specific: Chromium's sandbox helper needs to be root-owned with the setuid bit, but an
+    AppImage extracts to a FUSE mount owned by you, so the bit can never take effect there.
+  - Plain `Type=simple` (the default) is fine here — on a Wayland session Unhush re-execs itself
+    under XWayland, but stays attached as a supervisor around that child rather than detaching and
+    exiting, so this process (the real `ExecStart=` one) stays alive and correctly trackable for
+    the app's whole life.
+  - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
   [Unit]
   Description=Unhush Voice Dictation
 
   [Service]
+  KillMode=mixed
   ExecStart=/path/to/Unhush.AppImage --no-sandbox
   Restart=on-failure
 

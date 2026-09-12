@@ -42,14 +42,36 @@ udevadm settle --timeout=10 || true
 
 # systemd --user unit, shipped but disabled by default -- opted into via Settings -> "Start at
 # login" (electron/main.cjs' set-autostart handler). Same unit name and ExecStart as the README's
-# old hand-rolled instructions, so anyone who already followed those is silently subsumed:
-# identical file, no behavior change, and their next enable/disable goes through Settings instead.
+# hand-rolled instructions, so anyone who already followed those is silently subsumed: identical
+# file, no behavior change, and their next enable/disable goes through Settings instead.
+#
+# Plain Type=simple (the default -- deliberately not specified): on a Wayland session main.cjs
+# re-execs itself under XWayland (Chromium's ozone platform can only be chosen on the real command
+# line, before this script or main.cjs ever runs), but stays attached and alive as a thin
+# supervisor around that child rather than detaching and exiting -- see the isRunningAsUnhushService
+# branch in main.cjs's re-exec block. A detach-and-exit here (tried first) orphans the real child to
+# PID 1, not to systemd, which can then only warn "Supervising process N which is not our child"
+# and loses reliable track of it regardless of any MAINPID reassignment -- see
+# [[project_unhush_wayland_reexec_systemd]] for the full story of why Type=notify + MAINPID= was
+# tried and abandoned. Staying attached keeps this the genuine ExecStart= process for the app's
+# entire life, so plain Type=simple tracking (already correct for the X11 case, where no re-exec
+# happens at all) just works here too.
+#
+# KillMode=mixed, not the control-group default: systemd's default sends SIGTERM to every process
+# in the unit's cgroup at once on stop/restart -- the Chromium browser process *and* every zygote/
+# GPU/renderer child simultaneously. The browser then sees a child die from a signal it didn't
+# orchestrate itself, its own "unexpected child death" handling kicks in, and it crashes -- the
+# exact same failure class the old preremove.sh's roots()-only scoping existed to avoid, just
+# triggered by systemd's own kill behavior instead of a script signalling children directly. mixed
+# sends SIGTERM to the main process alone (letting Chromium shut its own children down in order,
+# same as an ordinary Quit) and only SIGKILLs the whole group as a timeout safety net.
 mkdir -p /usr/lib/systemd/user
 cat > /usr/lib/systemd/user/unhush.service <<'EOF'
 [Unit]
 Description=Unhush Voice Dictation
 
 [Service]
+KillMode=mixed
 ExecStart=/usr/local/bin/unhush
 Restart=on-failure
 
@@ -130,7 +152,13 @@ unhush_raw_pids_for_uid() {
 # "nothing auto-starts on install" falls out for free.
 for socket in /run/user/*/systemd/private; do
   [ -S "$socket" ] || continue
-  uid=${socket#/run/user/}; uid=${uid%%/*}
+  # basename/dirname, not a bash %% expansion: rpm's spec-macro processor treats a literal "%" as
+  # its own macro-escape character and collapses "%%" to a single "%" when fpm embeds this file's
+  # text into the rpm %post scriptlet -- silently turning this into the wrong (shortest-match) "%"
+  # form in the installed script, on the rpm target only. Traced from a real install where uid
+  # extraction failed for every session despite the source file (and the deb/pacman scriptlets,
+  # which aren't macro-processed) being correct.
+  uid=$(basename "$(dirname "$(dirname "$socket")")")
   user=$(getent passwd "$uid" | cut -d: -f1) || continue
   [ -n "$user" ] || continue
   run_as() { runuser -u "$user" -- env "XDG_RUNTIME_DIR=/run/user/$uid" "$@"; }
@@ -144,23 +172,38 @@ for socket in /run/user/*/systemd/private; do
   # it -- the exact bug this was added to fix.
   run_as systemctl --user daemon-reload
 
+  # Logged unconditionally (uid, branch, and every command's own pass/fail) so a silent failure
+  # here is never invisible again -- this whole block previously left no trace in journalctl even
+  # when systemctl start/restart failed outright. `logger` writes to the system journal, taggable
+  # and greppable with `journalctl -t unhush-postinstall`.
   if run_as systemctl --user is-active --quiet unhush.service; then
     # Systemd's already running the old instance -- its code stays validly mapped through the
     # file replacement above, so it's fine that this fires after the new payload landed. restart
     # is a single systemd-mediated stop-then-start.
-    run_as systemctl --user restart --no-block unhush.service
+    if run_as systemctl --user restart --no-block unhush.service; then
+      logger -t unhush-postinstall "uid $uid: unhush.service was active; restart issued" 2>/dev/null || true
+    else
+      logger -t unhush-postinstall "uid $uid: unhush.service was active; restart FAILED (exit $?)" 2>/dev/null || true
+    fi
   else
     # Not systemd-tracked. Either genuinely nothing running (do nothing -- an install/upgrade
     # must never surprise-start something that wasn't running), or a raw (manually-launched)
     # instance still on the old binary.
     raw_pids=$(unhush_raw_pids_for_uid "$uid")
     if [ -n "$raw_pids" ]; then
-      unhush_kill_roots "$(unhush_roots "$raw_pids")"
+      roots=$(unhush_roots "$raw_pids")
+      unhush_kill_roots "$roots"
       # Always brought back via systemd -- entering this branch at all already proves it was
       # running before this script started, so this finishes an in-flight restart rather than
       # surprise-starting something new. Not gated on is-enabled: that only governs login
       # autostart, not whether a manual start works.
-      run_as systemctl --user start --no-block unhush.service
+      if run_as systemctl --user start --no-block unhush.service; then
+        logger -t unhush-postinstall "uid $uid: killed raw pid(s) [$roots] (from [$raw_pids]); start issued" 2>/dev/null || true
+      else
+        logger -t unhush-postinstall "uid $uid: killed raw pid(s) [$roots] (from [$raw_pids]); start FAILED (exit $?)" 2>/dev/null || true
+      fi
+    else
+      logger -t unhush-postinstall "uid $uid: unhush.service inactive and no raw pid found -- nothing to do" 2>/dev/null || true
     fi
   fi
 done

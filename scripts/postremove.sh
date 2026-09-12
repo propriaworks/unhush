@@ -5,6 +5,12 @@
 # removal); dpkg passes remove/purge/upgrade; pacman's post_remove passes nothing.
 case "${1-}" in 0|remove|purge|"") final=1 ;; *) final=0 ;; esac
 
+# Logged unconditionally, before the early-exit below, so it's visible via
+# `journalctl -t unhush-postremove` whether a given transaction (e.g. `dnf reinstall`,
+# `rpm --reinstall`) took the removal path (final=1) or the upgrade-skip path (final=0) --
+# package managers differ, and don't all agree on what a same-version reinstall counts as.
+logger -t unhush-postremove "invoked with \$1='${1-}' -> final=$final" 2>/dev/null || true
+
 # An upgrade has nothing to do here: the new package's postinstall.sh has already run and decided
 # what any running instance becomes (restarted in place, or left alone) -- see that file.
 [ "$final" = 0 ] && exit 0
@@ -76,7 +82,10 @@ unhush_raw_pids_for_uid() {
 # doesn't reliably reproduce it.
 for socket in /run/user/*/systemd/private; do
   [ -S "$socket" ] || continue
-  uid=${socket#/run/user/}; uid=${uid%%/*}
+  # basename/dirname, not a bash %% expansion -- see the matching comment in postinstall.sh: rpm's
+  # spec-macro processor collapses a literal "%%" to "%" when fpm embeds this file into the rpm
+  # %post scriptlet, silently breaking uid extraction on the rpm target only.
+  uid=$(basename "$(dirname "$(dirname "$socket")")")
   user=$(getent passwd "$uid" | cut -d: -f1) || continue
   [ -n "$user" ] || continue
   run_as() { runuser -u "$user" -- env "XDG_RUNTIME_DIR=/run/user/$uid" "$@"; }
@@ -87,7 +96,13 @@ for socket in /run/user/*/systemd/private; do
   # disable --now only touches the unit -- also sweep for a raw instance running independent of
   # it (never systemd-managed, or drifted since -- see startup self-heal, electron/main.cjs).
   raw_pids=$(unhush_raw_pids_for_uid "$uid")
-  [ -n "$raw_pids" ] && unhush_kill_roots "$(unhush_roots "$raw_pids")"
+  if [ -n "$raw_pids" ]; then
+    roots=$(unhush_roots "$raw_pids")
+    unhush_kill_roots "$roots"
+    logger -t unhush-postremove "uid $uid: killed raw pid(s) [$roots] (from [$raw_pids])" 2>/dev/null || true
+  else
+    logger -t unhush-postremove "uid $uid: no raw pid found" 2>/dev/null || true
+  fi
 done
 
 rm -f /usr/lib/systemd/user/unhush.service
