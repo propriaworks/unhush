@@ -225,25 +225,31 @@ and is removed when Unhush exits.
 
 This can be done in several ways, depending partly upon how you installed:
 
+- **Package install — Settings toggle** (recommended): open **Settings → Usability** and turn on
+  **Start at login**. The package ships a systemd `--user` unit (disabled by default); this just
+  enables it.
+
 - **Package install — XDG autostart** (works on GNOME, KDE, XFCE, and most DEs):
   ```bash
   mkdir -p ~/.config/autostart
-  cp /usr/share/applications/unhush.desktop ~/.config/autostart/
+  cp /usr/share/applications/com.propriaworks.unhush.desktop ~/.config/autostart/
   ```
 
-- **Package install — Desktop Environment settings**:
+- **Desktop Environment settings**:
   - **GNOME**: open **Settings → Apps → Startup Applications** and add Unhush
   - **KDE Plasma**: open **System Settings → Autostart** and add `/usr/local/bin/unhush`
   - **Other**: most have an Autostart or Session Startup settings configuration; add Unhush as `/usr/local/bin/unhush`
 
-- **Package install — systemd user service**:
+- **AppImage**: no installer, so no systemd service is provided — use the Desktop Environment approach,
+  or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command
+  (add `--no-sandbox` if Unhush fails to start):
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
   [Unit]
   Description=Unhush Voice Dictation
 
   [Service]
-  ExecStart=/usr/local/bin/unhush
+  ExecStart=/path/to/Unhush.AppImage --no-sandbox
   Restart=on-failure
 
   [Install]
@@ -251,8 +257,6 @@ This can be done in several ways, depending partly upon how you installed:
   EOF
   systemctl --user enable --now unhush
   ```
-
-- **AppImage**: use Desktop Environment or systemd approaches, substituting `/path/to/Unhush.AppImage` as the command (add `--no-sandbox` if Unhush fails to start).
 </details>
 
 ## Detailed Configuration

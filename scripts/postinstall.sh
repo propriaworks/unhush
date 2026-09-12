@@ -11,8 +11,14 @@ cat > /usr/local/bin/unhush-toggle <<'EOF'
 # Toggle Unhush recording. Managed by the unhush package -- reinstalling overwrites this.
 FIFO="${XDG_RUNTIME_DIR:-/tmp}/unhush.fifo"
 # `timeout`: writing to a fifo with no reader blocks forever, which would wedge the desktop
-# shortcut if Unhush died without cleaning up. Falling through then launches the app instead.
+# shortcut if Unhush died without cleaning up. Falling through then tries to launch it -- via
+# systemd first, regardless of whether autostart is enabled (`start` works on a disabled unit
+# too, it just won't persist across logins), so the launched instance ends up systemd-tracked
+# either way; a raw exec is the last resort, for when no unit is installed at all (AppImage/dev).
 if [ -p "$FIFO" ] && timeout 0.5 sh -c "printf 'toggle\n' > \"$FIFO\""; then
+  exit 0
+fi
+if systemctl --user start unhush.service 2>/dev/null; then
   exit 0
 fi
 exec /usr/local/bin/unhush
@@ -33,3 +39,128 @@ udevadm trigger --name-match=uinput 2>/dev/null || udevadm trigger --subsystem-m
 # Settle before returning, or Unhush might start before /dev/uinput is writable, tripping
 # its setup warning unnecessarily.
 udevadm settle --timeout=10 || true
+
+# systemd --user unit, shipped but disabled by default -- opted into via Settings -> "Start at
+# login" (electron/main.cjs' set-autostart handler). Same unit name and ExecStart as the README's
+# old hand-rolled instructions, so anyone who already followed those is silently subsumed:
+# identical file, no behavior change, and their next enable/disable goes through Settings instead.
+mkdir -p /usr/lib/systemd/user
+cat > /usr/lib/systemd/user/unhush.service <<'EOF'
+[Unit]
+Description=Unhush Voice Dictation
+
+[Service]
+ExecStart=/usr/local/bin/unhush
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+# --- Upgrade-safe restart --------------------------------------------------------------------
+#
+# Package managers don't kill a running process during an upgrade -- they just replace files
+# underneath it, which is safe for an already-mapped binary as long as nothing execs/loads
+# something new mid-transaction. So there's no separate pre-deletion "kill" scriptlet: this is
+# the one place, run once the new payload is stably in place, that decides what a running
+# instance becomes, by checking reality (systemd tracking it? a raw instance running anyway?
+# nothing at all?) rather than trying to out-guess dpkg's/rpm's/pacman's differing hook ordering.
+
+# Root pids only: a forked/zygote child inherits its parent's cgroup and Chromium never moves its
+# own children to a different one, so callers only ever need to signal these. Identified by
+# /proc/PID/exe -- the kernel's own record of the running binary -- never by process name or
+# command line, so this can't match an unrelated process that merely mentions "unhush". The
+# "(deleted)" form appears once an upgrade has replaced the file under a still-running process.
+unhush_pids() {
+  find /proc -mindepth 2 -maxdepth 2 -name exe \
+    \( -lname /opt/Unhush/unhush -o -lname "/opt/Unhush/unhush (deleted)" \) -printf '%h\n' 2>/dev/null |
+    sed 's#^/proc/##'
+}
+
+# Chromium is a process tree -- browser, two zygotes, GPU, renderers, utilities -- and every one
+# of them has the same /proc/PID/exe, so unhush_pids returns the whole tree. Only the roots may
+# be signalled: a process whose parent is not itself Unhush.
+unhush_roots() {
+  # Unquoted, so the newline-separated list collapses to a single space-separated line -- the
+  # membership test below is a substring match and needs " $ppid " to be literally that.
+  all=" $(echo $1) "
+  for pid in $1; do
+    # /proc/PID/stat's second field is the comm in parentheses and may itself contain spaces or
+    # a ")", so read the fields *after* the last ")": state, then ppid.
+    rest=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null) || continue
+    ppid=$(printf '%s' "$rest" | cut -d' ' -f2)
+    case "$all" in
+      *" $ppid "*) ;;                  # parent is Unhush too: a child, left to the browser
+      *) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
+
+# SIGTERM (Electron turns it into an ordinary app quit) -> wait up to 5s -> SIGKILL stragglers.
+unhush_kill_roots() {
+  pids="$1"
+  [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null
+  for _ in $(seq 10); do
+    alive=""
+    for pid in $pids; do kill -0 "$pid" 2>/dev/null && alive="$alive $pid"; done
+    [ -n "$alive" ] || return 0
+    sleep 0.5
+  done
+  kill -9 $alive 2>/dev/null
+}
+
+unhush_raw_pids_for_uid() {
+  uid="$1"
+  unhush_pids | while IFS= read -r pid; do
+    [ "$(stat -c '%u' "/proc/$pid" 2>/dev/null)" = "$uid" ] && printf '%s\n' "$pid"
+  done
+}
+
+# Per-uid enumeration (not just "whoever's running the installer"): a root scriptlet has no
+# session of its own, and multi-seat machines can have more than one live at once.
+# /run/user/<uid>/systemd/private's existence is a direct, cheap test for "does this uid have a
+# running user manager," cheaper than shelling out to loginctl. XDG_RUNTIME_DIR is exported
+# explicitly since a root-invoked runuser doesn't reliably reproduce it. --no-block throughout so
+# a slow-to-quit instance can't hang the package manager's own transaction (never fatal, matching
+# this file's existing `|| true` style).
+#
+# No fresh-install-vs-upgrade branch anywhere: on a fresh install, is-active is false and
+# raw_pids is empty for every uid (nothing has ever run before), so the whole loop is a no-op --
+# "nothing auto-starts on install" falls out for free.
+for socket in /run/user/*/systemd/private; do
+  [ -S "$socket" ] || continue
+  uid=${socket#/run/user/}; uid=${uid%%/*}
+  user=$(getent passwd "$uid" | cut -d: -f1) || continue
+  [ -n "$user" ] || continue
+  run_as() { runuser -u "$user" -- env "XDG_RUNTIME_DIR=/run/user/$uid" "$@"; }
+
+  # The unit file above may be brand new to this user's already-running systemd --user manager
+  # (first install) or just have changed (a future ExecStart/etc. tweak) -- either way its
+  # in-memory unit cache is stale until told to re-scan. Unit-dir inotify auto-reload can't be
+  # relied on here: this writes in place (cat > over an existing path, no rename), which doesn't
+  # reliably fire the events that pickup depends on. Without this, is-active/restart/start below
+  # would silently fail (or act on a since-replaced unit) with nothing in the journal to show for
+  # it -- the exact bug this was added to fix.
+  run_as systemctl --user daemon-reload
+
+  if run_as systemctl --user is-active --quiet unhush.service; then
+    # Systemd's already running the old instance -- its code stays validly mapped through the
+    # file replacement above, so it's fine that this fires after the new payload landed. restart
+    # is a single systemd-mediated stop-then-start.
+    run_as systemctl --user restart --no-block unhush.service
+  else
+    # Not systemd-tracked. Either genuinely nothing running (do nothing -- an install/upgrade
+    # must never surprise-start something that wasn't running), or a raw (manually-launched)
+    # instance still on the old binary.
+    raw_pids=$(unhush_raw_pids_for_uid "$uid")
+    if [ -n "$raw_pids" ]; then
+      unhush_kill_roots "$(unhush_roots "$raw_pids")"
+      # Always brought back via systemd -- entering this branch at all already proves it was
+      # running before this script started, so this finishes an in-flight restart rather than
+      # surprise-starting something new. Not gated on is-enabled: that only governs login
+      # autostart, not whether a manual start works.
+      run_as systemctl --user start --no-block unhush.service
+    fi
+  fi
+done

@@ -39,6 +39,9 @@ declare global {
       // Reported at mount and on change: the main process can't read localStorage, and the
       // first-run setup check skips the ydotool problems entirely in clipboard mode.
       setOutputMethod: (method: OutputMethod) => void;
+      // "Start at login": supported is false on AppImage/dev (no systemd unit shipped there).
+      getAutostartStatus: () => Promise<{ supported: boolean; enabled: boolean }>;
+      setAutostart: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
       removeAllListeners: (channel: string) => void;
       log: (level: "debug" | "info" | "warn" | "error", message: string) => void;
       saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string, subdir?: string, filename?: string) => Promise<string | null>;

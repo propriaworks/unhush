@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   configureShortcut: () => ipcRenderer.invoke("configure-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
   setOutputMethod: (method) => ipcRenderer.send("set-output-method", method),
+  // "Start at login" (systemd --user unit; unsupported on AppImage/dev -- see get-autostart-status)
+  getAutostartStatus: () => ipcRenderer.invoke("get-autostart-status"),
+  setAutostart: (enabled) => ipcRenderer.invoke("set-autostart", enabled),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

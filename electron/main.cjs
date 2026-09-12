@@ -22,6 +22,15 @@ const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
 
+// "Start at login" (see syncDesktopOverride, set-autostart/get-autostart-status below).
+// UNHUSH_UNIT_PATH: written unconditionally by scripts/postinstall.sh on package installs; absent
+// on AppImage/dev, which is how these features detect "not applicable" there.
+// DESKTOP_ID must track package.json's desktopName (electron-builder appends ".desktop" itself).
+const UNHUSH_UNIT_PATH = "/usr/lib/systemd/user/unhush.service";
+const DESKTOP_ID = "com.propriaworks.unhush.desktop";
+const SYSTEM_DESKTOP_FILE = `/usr/share/applications/${DESKTOP_ID}`;
+const USER_DESKTOP_OVERRIDE = path.join(os.homedir(), ".local/share/applications", DESKTOP_ID);
+
 // Defined here because the re-exec guard below needs it too, and that runs before initLogging().
 //
 // Owner-only, both logfile and log.
@@ -324,7 +333,19 @@ function updateTrayMenu() {
     { type: "separator" },
     {
       label: "Quit",
-      click: () => { app.quit(); },
+      click: () => {
+        if (process.env.INVOCATION_ID) {
+          // systemd set this only because it started us -- ask it to stop us too, so systemd's
+          // view of "is it running" is never ambiguous, whether the stop was user- or
+          // externally-initiated. No app.quit() here: the resulting SIGTERM drives the shutdown,
+          // and Chromium's own SIGTERM handling already runs ahead of node's and shuts down
+          // cleanly through "will-quit" (see the SIGINT/SIGTERM fallback below) -- no new
+          // receiving-side code needed.
+          require("child_process").spawn("systemctl", ["--user", "stop", "unhush.service"], { detached: true, stdio: "ignore" }).unref();
+        } else {
+          app.quit();
+        }
+      },
     },
   ]);
   tray.setContextMenu(contextMenu);
@@ -786,6 +807,62 @@ ipcMain.handle("get-shortcut-info", async () => {
 // The only way to change a portal-bound key: the desktop's own editor, focused on our entry.
 ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
 
+// --- "Start at login" (systemd --user unit, see scripts/postinstall.sh) ------------------------
+//
+// electron-builder hardcodes the installed .desktop's Exec= to /opt/Unhush/unhush -- it can't be
+// changed at build time -- so redirecting the desktop icon through systemd instead happens here,
+// at runtime, via a per-user override: ~/.local/share/applications/ is searched before
+// /usr/share/applications/ per the XDG spec, and unlike the system one, it's writable by the app
+// itself. Zero detection code needed elsewhere: the override either exists (icon launches via
+// systemd) or doesn't (icon launches the binary directly), and nothing else has to know which.
+async function syncDesktopOverride(enabled) {
+  if (!fs.existsSync(UNHUSH_UNIT_PATH)) return; // AppImage/dev: feature doesn't exist there
+  try {
+    if (enabled) {
+      // Copy the installed .desktop verbatim and swap only Exec=, so Name/Icon/Categories/
+      // StartupWMClass stay in sync with whatever the package actually ships, automatically,
+      // rather than drifting from a hand-duplicated copy.
+      const src = fs.readFileSync(SYSTEM_DESKTOP_FILE, "utf8");
+      const patched = src.replace(/^Exec=.*$/m, "Exec=systemctl --user start unhush.service");
+      fs.mkdirSync(path.dirname(USER_DESKTOP_OVERRIDE), { recursive: true });
+      fs.writeFileSync(USER_DESKTOP_OVERRIDE, patched, { mode: 0o644 });
+    } else {
+      fs.rmSync(USER_DESKTOP_OVERRIDE, { force: true });
+    }
+  } catch (e) {
+    log("warn", `desktop-file override sync failed: ${e.message}`);
+  }
+}
+
+// Only ever touches future-login policy (the [Install] symlink), never the currently-running
+// instance: this handler only runs from inside the already-running Electron process, so one is
+// always live by construction. --now would be a harmless no-op when that instance is already
+// systemd-tracked, but when it's running raw -- exactly the population this toggle exists to
+// convert -- `enable --now` would start a *second*, systemd-tracked instance alongside it rather
+// than adopting the existing one; `disable --now` would kill the very instance Settings is open
+// inside. So neither direction touches runtime state, only the autostart-at-login marker.
+ipcMain.handle("set-autostart", async (event, enabled) => {
+  try {
+    await execFileAsync("systemctl", ["--user", enabled ? "enable" : "disable", "unhush.service"]);
+    await syncDesktopOverride(enabled);
+    log("info", `autostart ${enabled ? "enabled" : "disabled"}`);
+    return { ok: true };
+  } catch (err) {
+    log("error", `set-autostart(${enabled}) failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-autostart-status", async () => {
+  if (!fs.existsSync(UNHUSH_UNIT_PATH)) return { supported: false, enabled: false };
+  try {
+    await execFileAsync("systemctl", ["--user", "is-enabled", "--quiet", "unhush.service"]);
+    return { supported: true, enabled: true };
+  } catch (e) {
+    return { supported: true, enabled: false };
+  }
+});
+
 // Check the ydotool paste path at startup and, if something is broken, show the setup window.
 // Skipped when output mode is 'clipboard', since ydotool isn't used in that case.
 //
@@ -956,6 +1033,15 @@ if (!gotTheLock) {
     createWindow(offsetFromBottom);
     createTray();
     checkOutputPath();
+    // "Start at login" self-heal: the desktop-icon override (syncDesktopOverride above) can drift
+    // from the unit's real enabled state if the user runs `systemctl --user enable/disable` by
+    // hand outside the app. Reconciled once per launch; cheap and idempotent either way, so
+    // fire-and-forget is fine here too (matches checkOutputPath just above).
+    if (fs.existsSync(UNHUSH_UNIT_PATH)) {
+      execFileAsync("systemctl", ["--user", "is-enabled", "--quiet", "unhush.service"])
+        .then(() => syncDesktopOverride(true))
+        .catch(() => syncDesktopOverride(false));
+    }
     commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
 
     // The renderer normally supplies the accelerator (it holds the stored setting) by calling
