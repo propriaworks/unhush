@@ -1,6 +1,25 @@
 #!/bin/bash
-# Add unhush to PATH via a symlink in /usr/local/bin
-ln -sf /opt/Unhush/unhush /usr/local/bin/unhush
+# /usr/local/bin/unhush -- on PATH, and every "start Unhush" entry point (the desktop icon,
+# unhush-toggle's fallback, a user's own DE-autostart entry, someone typing `unhush`) goes through
+# it rather than the raw binary. All of those paths get the same benefit: prefer systemd (an instance
+# it starts is tracked the same way -- stoppable, restartable, auto-restarted on crash -- no matter
+# which entry point started it) but fall back to launching the binary directly if that fails for any
+# reason -- no --user manager, a broken unit, or no unit installed at all (AppImage/dev), or no systemd.
+#
+# NOTE that unhush.service's own ExecStart= must point to the actual executable, not here.
+cat > /usr/local/bin/unhush <<'EOF'
+#!/bin/sh
+# Launch Unhush. Managed by the unhush package -- reinstalling overwrites this.
+if systemctl --user start unhush.service 2>/dev/null; then
+  # Unlike the exec fallback below, the app that just started is a separate, systemd-managed
+  # process -- nothing of ours stays attached to this terminal for main.cjs's own startup banner
+  # to print into, so this is the one launch path that has to speak up for it itself.
+  [ -t 2 ] && echo "Unhush started — look for the tray icon." >&2
+  exit 0
+fi
+exec /opt/Unhush/unhush --ozone-platform=x11 "$@"
+EOF
+chmod 755 /usr/local/bin/unhush
 
 # Helper for desktop-environment keyboard shortcuts. On Wayland we run under XWayland, where the
 # compositor won't deliver X11 key grabs to us, so the DE owns the binding and runs this; it writes
@@ -11,14 +30,9 @@ cat > /usr/local/bin/unhush-toggle <<'EOF'
 # Toggle Unhush recording. Managed by the unhush package -- reinstalling overwrites this.
 FIFO="${XDG_RUNTIME_DIR:-/tmp}/unhush.fifo"
 # `timeout`: writing to a fifo with no reader blocks forever, which would wedge the desktop
-# shortcut if Unhush died without cleaning up. Falling through then tries to launch it -- via
-# systemd first, regardless of whether autostart is enabled (`start` works on a disabled unit
-# too, it just won't persist across logins), so the launched instance ends up systemd-tracked
-# either way; a raw exec is the last resort, for when no unit is installed at all (AppImage/dev).
+# shortcut if Unhush died without cleaning up. Falling through means there's no reader (or no fifo
+# at all) -- so Unhush isn't running. Launch it via /usr/local/bin/unhush.
 if [ -p "$FIFO" ] && timeout 0.5 sh -c "printf 'toggle\n' > \"$FIFO\""; then
-  exit 0
-fi
-if systemctl --user start unhush.service 2>/dev/null; then
   exit 0
 fi
 exec /usr/local/bin/unhush
@@ -45,20 +59,12 @@ udevadm settle --timeout=10 || true
 # hand-rolled instructions, so anyone who already followed those is silently subsumed: identical
 # file, no behavior change, and their next enable/disable goes through Settings instead.
 #
+# ExecStart= is the real binary, not /usr/local/bin/unhush to avoid circular invocation.
+#
 # Plain Type=simple (the default -- deliberately not specified): correct by construction now,
 # because there is only ever one process for the app's whole life, on both session types.
 # --ozone-platform=x11 is right here on ExecStart= -- a no-op on an X11 session (Electron already
-# resolves to that ozone backend by default there) and exactly what's needed on Wayland, where
-# Chromium picks its ozone platform from the real command line before main.cjs ever runs. This used
-# to be main.cjs's job instead, re-execing itself on Wayland only -- which meant a second process
-# that systemd hadn't itself forked, since a plain fork+exit orphans the real child to PID 1, not to
-# systemd ("Supervising process N which is not our child"), and a supervisor kept alive to forward
-# signals worked but cost a whole second idle Electron runtime per launch. Putting the flag directly
-# on the one command line systemd forks removes the need for either. main.cjs still execve()s itself
-# (same PID, no new process) as a fallback for launch paths that don't go through ExecStart= here --
-# see the comment above the re-exec block in main.cjs. See
-# [[project_unhush_wayland_reexec_systemd]] for the full history, including why Type=notify +
-# MAINPID= was tried and abandoned before any of this.
+# resolves to that ozone backend by default there) what's needed on Wayland to force XWayland.
 #
 # KillMode=mixed, not the control-group default: systemd's default sends SIGTERM to every process
 # in the unit's cgroup at once on stop/restart -- the Chromium browser process *and* every zygote/
@@ -67,7 +73,13 @@ udevadm settle --timeout=10 || true
 # exact same failure class the old preremove.sh's roots()-only scoping existed to avoid, just
 # triggered by systemd's own kill behavior instead of a script signalling children directly. mixed
 # sends SIGTERM to the main process alone (letting Chromium shut its own children down in order,
-# same as an ordinary Quit) and only SIGKILLs the whole group as a timeout safety net.
+# same as an ordinary Quit) and reserves SIGKILL for whatever is still in the cgroup once the main
+# process is gone -- observed, on a clean shutdown, to land in the same instant as the main process's
+# own exit, not after a fresh wait: TimeoutStopSec= only bounds how long systemd waits *for the main
+# process itself*, and once that's done it sweeps any remainder immediately rather than pausing again
+# for it. A lingering zygote/GPU child getting SIGKILL'd this way is expected and harmless -- its
+# parent's exit already closed the socket it blocks on (CLOEXEC), so it's already unwinding on its
+# own; systemd's sweep just wins the race to actually reap it.
 mkdir -p /usr/lib/systemd/user
 cat > /usr/lib/systemd/user/unhush.service <<'EOF'
 [Unit]
@@ -75,7 +87,7 @@ Description=Unhush Voice Dictation
 
 [Service]
 KillMode=mixed
-ExecStart=/usr/local/bin/unhush --ozone-platform=x11
+ExecStart=/opt/Unhush/unhush --ozone-platform=x11
 Restart=on-failure
 
 [Install]

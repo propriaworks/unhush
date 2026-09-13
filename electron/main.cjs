@@ -50,24 +50,6 @@ function logFilePath() {
   return file;
 }
 
-// Whether *this exact process* is currently running inside unhush.service's own cgroup -- used by
-// the tray Quit handler to decide whether to route through systemctl. Deliberately not just
-// `process.env.INVOCATION_ID`: that's an ordinary environment variable, inherited like any other,
-// so it can end up truthy in a plain CLI launch too -- e.g. left over from an earlier
-// `systemd-run`/manual-testing session that exported it into the same shell. That previously made
-// a non-systemd instance's Quit button try to stop a unit it had nothing to do with, doing
-// nothing. Reading our own cgroup membership directly can't be spoofed that way: it reflects where
-// systemd actually placed this process at spawn time, not what some ancestor shell happened to
-// have set. cgroup v2's /proc/self/cgroup is a single "0::/some/path" line; a --user unit's path
-// ends in "/<unit-name>.service" (verified against a live user-manager session on this machine).
-function isRunningAsUnhushService() {
-  try {
-    return fs.readFileSync("/proc/self/cgroup", "utf8").includes("/unhush.service");
-  } catch (e) {
-    return false; // no /proc/self/cgroup (non-Linux, or something unusual) -- assume not systemd
-  }
-}
-
 // --- Run under XWayland on Wayland sessions ---------------------------------------------------
 // Electron 38.2+ is a native Wayland client by default. Wayland forbids placing its own window
 // (the recording pill lands centre-screen), keeping it above
@@ -76,24 +58,20 @@ function isRunningAsUnhushService() {
 // clipboard only sporadically. All three work under XWayland exactly as on an X11 session, and we
 // already sidestep Wayland's input model anyway by injecting keystrokes through /dev/uinput.
 //
-// Chromium picks its ozone platform long before this script runs, so appendSwitch() is far too
-// late -- the flag must be on the real command line. Every launch path we control (the systemd
-// unit's ExecStart=, the user's desktop-override Exec=, scripts/postinstall.sh's symlink target)
-// puts it there directly now -- see scripts/postinstall.sh and syncDesktopOverride() below -- and the flag
-// is a no-op on an X11 session: Electron already resolves to ozone=x11 there by default (verified
-// -- an unflagged X11 launch's own GPU/renderer children carry --ozone-platform=x11 in their argv,
-// Chromium propagating the platform it already picked). So this block only ever fires for a launch
-// whose command line we don't own: an AppImage, a raw `/opt/Unhush/unhush`, or a hand-rolled
-// systemd unit predating this flag.
+// Chromium picks its ozone platform long before this script runs, so appendSwitch() is too
+// late -- the --ozone-platform=x11 flag must be on the real command line. Every launch path we
+// control (the systemd unit's ExecStart=, /usr/local/bin/unhush's own direct-launch fallback,
+// the desktop-override Exec= that now points at that same script puts it there directly now,
+// and it's a no-op on an X11 session: (Electron already resolves to ozone=x11 there by default),
+// So this block only ever fires for a launch whose command line we don't own: an AppImage, a raw
+// `/opt/Unhush/unhush`, or similar.
 //
 // It used to re-exec via spawn() -- a new child process, this one exiting once it was launched.
 // Under systemd that makes the child an orphan re-parented to PID 1, not to systemd, regardless of
-// any MAINPID reassignment attempted afterwards -- confirmed by systemd's own diagnostic for
-// exactly this situation: "Supervising process N which is not our child. We'll most likely not
-// notice when it exits." Unable to reliably tell when the real app exits, `systemctl stop`/
-// `restart` became racy -- observed sending SIGKILL to the whole cgroup almost immediately rather
-// than a clean SIGTERM-driven shutdown. A supervisor process kept alive solely to forward signals
-// worked around that, at the cost of a whole second idle Electron runtime per launch. execve()
+// any MAINPID reassignment attempted afterwards -- leading to systemd's diagnostic: "Supervising
+// process N which is not our child. We'll most likely not notice when it exits." This led to
+// `systemctl stop`/ `restart` becoming racy -- observed sending SIGKILL to the whole cgroup
+// almost immediately rather than a clean SIGTERM-driven shutdown. execve()
 // avoids the problem at its root: it replaces this process's image in place, same PID, so whatever
 // launched us (systemd via ExecStart=, or a shell) is still watching the process it actually
 // started -- no orphan, no supervisor, one process, one SIGTERM.
@@ -123,9 +101,6 @@ let mainWindow = null;
 let settingsWindow = null;
 let tray = null;
 let isRecording = false;
-// Tray "Quit" fallback -- see the click handler below. Sticky once set: a systemd-managed quit
-// attempt is only ever trusted once per run.
-let systemdQuitAttempted = false;
 let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
@@ -339,43 +314,10 @@ function updateTrayMenu() {
     { type: "separator" },
     {
       label: "Quit",
-      click: () => {
-        if (isRunningAsUnhushService() && !systemdQuitAttempted) {
-          // systemd set this only because it started us -- ask it to stop us too, so systemd's
-          // view of "is it running" is never ambiguous, whether the stop was user- or
-          // externally-initiated. No app.quit() here: the resulting SIGTERM drives the shutdown,
-          // and Chromium's own SIGTERM handling already runs ahead of node's and shuts down
-          // cleanly through "will-quit" (see the SIGINT/SIGTERM fallback below) -- no new
-          // receiving-side code needed.
-          //
-          // Belt-and-braces given how much has gone sideways with this unit already (see
-          // [[project_unhush_wayland_reexec_systemd]]): if this path doesn't actually work, Quit
-          // must not just silently do nothing forever. Set *before* spawning -- the tray menu
-          // click handler can fire again before this one returns.
-          systemdQuitAttempted = true;
-          const stop = require("child_process")
-            .spawn("systemctl", ["--user", "stop", "unhush.service"], { detached: true, stdio: "ignore" });
-          // Couldn't even launch systemctl (missing binary, no --user manager, etc.) -- that's a
-          // failure we can detect immediately, so don't make the user click Quit twice for it.
-          // Logged (not just silently falling back) so a bad interaction with this unit shows up
-          // in the log rather than just "Quit felt slow that one time" -- see
-          // [[project_unhush_wayland_reexec_systemd]] for how much has already gone sideways here.
-          stop.on("error", (err) => {
-            log("warn", `Quit: could not launch systemctl --user stop (${err.message}) -- falling back to app.quit()`);
-            app.quit();
-          });
-          stop.unref();
-        } else {
-          // Either not systemd-managed (the common case -- nothing to log), or Quit was already
-          // tried the systemd way and clearly didn't work (we're still here to receive a second
-          // click) -- stop trusting systemctl and exit directly instead of leaving Quit looking
-          // like a dead button.
-          if (isRunningAsUnhushService()) {
-            log("warn", "Quit: systemctl --user stop didn't take effect -- falling back to app.quit()");
-          }
-          app.quit();
-        }
-      },
+      // Plain app.quit() -- whether or not systemd started us. It shuts down cleanly through
+      // "will-quit" (see the SIGINT/SIGTERM fallback below) and now correctly exits with
+      // status 0, so systemd sees a normal exit, updates status and doesn't attempt restart.
+      click: () => { app.quit(); },
     },
   ]);
   tray.setContextMenu(contextMenu);
@@ -843,24 +785,18 @@ ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
 // changed at build time -- so the icon's real command line is controlled here instead, at runtime,
 // via a per-user override: ~/.local/share/applications/ is searched before
 // /usr/share/applications/ per the XDG spec, and unlike the system one, it's writable by the app
-// itself. This is also where --ozone-platform=x11 reaches the icon on a Wayland session (see the
-// re-exec comment above): rather than mutating the package-owned system file, both cases -- icon
-// launches via systemd, icon launches the binary directly -- are handled by writing this same
-// override, differing only in Exec=. Always written now (autostart on or off), so a Wayland icon
-// launch never has to fall back to main.cjs's execve() at all.
-async function syncDesktopOverride(enabled) {
+// itself. Points at /usr/local/bin/unhush rather than the raw binary, so the icon gets the same
+// systemd-preferred-with-a-direct-launch-fallback including ozone-override-flag behaviour as every
+// other launch entry point.
+async function syncDesktopOverride() {
   if (!fs.existsSync(UNHUSH_UNIT_PATH)) return; // AppImage/dev: feature doesn't exist there
   try {
-    // Copy the installed .desktop verbatim and swap only Exec=, so Name/Icon/Categories/
-    // StartupWMClass stay in sync with whatever the package actually ships, automatically, rather
+    // Copy the installed .desktop verbatim and swap only the executable token in Exec=, so
+    // Name/Icon/Categories/StartupWMClass -- and any trailing field code electron-builder appends
+    // (e.g. "%U") -- stay in sync with whatever the package actually ships, automatically, rather
     // than drifting from a hand-duplicated copy.
     const src = fs.readFileSync(SYSTEM_DESKTOP_FILE, "utf8");
-    const newExec = enabled
-      ? "Exec=systemctl --user start unhush.service"
-      // Insert the flag right after the executable token (quoted or not) rather than rewrite the
-      // whole line, so a trailing field code electron-builder appends (e.g. "%U") is preserved.
-      : "Exec=$1 --ozone-platform=x11$2";
-    const patched = src.replace(/^Exec=("[^"]*"|\S+)(.*)$/m, newExec);
+    const patched = src.replace(/^Exec=("[^"]*"|\S+)(.*)$/m, "Exec=/usr/local/bin/unhush$2");
     fs.mkdirSync(path.dirname(USER_DESKTOP_OVERRIDE), { recursive: true });
     fs.writeFileSync(USER_DESKTOP_OVERRIDE, patched, { mode: 0o644 });
   } catch (e) {
@@ -878,7 +814,7 @@ async function syncDesktopOverride(enabled) {
 ipcMain.handle("set-autostart", async (event, enabled) => {
   try {
     await execFileAsync("systemctl", ["--user", enabled ? "enable" : "disable", "unhush.service"]);
-    await syncDesktopOverride(enabled);
+    await syncDesktopOverride();
     log("info", `autostart ${enabled ? "enabled" : "disabled"}`);
     return { ok: true };
   } catch (err) {
@@ -1066,16 +1002,13 @@ if (!gotTheLock) {
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
     createTray();
-    checkOutputPath();
-    // "Start at login" self-heal: the desktop-icon override (syncDesktopOverride above) can drift
-    // from the unit's real enabled state if the user runs `systemctl --user enable/disable` by
-    // hand outside the app. Reconciled once per launch; cheap and idempotent either way, so
-    // fire-and-forget is fine here too (matches checkOutputPath just above).
-    if (fs.existsSync(UNHUSH_UNIT_PATH)) {
-      execFileAsync("systemctl", ["--user", "is-enabled", "--quiet", "unhush.service"])
-        .then(() => syncDesktopOverride(true))
-        .catch(() => syncDesktopOverride(false));
+    // Being a tray app, a successful start is silent. Once tray/window creation above has actually
+    // succeeded, and only when someone is there to read it (not with no TTY), show a banner.
+    if (process.stderr.isTTY) {
+      process.stderr.write(`Unhush ${app.getVersion()} started — look for the tray icon.\n`);
     }
+    checkOutputPath();
+    syncDesktopOverride(); // fire and forget; this is idempotent
     commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
 
     // The renderer normally supplies the accelerator (it holds the stored setting) by calling
