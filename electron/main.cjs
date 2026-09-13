@@ -8,17 +8,92 @@ const {
   clipboard,
   globalShortcut,
   dialog,
+  shell,
 } = require("electron");
 const path = require("path");
 const { exec, execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
+const ydotool = require("./ydotool.cjs");
+const providerSetup = require("./providerSetup.cjs");
+const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+
+// "Start at login" (see set-autostart/get-autostart-status below).
+// Written unconditionally by scripts/postinstall.sh on package installs; absent on AppImage/dev,
+// which is how these features detect "not applicable" there.
+const UNHUSH_UNIT_PATH = "/usr/lib/systemd/user/unhush.service";
+
+// Defined here because the re-exec guard below needs it too, and that runs before initLogging().
+//
+// Owner-only, both logfile and log.
+// To maintain privacy, nothing here logs dictated text (although debug_audio does, if opted in)
+function logFilePath() {
+  const logDir = app.getPath("logs");
+  fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
+  const file = path.join(logDir, "unhush.log");
+  try {
+    // The mode arguments above only apply at creation, so an install that predates this keeps
+    // whatever the umask gave it. Both are ours alone, so narrow them in place.
+    if ((fs.statSync(logDir).mode & 0o077) !== 0) fs.chmodSync(logDir, 0o700);
+    fs.closeSync(fs.openSync(file, "a", 0o600));
+    if ((fs.statSync(file).mode & 0o077) !== 0) fs.chmodSync(file, 0o600);
+  } catch (e) { /* the caller's own open will report anything that really matters */ }
+  return file;
+}
+
+// --- Run under XWayland on Wayland sessions ---------------------------------------------------
+// Electron 38.2+ is a native Wayland client by default. Wayland forbids placing its own window
+// (the recording pill lands centre-screen), keeping it above
+// other windows, and owning the clipboard while unfocused -- wl_data_device.set_selection needs a
+// serial from a recent input event, and the pill is focusable:false, so transcripts reached the
+// clipboard only sporadically. All three work under XWayland exactly as on an X11 session, and we
+// already sidestep Wayland's input model anyway by injecting keystrokes through /dev/uinput.
+//
+// Chromium picks its ozone platform long before this script runs, so appendSwitch() is too
+// late -- the --ozone-platform=x11 flag must be on the real command line. Every launch path we
+// control (the systemd unit's ExecStart=, /usr/local/bin/unhush's own direct-launch fallback,
+// the desktop-override Exec= that now points at that same script puts it there directly now,
+// and it's a no-op on an X11 session: (Electron already resolves to ozone=x11 there by default),
+// So this block only ever fires for a launch whose command line we don't own: an AppImage, a raw
+// `/opt/Unhush/unhush`, or similar. Note that this includes a shortcut click on initial install
+// under Wayland, since the below .desktop override will not yet be in place.
+//
+// It used to re-exec via spawn() -- a new child process, this one exiting once it was launched.
+// Under systemd that makes the child an orphan re-parented to PID 1, not to systemd, regardless of
+// any MAINPID reassignment attempted afterwards -- leading to systemd's diagnostic: "Supervising
+// process N which is not our child. We'll most likely not notice when it exits." This led to
+// `systemctl stop`/ `restart` becoming racy -- observed sending SIGKILL to the whole cgroup
+// almost immediately rather than a clean SIGTERM-driven shutdown. execve()
+// avoids the problem at its root: it replaces this process's image in place, same PID, so whatever
+// launched us (systemd via ExecStart=, or a shell) is still watching the process it actually
+// started -- no orphan, no supervisor, one process, one SIGTERM.
+//
+// This runs before requestSingleInstanceLock() below, so the process about to be replaced never
+// takes it.
+if (
+  process.env.XDG_SESSION_TYPE === "wayland" &&
+  // The opt-out is disabled, though not removed. Native Wayland cannot deliver a reliable clipboard on
+  // GNOME: setting a selection while unfocused needs ext-data-control-v1 (the protocol wl-copy
+  // uses), Mutter implements neither it nor its wlr- predecessor and has said it won't, and
+  // wl-clipboard's only fallback there is to briefly take focus -- which would break the very
+  // paste we are setting up. A mode whose core function can't work on half the Linux desktop
+  // isn't one to offer. Re-enable this line if that ever changes.
+  // process.env.UNHUSH_NATIVE_WAYLAND !== "1" &&
+  // Someone who passes the flag themselves is still honoured -- unsupported, but not fought. This
+  // is also the exec-loop guard: the re-exec'd process carries the flag, so it never re-enters.
+  !process.argv.some((a) => a.startsWith("--ozone-platform"))
+) {
+  // Never returns on success -- the current process image is gone. argv[0] is conventionally the
+  // program path (execve doesn't otherwise care), matching what Node itself put there.
+  process.execve(process.execPath,
+    [process.execPath, "--ozone-platform=x11", ...process.argv.slice(1)], process.env);
+}
 
 let mainWindow = null;
 let settingsWindow = null;
@@ -56,11 +131,12 @@ const appIconWarning = path.join(__dirname, isDev ? "../assets/icon-dev-warning.
 
 let logFile = null;
 let debugLogging = false; // gates "debug"-level messages only — see settings.json's debug_logging
+const startedAt = Date.now();
 function log(level, message) {
   if (level === "debug" && !debugLogging) return;
   if (!logFile) {
-    // shouldn't happen — log() is only called after app is ready
-    console.error(`[pre-ready log] ${level.toUpperCase()}: ${message}`);
+    // shouldn't happen — initLogging() runs at module load, before anything calls log()
+    console.error(`[pre-init log] ${level.toUpperCase()}: ${message}`);
     return;
   }
   const now = new Date();
@@ -69,7 +145,49 @@ function log(level, message) {
   fs.appendFileSync(logFile, line);
   if (isDev) console.log(line.trimEnd());
 }
+
+// Opens the log at module load rather than in whenReady(), so everything from the very first
+// module initialisation onwards is recorded — the second-instance path and any startup failure
+// both happen before "ready" and used to vanish into console.error. app.getPath() and
+// app.getVersion() are documented as usable before "ready" (verified: the logs path is
+// identical before and after).
+function initLogging() {
+  try {
+    logFile = logFilePath();
+  } catch (e) {
+    // Running at module load means a throw here would take the whole app down over a log file.
+    // Leave logFile null instead: log() then falls back to console.
+    console.error(`could not open log file: ${e.message}`);
+  }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8"));
+    debugLogging = cfg.debug_logging === true || cfg.debug_logging === "true";
+  } catch (e) {} // missing/invalid settings.json — debugLogging stays false
+}
+
+function uptimeString(ms) {
+  const s = Math.round(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h${m}m` : m ? `${m}m${s % 60}s` : `${s}s`;
+}
+
+// Logged once per real launch (not for the second-instance hotkey relaunches, which would
+// otherwise banner the log on every dictation toggle under the Wayland fallback).
+function logStartup() {
+  log("info", `=== Unhush ${app.getVersion()} starting: electron ${process.versions.electron}, ` +
+    `node ${process.versions.node}, pid ${process.pid}, ${isDev ? "dev" : "packaged"} ===`);
+  log("info", `platform: ${os.type()} ${os.release()} ${process.arch}, ` +
+    `session=${process.env.XDG_SESSION_TYPE || "?"}, desktop=${process.env.XDG_CURRENT_DESKTOP || "?"}, ` +
+    `ozone=${waylandShortcut.displayBackend()}, logs=${logFile}`);
+}
+
+initLogging();
+// ydotool takes the userData path rather than requiring electron itself — it's its only reason
+// to, and without it it's testable as plain node. waylandShortcut needs nothing from electron.
 waylandShortcut.init(log);
+ydotool.init(log, app.getPath("userData"));
+commandFifo.init(log);
 audioDucking.init(log, app.getName());
 activeWindow.init(log);
 
@@ -77,29 +195,54 @@ app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
 app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
 
-let isWayland = false;
-try {
-  isWayland = process.env.XDG_SESSION_TYPE === "wayland";
-} catch (e) {}
+// Session-type and compositor knowledge now lives entirely in waylandShortcut.cjs, which is the
+// only place that acts on it.
+//
+// No GlobalShortcutsPortal switch here any more. We force XWayland, where Chromium builds an X11
+// listener and never touches the portal; and on a forced native-Wayland run the switch would
+// still be pointless, since Chromium enables kGlobalShortcutsPortal by default and Electron
+// adds GlobalShortcutsPortalPreferredTrigger itself on Linux. It was also appended too late to
+// affect the feature list, which is built before this script runs.
 
-if (isWayland) {
-  // Enable XDG GlobalShortcuts portal so globalShortcut works on Wayland
-  // via the desktop environment (KDE, GNOME 48+).
-  app.commandLine.appendSwitch("enable-features", "GlobalShortcutsPortal");
-}
+let shortcutRegistered = false;
 
 async function registerShortcut(shortcut) {
+  // On Wayland the portal owns the binding, and it honors a "preferred trigger" on the first bind
+  // only -- so this call exists to hand the user's stored accelerator to that first bind, and does
+  // nothing afterwards. Changing the key from here is impossible by design; Settings offers the
+  // desktop's own editor instead for this purpose (waylandShortcut.configure()).
+  if (waylandShortcut.usesPortal()) {
+    await waylandShortcut.startPortal(
+      shortcut,
+      () => {
+        log("info", "portal shortcut fired");
+        lastHotkeyAt = Date.now();
+        toggleRecording();
+      },
+      // The tray menu names the key, so it has to follow the desktop's editor too.
+      () => updateTrayMenu(),
+    );
+    currentShortcut = shortcut;
+    updateTrayMenu();
+    return;
+  }
+
+  if (shortcut === currentShortcut && shortcutRegistered) return;
+
   globalShortcut.unregisterAll();
+  shortcutRegistered = false;
 
   try {
-    await globalShortcut.register(shortcut, () => { lastHotkeyAt = Date.now(); toggleRecording(); });
-  } catch (e) {}
-
-  // On Wayland without portal support, globalShortcut does nothing.
-  // Prompt the user to configure a desktop environment shortcut instead.
-  if (isWayland && waylandShortcut.needsFallback()) {
-    waylandShortcut.check(shortcut);
+    const ok = await globalShortcut.register(shortcut, () => {
+      log("debug", `global shortcut fired: ${shortcut}`);
+      lastHotkeyAt = Date.now();
+      toggleRecording();
+    });
+    shortcutRegistered = ok !== false;
+  } catch (e) {
+    log("debug", `global shortcut register threw: ${e.message}`);
   }
+  log("info", `global shortcut ${shortcutRegistered ? "registered" : "NOT registered"}: ${shortcut}`);
 
   currentShortcut = shortcut;
   updateTrayMenu();
@@ -124,6 +267,16 @@ function updateTrayIcon() {
   tray.setToolTip(lines.length ? `${base}\n${lines.join("\n")}` : base);
 }
 
+// What to call the hotkey in the tray menu. Ours to name only while we hold the grab: on the
+// portal path the desktop decides, and in manual mode there may be no key bound at all.
+function shortcutLabel() {
+  switch (waylandShortcut.shortcutMode()) {
+    case "portal": return waylandShortcut.shortcutInfo().trigger || "";
+    case "manual": return "";
+    default: return currentShortcut;
+  }
+}
+
 function updateTrayMenu() {
   if (!tray) return;
   const preview = lastTranscript
@@ -135,7 +288,9 @@ function updateTrayMenu() {
   const warningLines = activeWarningLines();
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: `Toggle Recording (${currentShortcut})`,
+      // On the portal path the live key is whatever the desktop says it is -- the user may have
+      // added their own trigger and unchecked ours, and an empty description means there is no trigger.
+      label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
       click: () => { toggleRecording(); },
     },
     { type: "separator" },
@@ -159,6 +314,9 @@ function updateTrayMenu() {
     { type: "separator" },
     {
       label: "Quit",
+      // Plain app.quit() -- whether or not systemd started us. It shuts down cleanly through
+      // "will-quit" (see the SIGINT/SIGTERM fallback below) and now correctly exits with
+      // status 0, so systemd sees a normal exit, updates status and doesn't attempt restart.
       click: () => { app.quit(); },
     },
   ]);
@@ -178,6 +336,9 @@ function setRecordingActive(active) {
 
 // Toggle recording: show+record or stop+hide
 function toggleRecording() {
+  // The only way a delivered hotkey/fifo command can still do nothing: say so rather than no-op
+  // silently, since from outside that is indistinguishable from the trigger never arriving.
+  if (!mainWindow) log("warn", "toggleRecording: no main window, ignoring");
   if (mainWindow) {
     if (!isRecording) {
       mainWindow.setIgnoreMouseEvents(false);
@@ -280,9 +441,14 @@ function createWindow(offsetFromBottom) {
   });
 }
 
-function createSettingsWindow(tab = null) {
+// outputMethod, when given, is a mode for Settings to select as it opens -- the setup dialog's
+// "Use Clipboard mode instead" uses it. It travels in the query string rather than as an IPC
+// message because a freshly created window would still be mounting React when the send arrived;
+// the already-open branch below has no such race and uses an event, exactly as `tab` does.
+function createSettingsWindow(tab = null, outputMethod = null) {
   if (settingsWindow) {
     if (tab) settingsWindow.webContents.send("navigate-tab", tab);
+    if (outputMethod) settingsWindow.webContents.send("set-output-method-ui-setting", outputMethod);
     settingsWindow.focus();
     return;
   }
@@ -311,13 +477,26 @@ function createSettingsWindow(tab = null) {
     title: "Unhush Settings",
   });
 
+  const query = {};
+  if (tab) query.tab = tab;
+  if (outputMethod) query.output = outputMethod;
+  const search = new URLSearchParams(query).toString();
+
+  // Settings links out to provider API-key pages and local-model docs (Transcription/Formatting
+  // tabs) -- send those to the system browser and never let them open a second Electron window,
+  // exactly like the setup window (see showSetupWindow()).
+  settingsWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  settingsWindow.webContents.on("will-navigate", (event, url) => {
+    if (url !== settingsWindow.webContents.getURL()) event.preventDefault();
+  });
+
   if (isDev) {
-    settingsWindow.loadURL(`http://localhost:5173/settings.html${tab ? `?tab=${tab}` : ""}`);
+    settingsWindow.loadURL(`http://localhost:5173/settings.html${search ? `?${search}` : ""}`);
   } else {
-    settingsWindow.loadFile(
-      path.join(__dirname, "../dist/settings.html"),
-      tab ? { query: { tab } } : {}
-    );
+    settingsWindow.loadFile(path.join(__dirname, "../dist/settings.html"), { query });
   }
 
   settingsWindow.on("closed", () => {
@@ -355,6 +534,7 @@ ipcMain.handle("hide-window", async () => {
 
 ipcMain.handle("copy-to-clipboard", async (event, text) => {
   clipboard.writeText(text);
+  clipboard.writeText(text, 'selection'); // PRIMARY too, so middle-click paste works
   return true;
 });
 
@@ -456,7 +636,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
       // this same thread. Blocking here for the time ydotool takes to run risks stalling that
       // response right when it's needed most. Still awaited, so callers see the real outcome
       // and errors/timeouts are still caught below -- this isn't fire-and-forget.
-      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000 });
+      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000, env: ydotool.env() });
       log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
       log('error', `output-text paste key simulation failed: ${err.message}`);
@@ -482,15 +662,18 @@ ipcMain.handle("output-text", async (event, text, method) => {
         await doPaste();
         break;
       case "type": {
-        // Use a random temp filename to prevent symlink race attacks on a predictable path
-        const tempFile = path.join(os.tmpdir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
+        // The dictated text is written to disk, because `ydotool type` needs to read it from a file.
+        // Only one ever exists at a time and it is unlinked in the finally below. It is written
+        // into XDG_RUNTIME_DIR (0700, tmpfs, cleared at logout -- if it exists) rather than /tmp.
+        // Random name also guards against symlink races, 0600 in case the fallback puts us in /tmp after all.
+        const tempFile = path.join(commandFifo.runtimeDir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
         try {
-          fs.writeFileSync(tempFile, text);
+          fs.writeFileSync(tempFile, text, { mode: 0o600 });
           await new Promise(resolve => setTimeout(resolve, 250));
           await captureDestination();
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore' });
+          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore', env: ydotool.env() });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }
@@ -575,62 +758,251 @@ ipcMain.on("set-ducking-config", (event, config) => {
   audioDucking.setConfig(config);
 });
 
+// The renderer's output method, reported as it mounts and whenever the user changes it in Settings.
+// Only the setup check needs it -- output-text carries the method with each request.
+let reportOutputMethod;
+const outputMethodKnown = new Promise((resolve) => { reportOutputMethod = resolve; });
+// Single place that records the mode, so no caller can update one half of it and not the other.
+// Also keeps the setup window's Re-check honest if the user switches mode while it is open.
+function noteOutputMethod(method) {
+  reportOutputMethod(method);
+  setupIncludesYdotool = method !== "clipboard";
+}
+ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));
+
+// The renderer's transcription/formatter provider status (see RecordingBar.checkConfigWarnings),
+// reported alongside the existing tray-warning IPC. Only the setup window needs it -- never an
+// API key, just the provider name and the existing reasonKey -- see providerSetup.cjs.
+let reportProviderStatus;
+const providerStatusKnown = new Promise((resolve) => { reportProviderStatus = resolve; });
+let providerStatus = null;
+ipcMain.on("set-provider-status", (event, status) => {
+  providerStatus = status;
+  reportProviderStatus(status);
+  // Settings just closed and the renderer re-reported -- keep an already-open setup window honest
+  // rather than waiting for the user to click Re-check.
+  if (setupWindow) refreshSetupWindow();
+});
+
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
   await registerShortcut(shortcut);
   return true;
 });
 
-ipcMain.handle("get-shortcut-mode", () => {
-  if (!isWayland) return "native";
-  return waylandShortcut.shortcutMode();
+// Reports mode "native" on X11, where globalShortcut grabs the key itself, "portal" where the
+// desktop holds the binding for us, and "manual" when the user has to bind it. Awaits the first
+// bind attempt so Settings never renders a mode that's about to change under it. The fifo command
+// comes back in every mode, since it works everywhere and can bind keys the dropdown doesn't list.
+ipcMain.handle("get-shortcut-info", async () => {
+  await waylandShortcut.settled();
+  // Ask the portal what the key is *now*: the user may have added their own trigger, or unchecked
+  // ours, since the bind at startup. One round trip, and only when a settings window opens.
+  await waylandShortcut.refresh();
+  return waylandShortcut.shortcutInfo();
 });
 
-// Warn once if /dev/uinput isn't accessible (AppImage users, or post-install udev not yet active).
-// Skipped when output mode is 'clipboard' since ydotool isn't needed in that case.
-function checkUinputAccess() {
+// The only way to change a portal-bound key: the desktop's own editor, focused on our entry.
+ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
+
+// --- "Start at login" (systemd --user unit, see scripts/postinstall.sh) ------------------------
+//
+// (The installed .desktop's Exec= -- hardcoded by electron-builder to the raw binary -- is
+// corrected once, system-wide, by scripts/postinstall.sh; nothing to do with that here.)
+//
+// Only ever touches future-login policy (the [Install] symlink), never the currently-running
+// instance: this handler only runs from inside the already-running Electron process, so one is
+// always live by construction. --now would be a harmless no-op when that instance is already
+// systemd-tracked, but when it's running raw -- exactly the population this toggle exists to
+// convert -- `enable --now` would start a *second*, systemd-tracked instance alongside it rather
+// than adopting the existing one; `disable --now` would kill the very instance Settings is open
+// inside. So neither direction touches runtime state, only the autostart-at-login marker.
+ipcMain.handle("set-autostart", async (event, enabled) => {
+  try {
+    await execFileAsync("systemctl", ["--user", enabled ? "enable" : "disable", "unhush.service"]);
+    log("info", `autostart ${enabled ? "enabled" : "disabled"}`);
+    return { ok: true };
+  } catch (err) {
+    log("error", `set-autostart(${enabled}) failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-autostart-status", async () => {
+  if (!fs.existsSync(UNHUSH_UNIT_PATH)) return { supported: false, enabled: false };
+  try {
+    await execFileAsync("systemctl", ["--user", "is-enabled", "--quiet", "unhush.service"]);
+    return { supported: true, enabled: true };
+  } catch (e) {
+    return { supported: true, enabled: false };
+  }
+});
+
+// Check the ydotool paste path at startup and, if something is broken, show the setup window.
+// Skipped when output mode is 'clipboard', since ydotool isn't used in that case.
+//
+// The old version of this warned on a single fs.accessSync of /dev/uinput and latched a sentinel
+// file *before* showing the dialog, so a genuinely broken install was hidden forever after one
+// dismissal — and a package postinstall's asynchronous `udevadm trigger` could easily lose the
+// race against an installer's "Launch" button and warn about a permission that was about to
+// arrive. ydotool.preflight() retries, and diagnoses the daemon and the client binary too.
+let setupWindow = null;
+let lastSetupResult = null; // most recent preflight, so "don't show again" mutes what was on screen
+
+function setupMuteFile() {
+  return path.join(app.getPath("userData"), ".setup-dialog-muted");
+}
+
+function mutedProblems() {
+  try {
+    return new Set(JSON.parse(fs.readFileSync(setupMuteFile(), "utf8")));
+  } catch (e) {
+    // Pre-3.2 sentinel: the user dismissed the old uinput-only dialog, so honour that for uinput.
+    if (fs.existsSync(path.join(app.getPath("userData"), ".uinput-warned"))) return new Set(["uinput"]);
+    return new Set();
+  }
+}
+
+// The setup window shows one card per problem. Provider config, the ydotool paste path, and the
+// global shortcut are independent concerns, so they're gathered here rather than any module
+// knowing about the others; each card is tagged with `kind` by its gatherer below.
+let setupIncludesYdotool = true;
+
+async function setupPreflight() {
+  // The renderer owns provider config (localStorage) -- wait briefly to be told rather than
+  // guess "unconfigured". Already resolved by the time Re-check can be clicked.
+  await Promise.race([providerStatusKnown, new Promise((r) => setTimeout(r, 3000).unref?.())]);
+  const problems = providerSetup.problems(providerStatus); // already tagged kind: "provider"
+
+  if (setupIncludesYdotool) {
+    problems.push(...(await ydotool.preflight()).problems.map((p) => ({ kind: "ydotool", ...p })));
+  }
+  // Wait for the first portal bind to settle before deciding: on a Wayland first run that means
+  // waiting out the desktop's consent dialog, and telling the user to bind a key by hand while
+  // that dialog is on screen would be exactly wrong. Already resolved on X11.
+  await waylandShortcut.settled();
+  // Needed whatever the output mode, unlike the ydotool checks. Returns null unless the user
+  // really does have to bind the key themselves.
+  const shortcut = waylandShortcut.shortcutProblem();
+  if (shortcut) problems.push({ kind: "shortcut", ...shortcut });
+
+  // Optional cards (e.g. "LLM formatting is off") are advice, not faults: they ride along when
+  // the window is already going to be shown for a real problem, but must never open it alone.
+  if (problems.every((p) => p.optional)) return { ok: true, problems: [] };
+  return { ok: false, problems };
+}
+
+async function checkOutputPath() {
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsFilePath, "utf8")); } catch (e) {}
+  // The renderer owns this setting, in localStorage, so wait to be told rather than guess.
+  // Don't nag a Clipboard-mode user about ydotool. The renderer reports it as it mounts
+  // (see RecordingBar.tsx); the timeout covers a renderer that never gets there, and
+  // settings.json is the last resort -- its keys are the localStorage names
+  // minus the `unhush_` prefix (see the injection in createWindow), so it is `output_method`.
+  const { method, source } = await Promise.race([
+    outputMethodKnown.then((m) => ({ method: m, source: "renderer" })),
+    new Promise((resolve) => setTimeout(() => resolve(settings.output_method
+      ? { method: settings.output_method, source: "settings.json" }
+      : { method: "paste", source: "default" }), 3000).unref?.()),
+  ]);
+  noteOutputMethod(method);
+  // Name the source as well as the answer for better clarity
+  log("debug", `setup check: output method ${method} (${source}), ydotool checks ${setupIncludesYdotool ? "included" : "skipped"}`);
 
-  const outputMode = settings.outputMode || "paste";
-  if (outputMode === "clipboard") return;
+  const result = await setupPreflight();
+  lastSetupResult = result;
+  if (result.ok) return;
 
-  // Sentinel file so we only warn once
-  const warnedFlag = path.join(app.getPath("userData"), ".uinput-warned");
-  if (fs.existsSync(warnedFlag)) return;
-
-  try {
-    fs.accessSync("/dev/uinput", fs.constants.W_OK);
-    return; // accessible — nothing to do
-  } catch (e) {}
-
-  // Not accessible: show guidance
-  try { fs.writeFileSync(warnedFlag, ""); } catch (e) {}
-
-  const udevCmd = `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/80-uinput.rules`;
-  const reloadCmd = `sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput`;
-
-  dialog.showMessageBox({
-    type: "warning",
-    title: "Setup needed for ydotool",
-    message: "/dev/uinput is not accessible",
-    detail:
-      "Unhush uses ydotool to paste text, which requires\nwrite access to /dev/uinput.\n\n" +
-      "To give permission, run these two commands in a\nterminal (click 'Copy commands' to copy them):\n\n" +
-      `~~~~\n${udevCmd}\n\n` +
-      `${reloadCmd}\n~~~~\n\n` +
-      "On systemd-based systems this takes effect immediately.\n\n" +
-      "Alternatively, switch to Clipboard mode in Settings\n(then you paste manually with Ctrl+V).\n",
-    buttons: ["OK", "Copy commands", "Open Settings"],
-    defaultId: 0,
-  }).then(({ response }) => {
-    if (response === 1) {
-      clipboard.writeText(`${udevCmd}\n${reloadCmd}`);
-    } else if (response === 2) {
-      createSettingsWindow("usability");
-    }
-  });
+  // Only stay quiet if the user muted *these* problems; a new failure still deserves a warning.
+  const muted = mutedProblems();
+  if (result.problems.every((p) => muted.has(p.code))) {
+    log("info", `setup problems suppressed by user: ${result.problems.map((p) => p.code).join(", ")}`);
+    return;
+  }
+  showSetupWindow(result);
 }
+
+function showSetupWindow(result) {
+  if (setupWindow) {
+    setupWindow.webContents.send("setup-result", result);
+    setupWindow.focus();
+    return;
+  }
+  setupWindow = new BrowserWindow({
+    width: 640,
+    height: 700, // provider cards can push this up to five cards, taller than the old ydotool-only max of two
+    minWidth: 460,
+    minHeight: 320,
+    resizable: true,      // the problem list varies in length, so let it be resized
+    // It's a dialog, not an app window. `parent` is what actually does the work on Linux: it
+    // sets WM_TRANSIENT_FOR, and window managers then drop the minimise/maximise buttons.
+    // The minimizable/maximizable flags alone are documented as inconsistent on Linux.
+    parent: mainWindow || undefined,
+    minimizable: false,
+    maximizable: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+    icon: appIcon,
+    title: "Unhush Setup",
+  });
+  setupWindow.on("closed", () => { setupWindow = null; });
+  setupWindow.webContents.on("did-finish-load", () => {
+    setupWindow.webContents.send("setup-result", result);
+  });
+  // The window now carries real links (API-key pages, local-model docs) -- send them to the
+  // system browser and never let them open a second Electron window or navigate the dialog away.
+  setupWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  setupWindow.webContents.on("will-navigate", (event, url) => {
+    if (url !== setupWindow.webContents.getURL()) event.preventDefault();
+  });
+  setupWindow.loadFile(path.join(__dirname, "setup-dialog.html"));
+}
+
+// Re-runs the combined preflight and, if the setup window is open, pushes the fresh result into
+// it -- shared by the manual Re-check button and the automatic refresh when Settings closes.
+async function refreshSetupWindow() {
+  lastSetupResult = await setupPreflight();
+  if (setupWindow) setupWindow.webContents.send("setup-result", lastSetupResult);
+  return lastSetupResult;
+}
+
+ipcMain.handle("setup-preflight", async () => refreshSetupWindow());
+
+ipcMain.handle("open-settings-window", (event, tab, outputMethod) => {
+  // Record the requested mode now rather than waiting for Settings to mount and report it back:
+  // the setup dialog re-checks as soon as this resolves, and would otherwise still be told the
+  // ydotool problems it just opted out of. A mounting renderer re-reports the truth regardless.
+  if (outputMethod) noteOutputMethod(outputMethod);
+  createSettingsWindow(tab || "usability", outputMethod || null);
+  return true;
+});
+
+ipcMain.on("close-setup-dialog", () => {
+  if (setupWindow) setupWindow.close();
+});
+
+// Remember which problems the user chose not to be warned about again, by code rather than as a
+// blanket flag, so an unrelated failure later still surfaces. Records what was actually on screen
+// when they ticked the box, rather than re-running the checks and possibly storing something else.
+ipcMain.on("set-setup-dialog-muted", (event, muted) => {
+  try {
+    if (!muted) { fs.unlinkSync(setupMuteFile()); return; }
+    const codes = (lastSetupResult ? lastSetupResult.problems : []).map((p) => p.code);
+    fs.writeFileSync(setupMuteFile(), JSON.stringify(codes), { mode: 0o600 });
+    log("info", `setup warnings muted for: ${codes.join(", ") || "(none)"}`);
+  } catch (e) {
+    log("warn", `could not update setup-dialog mute state: ${e.message}`);
+  }
+});
 
 // Single-instance toggle: on Wayland without portal support (GNOME < 48, wlroots compositors),
 // the global hotkey is a manual desktop env. keyboard shortcut that simply re-launches Unhush.
@@ -652,22 +1024,30 @@ if (!gotTheLock) {
     }
   });
 
+  logStartup();
+
   app.whenReady().then(() => {
-    const logDir = app.getPath('logs');
-    fs.mkdirSync(logDir, { recursive: true });
-    logFile = path.join(logDir, 'unhush.log');
-
-    try {
-      const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
-      const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
-      debugLogging = cfg.debug_logging === true || cfg.debug_logging === "true";
-    } catch (e) {} // missing/invalid settings.json — debugLogging stays false
-
+    log("info", `app ready after ${Date.now() - startedAt}ms`);
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
     createWindow(offsetFromBottom);
     createTray();
-    checkUinputAccess();
+    // Being a tray app, a successful start is silent. Once tray/window creation above has actually
+    // succeeded, and only when someone is there to read it (not with no TTY), show a banner.
+    if (process.stderr.isTTY) {
+      process.stderr.write(`Unhush ${app.getVersion()} started — look for the tray icon.\n`);
+    }
+    checkOutputPath();
+    commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
+
+    // The renderer normally supplies the accelerator (it holds the stored setting) by calling
+    // update-shortcut as it mounts, and that first call is what binds the portal shortcut. If the
+    // renderer never gets there -- a crash, a very slow first paint -- the hotkey would simply
+    // never exist, so bind the default rather than let the UI's health decide. Idempotent: whoever
+    // arrives first wins, and the portal honours a preferred trigger on the first bind only anyway.
+    setTimeout(() => {
+      void registerShortcut(currentShortcut);
+    }, 3000).unref?.();
 
     // Reposition the recording bar whenever the primary display's work area changes
     // (resolution change, taskbar resize, monitor added/removed, etc.)
@@ -702,28 +1082,36 @@ if (!gotTheLock) {
   });
 }
 
+// Under userData (~/.config/unhush/debug), rather than a publicly accessible location like /tmp,
+// since this holds recordings of the user's voice and the transcripts made from them.
+//
+// $XDG_STATE_HOME would be the spec-correct home for state like this, but Electron already puts
+// userData -- settings, LevelDB, caches and the log -- under the config directory on Linux, and
+// splitting one directory out of that would only mean two places to find, document and delete.
+function debugAudioDir() {
+  return path.join(app.getPath("userData"), "debug");
+}
+
 ipcMain.handle("save-debug-audio", async (event, arrayBuffer, mimeType, subdir, filename) => {
   try {
     let extension, filePath;
+    const BASE_DEBUG_DIR = debugAudioDir();
     if (subdir && filename) {
-      // New style: save to /tmp/unhush-debug/{subdir}/{filename}
       // Validate that both subdir and filename stay within the debug root (prevent path traversal)
-      const BASE_DEBUG_DIR = "/tmp/unhush-debug";
       const debugDir = path.resolve(path.join(BASE_DEBUG_DIR, subdir));
       if (!debugDir.startsWith(BASE_DEBUG_DIR + path.sep) && debugDir !== BASE_DEBUG_DIR)
         throw new Error("Path traversal attempt in subdir");
-      fs.mkdirSync(debugDir, { recursive: true });
+      fs.mkdirSync(debugDir, { recursive: true, mode: 0o700 });
       filePath = path.join(debugDir, path.basename(filename)); // basename prevents traversal via filename
     } else {
       // Legacy style: auto-generate filename from timestamp
       extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
       const now = new Date();
       const timestamp = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1).replace(/[:.]/g, "-");
-      const debugDir = "/tmp/unhush-debug";
-      fs.mkdirSync(debugDir, { recursive: true });
-      filePath = path.join(debugDir, `recording-${timestamp}.${extension}`);
+      fs.mkdirSync(BASE_DEBUG_DIR, { recursive: true, mode: 0o700 });
+      filePath = path.join(BASE_DEBUG_DIR, `recording-${timestamp}.${extension}`);
     }
-    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    fs.writeFileSync(filePath, Buffer.from(arrayBuffer), { mode: 0o600 });
     return filePath;
   } catch (err) {
     console.error("Failed to save debug audio:", err);
@@ -735,9 +1123,31 @@ app.on("window-all-closed", () => {
   // Keep app running in tray
 });
 
+// Teardown steps are independent: a throw in one must not skip the rest. Quitting mid-recording
+// was doing exactly that -- the shutdown line appeared but the command fifo survived, and on a
+// machine where we spawned ydotoold it would have been orphaned holding a uinput keyboard. The
+// label tells us which step failed rather than leaving it to be inferred.
+function tryTeardown(label, fn) {
+  const t0 = Date.now();
+  try { fn(); } catch (e) { log("warn", `teardown step "${label}" failed: ${e.message}`); }
+  log("debug", `teardown: ${label} (${Date.now() - t0}ms)`);
+}
+
 app.on("will-quit", () => {
-  audioDucking.restoreSyncForQuit();
-  globalShortcut.unregisterAll();
+  // First thing, so the shutdown is on record even if a teardown step below throws.
+  // Skipped for the second instance, which quits immediately and never really started.
+  if (gotTheLock) log("info", `=== Unhush shutting down after ${uptimeString(Date.now() - startedAt)} ===`);
+  tryTeardown("audio ducking", () => audioDucking.restoreSyncForQuit());
+  tryTeardown("global shortcuts", () => globalShortcut.unregisterAll());
+  // Closes the D-Bus connection and cancels any pending rebind, so quitting can't be chased by a
+  // retry. The binding itself survives in the desktop's settings -- the portal has no unbind.
+  tryTeardown("portal shortcuts", () => waylandShortcut.stopPortal());
+  // Our ydotoold must not outlive us — it holds an open /dev/uinput virtual keyboard.
+  // No-op if we adopted someone else's daemon rather than starting one.
+  tryTeardown("ydotoold", () => ydotool.stopDaemon());
+  // Leaving the pipe behind would make `unhush-toggle` block on a fifo with no reader.
+  tryTeardown("command fifo", () => commandFifo.stop());
+  log("debug", "teardown: complete");
   // Chromium doesn't reliably remove its Mojo IPC channel files from userData.
   // Only the main instance cleans up — the second instance must not touch files
   // that the main instance may still be using.
@@ -752,9 +1162,17 @@ app.on("will-quit", () => {
   }
 });
 
-process.on("SIGINT", () => {
-  app.quit();
-});
+// Chromium's browser process installs its own SIGINT/SIGTERM handling and shuts down cleanly
+// through "will-quit" on both, ahead of node's listeners -- measured, by sending each signal to
+// the main pid alone and finding the shutdown line present but the one below absent. These stay
+// only as a fallback for a signal arriving before that machinery is up (e.g. during module
+// load), and the log line is how we would find out that ever happens.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    log("info", `received ${sig} — quitting`);
+    app.quit();
+  });
+}
 
 app.on("before-quit", () => {
   if (tray) {

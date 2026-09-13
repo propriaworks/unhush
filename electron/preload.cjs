@@ -17,12 +17,34 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
 
+  // Setup dialog (electron/setup-dialog.html) — see electron/ydotool.cjs, waylandShortcut.cjs,
+  // and providerSetup.cjs, whose results setupPreflight() in main.cjs combines into one list.
+  setupPreflight: () => ipcRenderer.invoke("setup-preflight"),
+  // outputMethod, when given, is the mode Settings should select on arrival (see
+  // "Use Clipboard mode instead"): the renderer owns that setting, so it does the write.
+  openSettings: (tab, outputMethod) =>
+    ipcRenderer.invoke("open-settings-window", tab, outputMethod),
+  closeSetupDialog: () => ipcRenderer.send("close-setup-dialog"),
+  setSetupDialogMuted: (muted) => ipcRenderer.send("set-setup-dialog-muted", muted),
+  onSetupResult: (callback) => ipcRenderer.on("setup-result", callback),
+
   // Settings
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   onNavigateTab: (callback) => ipcRenderer.on("navigate-tab", callback),
+  onSetOutputMethodUiSetting: (callback) => ipcRenderer.on("set-output-method-ui-setting", callback),
   updateShortcut: (shortcut) => ipcRenderer.invoke("update-shortcut", shortcut),
-  getShortcutMode: () => ipcRenderer.invoke("get-shortcut-mode"),
+  // How the global shortcut is managed here, plus the command a desktop-environment shortcut
+  // should run (see electron/waylandShortcut.cjs and electron/commandFifo.cjs).
+  getShortcutInfo: () => ipcRenderer.invoke("get-shortcut-info"),
+  configureShortcut: () => ipcRenderer.invoke("configure-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
+  setOutputMethod: (method) => ipcRenderer.send("set-output-method", method),
+  // "Start at login" (systemd --user unit; unsupported on AppImage/dev -- see get-autostart-status)
+  getAutostartStatus: () => ipcRenderer.invoke("get-autostart-status"),
+  setAutostart: (enabled) => ipcRenderer.invoke("set-autostart", enabled),
+  // Transcription/formatter provider status, for the setup window's provider cards (referral
+  // only -- see providerSetup.cjs). Never carries an API key, only provider name + reasonKey.
+  setProviderStatus: (status) => ipcRenderer.send("set-provider-status", status),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

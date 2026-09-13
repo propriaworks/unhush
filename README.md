@@ -20,7 +20,7 @@ Unhush provides seamless speech-to-text using AI transcription, allowing you to 
 - **Multilingual** - Supports 99+ languages with automatic detection
 - **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
-- **Wayland & X11 Support** - Works on both display servers
+- **Wayland & X11 Support** - Works on both display servers (Wayland more require [more setup](#wayland-setup))
 - **Privacy First** - Records locally before sending to API. Both the transcription and formatting endpoints can be local for *total privacy* — see [Using Local Models](docs/local-models.md)
 - **Auto-start & Warm-up** - Unhush can start local servers automatically on first use and pre-load models into GPU memory to reduce first-request latency
 - **Attenuate Background Audio** - Optionally lowers other apps' volume while recording (with a smooth ramp, not an abrupt cut), so ambient music or notifications don't compete with your voice
@@ -70,7 +70,7 @@ Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcri
 
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
-`ydotool` needs write access to `/dev/uinput`. At startup, Unhush will show a one-time dialog with setup instructions if it isn't already accessible.
+`ydotool` needs write access to `/dev/uinput`. At startup Unhush checks for everything it needs to paste — the `ydotool` binary, `/dev/uinput` access, and the `ydotoold` daemon — and if anything is missing it opens a setup window naming the specific problem, with the commands to fix it and a **Re-check** button. Since AppImage installs run no post-install script, this is where you'll be told what to do.
 
 On X11 sessions, also install `xprop` if you want the tray's "sent ➜ \<app\>" indicator (package name varies by distro — see [Requirements](#requirements)); it's optional and everything else works fine without it.
 </details>
@@ -89,16 +89,26 @@ pnpm install
 # Run in development mode
 pnpm run electron:dev
 ```
-
-### Running `ydotoold` as a service (optional, recommended)
-
-Using the `ydotoold` daemon improves responsiveness and avoids the small startup delay on each dictation. If your package manager doesn't provide a service config (Ubuntu's doesn't), get the `systemd` config [here](https://github.com/ReimuNotMoe/ydotool/raw/refs/heads/master/Daemon/systemd/ydotoold.service.in). Save it as `$HOME/.config/systemd/user/ydotoold.service`, edit `ExecStart` to point to `which ydotoold`, then run once:
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable --now ydotoold
-```
 </details>
+
+### The `ydotoold` daemon
+
+Nothing to do — Unhush handles this. ydotool 1.x is only a client: it forwards keystrokes over a
+unix socket to the `ydotoold` daemon, which is what actually holds `/dev/uinput` open. At startup
+Unhush looks for a daemon it can use and, finding none, starts its own as a child process on a
+socket private to Unhush (`$XDG_RUNTIME_DIR/unhush-ydotool.sock`). It exits with the app.
+
+If a ydotoold is already running on ydotool's default socket — because you started one yourself,
+or enabled Debian's or Arch's `ydotool.service` — Unhush adopts that one instead of starting a
+second.
+
+Two distro notes:
+- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes
+  `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
+- As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does
+  not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds
+  `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in
+  `/run/user/<uid>/` and finds nothing. Leave it disabled.
 
 ## Usage
 
@@ -150,30 +160,63 @@ The change takes effect on the next recording — no restart needed.
 
 - A **⚠ badge** appears on the tray icon for transcription failures, missing settings (API key, custom URL/model), or repeated LLM warm-up failures. Hover the icon or open the menu for details; each cause clears independently, and the badge itself clears once none remain.
 
-## Wayland Setup
+### Wayland Setup
 
-Global shortcut handling on X11 works seemlessly. On Wayland it depends on your desktop environment.
+On a Wayland session Unhush runs itself under **XWayland**. Using native Wayland would interfere with core features, such as being able to write seemlessly to the clipboard, put the recording indicator above other windows and place it at the bottom of the screen. But the use of XWayland should be transparent to users, with one exception: if your primary display uses fractional dpi scaling (like 125%), Unhush may appear slightly blurry.
+
+The global shortcut still works:  it through the **XDG GlobalShortcuts
+portal** over D-Bus, which is independent of XWayland. On first run Unhush asks the desktop to assign it the shortcut `Ctrl+Alt+Space`, with your permission (modifiable at that time or later, see below) so as to toggle dictation.
 
 <details>
-<summary>Wayland Shortcut Setup</summary>
+<summary>Changing the shortcut on Wayland</summary>
 
-| Desktop | Behaviour |
-|---|---|
-| **KDE Plasma** | Works automatically via the XDG GlobalShortcuts portal. On first launch, KDE shows a dialog to confirm the shortcut binding. |
-| **GNOME 48+** (Ubuntu 25.04+, Fedora 42+) | Works automatically via the portal, same as KDE. |
-| **GNOME < 48** (Ubuntu 24.04 LTS) | On first launch, Unhush automatically configures a desktop keyboard shortcut via `gsettings`. |
-| **Other compositors** (Sway, Hyprland, etc.) | On first launch, Unhush shows a one-time dialog with instructions to manually add a custom shortcut using your compositor's config. |
+The key belongs to your desktop environment, not to Unhush — Unhush can only make a suggestion when it first registers, and after that only your desktop can change it. **Settings → Usability** shows the key
+that is live and a **Change shortcut…** button, which opens your desktop's own shortcut editor
+focused on Unhush's entry. Add whichever key you prefer there; on KDE you can also untick the
+default one, so just your own (added) key keeps working.
 
-### Manual shortcut setup
+Two things worth knowing:
 
-**Note**: Running Unhush again while it's already running will ***toggle** recording*. This is what the keyboard shortcut calls — no matter how Unhush was installed, the shortcut just runs `unhush` (or the AppImage path) again.
+- The entry stays in your desktop's shortcut settings after uninstalling Unhush. The portal has no
+  way to remove a binding — delete the Unhush entry by hand if you want it gone.
+- If you untick *every* key for Unhush, the shortcut is registered but can't fire. Settings says so
+  rather than showing a key that does nothing.
 
-If you need to configure the shortcut yourself, add a custom keyboard shortcut in your Desktop Evironment's settings with the command:
-
-- **Package install**: `unhush`
-- **AppImage**: `/path/to/Unhush.AppImage` (add `--no-sandbox` if Unhush fails to start)
-- **Development**: `pnpm run -C /path/to/unhushrepo electron:dev`
 </details>
+
+<details>
+<summary>If your compositor has no GlobalShortcuts portal</summary>
+
+The portal's GlobalShortcuts interface is implemented by KDE Plasma, GNOME and Hyprland. The
+wlroots-based compositors (sway, river, Wayfire) don't have it, so there Unhush cannot register
+anything and you bind the key yourself, to:
+
+```
+unhush-toggle
+```
+
+That helper is installed by the deb/rpm/pacman packages. It toggles recording on/off, or, if Unhush
+isn't running, starts it. On an **AppImage** or custom build, there's no installer to place the
+helper, so use the [command it wraps instead](#the-command-pipe) — Unhush shows the exact line to use
+in **Settings → Usability**, and in the setup window on first run.
+
+Where to add it: your compositor's config file (`~/.config/sway/config` and friends), or the
+"custom shortcuts" page of whatever settings app your desktop provides.
+
+</details>
+
+### The command pipe
+
+Unhush listens on a named pipe at `$XDG_RUNTIME_DIR/unhush.fifo` on every session type, X11
+included. Anything that can write a line can drive it:
+
+```sh
+printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"
+```
+
+This is useful beyond Wayland — it lets you bind a key the Settings dropdown doesn't offer, or start
+and stop dictation from a script. The pipe is created mode 0600 inside your own runtime directory,
+and is removed when Unhush exits.
 
 ## Auto-starting Unhush
 
@@ -182,25 +225,40 @@ If you need to configure the shortcut yourself, add a custom keyboard shortcut i
 
 This can be done in several ways, depending partly upon how you installed:
 
+- **Package install — Settings toggle** (recommended): open **Settings → Usability** and turn on
+  **Start at login**. The package ships a systemd `--user` unit (disabled by default); this just
+  enables it.
+
 - **Package install — XDG autostart** (works on GNOME, KDE, XFCE, and most DEs):
   ```bash
   mkdir -p ~/.config/autostart
-  cp /usr/share/applications/unhush.desktop ~/.config/autostart/
+  cp /usr/share/applications/com.propriaworks.unhush.desktop ~/.config/autostart/
   ```
 
-- **Package install — Desktop Environment settings**:
+- **Desktop Environment settings**:
   - **GNOME**: open **Settings → Apps → Startup Applications** and add Unhush
   - **KDE Plasma**: open **System Settings → Autostart** and add `/usr/local/bin/unhush`
   - **Other**: most have an Autostart or Session Startup settings configuration; add Unhush as `/usr/local/bin/unhush`
 
-- **Package install — systemd user service**:
+- **AppImage**: no installer, so no systemd service is provided — use the Desktop Environment approach,
+  or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command.
+  Service unit notes:
+  - `--no-sandbox` is AppImage-specific: Chromium's sandbox helper needs to be root-owned with the setuid bit, but an
+    AppImage extracts to a FUSE mount owned by you, so the bit can never take effect there.
+  - Plain `Type=simple` (the default) is fine here — there is only ever one process for the app's
+    whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
+  - `--ozone-platform=x11` picks XWayland on a Wayland session (Chromium needs this on the real
+    command line) and is a no-op on X11, so it's safe to include unconditionally. Leaving it off
+    also works — Unhush falls back to re-execing itself in place (same PID) if it's missing.
+  - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
   [Unit]
   Description=Unhush Voice Dictation
 
   [Service]
-  ExecStart=/usr/local/bin/unhush
+  KillMode=mixed
+  ExecStart=/path/to/Unhush.AppImage --no-sandbox --ozone-platform=x11
   Restart=on-failure
 
   [Install]
@@ -208,8 +266,6 @@ This can be done in several ways, depending partly upon how you installed:
   EOF
   systemctl --user enable --now unhush
   ```
-
-- **AppImage**: use Desktop Environment or systemd approaches, substituting `/path/to/Unhush.AppImage` as the command (add `--no-sandbox` if Unhush fails to start).
 </details>
 
 ## Detailed Configuration
@@ -247,7 +303,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
 | Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
-| Shortcut | Usability tab | Global hotkey |
+| Shortcut | Usability tab | Global hotkey. On X11 pick it from the list; on Wayland the tab shows the key your desktop holds, with a button to change it |
 | Chimes | Usability tab | Play a short chime when recording starts and stops: `On` (default) or `Off` |
 | Attenuate other audio | Usability tab | Lowers other apps' volume while recording, then ramps back up when you stop: `Off`, `40%`, `60%`, or `Mute` (default `40%`). Your own start/stop chimes are never attenuated. Requires PulseAudio or PipeWire (i.e. virtually all Linux desktops) |
 | Keep microphone warm | Usability tab | Keeps the microphone open between recordings so the next one starts instantly: `On` or `Off` (default). Useful for microphones that are slow to wake from power saving (common with USB webcam mics). While on, your system's microphone-in-use indicator stays lit, though audio isn't processed or saved except while transcribing |
@@ -257,6 +313,11 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | API Key | Formatting tab (Custom) | Optional bearer token |
 | Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
+
+**Resetting everything.** Settings (including your API keys) live in a Chromium LevelDB store, not
+in an editable file, so there's nothing to hand-edit — to wipe them, quit Unhush and run
+`rm -rf ~/.config/unhush`. Uninstalling the package deliberately leaves that directory alone, so
+this is also how you purge your data afterwards (also including logs and debug info).
 
 </details>
 
@@ -274,7 +335,7 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `debug_audio` | Save each recording's audio segments and transcripts to `/tmp/unhush-debug/` for inspection | `false` |
+| `debug_audio` | Save each recording's audio segments and transcripts to `~/.config/unhush/debug/` for inspection. Be aware these may build up over time if set to true. | `false` |
 | `debug_logging` | Include "debug"-level messages in `~/.config/unhush/logs/unhush.log` (normally suppressed, since nothing currently filters log levels otherwise — see [Troubleshooting](#troubleshooting)) | `false` |
 | `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
 | `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
@@ -297,25 +358,40 @@ Unhush logs to `~/.config/unhush/logs/unhush.log` (Linux). When something goes w
 
 If you're using **Paste** (default) or **Type** output mode, Unhush depends on ydotool. Switch to **Clipboard** mode in Settings to eliminate this dependency entirely (you will need to paste the result yourself).
 
-- Test manually: `ydotool type "hello"` — the word should appear in your terminal
+Unhush diagnoses this itself: it checks the paste path at startup and opens a setup window naming
+whatever is broken, with the commands to fix it and a **Re-check** button. If you dismissed that
+window with "Don't show again", delete `~/.config/unhush/.setup-dialog-muted` to get it back.
+The checks it runs, if you'd rather do them by hand:
+
+- Test manually: `YDOTOOL_SOCKET=$XDG_RUNTIME_DIR/unhush-ydotool.sock ydotool type "hello"` — the word should appear in your terminal
 - Ensure ydotool is installed (`.deb`/`.rpm`/`.pacman` installs it automatically; AppImage users need to install it manually)
-- Ensure the daemon (`ydotoold`) is running — running it as a user systemd service is recommended (see [Install ydotool](#install-ydotool-appimage-only))
-- **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users will see a one-time setup dialog on first use; follow the instructions shown, or run:
+- Ensure the daemon runs. Unhush starts its own `ydotoold` and stops it on exit, so check while Unhush is running: `ydotool debug` exits 0 when it can reach a daemon. See [The `ydotoold` daemon](#the-ydotoold-daemon) — in particular, do **not** expect Fedora's packaged `ydotool.service` to help.
+- **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users need to do it themselves:
   ```bash
   echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
     | sudo tee /etc/udev/rules.d/80-uinput.rules
   sudo udevadm control --reload-rules && sudo udevadm trigger
   ```
-  In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>`.
+  If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
+
+  In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>` — but note that a running process can't pick up new group membership, so log out and back in afterwards.
 </details>
 
 <details>
 <summary>Global shortcut not working on Wayland</summary>
 
-- **KDE / GNOME 48+**: On first launch, a system dialog should appear asking you to confirm the shortcut. If you dismissed it, restart Unhush to re-trigger it.
-- **GNOME < 48**: Unhush configures this automatically on first launch. If it failed, set it up manually in GNOME Settings → Keyboard → Custom Shortcuts (see [Manual shortcut setup](#manual-shortcut-setup)).
-- **Other compositors**: Add a custom shortcut in your compositor config that runs `unhush` (or the AppImage path).
-- Running `unhush` again from the command line always toggles recording regardless of how shortcuts are configured.
+On Wayland the key binding is controlled by your desktop environment, not Unhush. See
+[Wayland Setup](#wayland-setup).
+
+- **Settings → Usability** says which mechanism is in play: a key with a **Change shortcut…** button
+  means your desktop holds the binding; a command with no key means it couldn't, and you have to bind
+  one yourself.
+- Check your desktop's shortcut settings for an Unhush entry, and that at least one key for it is
+  ticked — unticking them all leaves it registered but silent.
+- If you bound the key yourself, check it runs `unhush-toggle` (or, for an AppImage, the command shown in **Settings → Usability**).
+- Test the pipe directly: `printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"` while Unhush is
+  running should start or stop recording. If that works but your key doesn't, the problem is the desktop shortcut, not Unhush.
+- If the pipe doesn't exist, check the log for `command fifo listening` (`~/.config/unhush/logs/`).
 </details>
 
 <details>
@@ -399,7 +475,7 @@ Enable debug audio to capture each recording session in detail:
 { "debug_audio": "true" }
 ```
 
-Then after each recording, Unhush writes to `/tmp/unhush-debug/<timestamp>/`:
+Then after each recording, Unhush writes to `~/.config/unhush/debug/<timestamp>/`:
 
 | File | Contents |
 |------|----------|
@@ -418,20 +494,21 @@ A diagram of the recording, processing, chunking, postprocessing pipeline workfl
 
 ### Testing
 
-Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10), particularly with respect to the hotkey functionality, and with respect to the paste-destination tray indicator on Sway, Hyprland, and GNOME Wayland (with the Focused Window D-Bus extension installed) — none of these could be tested on the machine this was developed on. KDE Plasma Wayland support for this indicator isn't implemented yet.
+Some aspects of Wayland and many Linux distributions have not been tested directly. Please share your experiences in the [discussions](https://github.com/propriaworks/unhush/discussions/10).
+
+Most Wayland testing has been on KDE. Your experience with GNOME and Hyprland on Wayland is particularly interesting, especially whether the shortcut registers through their portals as it does on KDE (the manual `unhush-toggle` command works regardless), and the paste-destination tray indicator on Sway, Hyprland, and GNOME Wayland with the Focused Window D-Bus extension installed. KDE Plasma Wayland support for that indicator isn't implemented yet.
 
 
 <details>
 <summary>Developer notes</summary>
 
-Run `pnpm install` to install dependencies.
-`pnpm up --latest` updates dependencies to their latest versions.
+Run `pnpm install` to install dependencies, or update them based upon a changed `package.json` (changes to lockfile are limited to what's needed to match `package.json`). `pnpm update` will also change the `package.json`, bumping versions to the newest matching versions (subject to minimum age from the workspace file). `pnpm up --latest -i` updates dependencies in `packages.json` to their latest major versions; do rarely, in interactive mode to avoid disruptive upgrades and aptknow what needs to be tested/changed.
 
-Before committing check typescript with `pnpm tsc` .
+Before committing check typescript with `pnpm tsc` and run tests with `pnpm test`.
 
 ### Fixing OSV-flagged subdependencies
 
-The flagged package is often transitive (e.g. `esbuild`, pulled in by `vite`), so bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it, then `pnpm add -D <package>@<fixed-version>` to pin it directly, then `pnpm why <package>` again to confirm it deduped to one version.
+Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version.
 
 ### Building
 

@@ -12,6 +12,10 @@ function RecordingBar() {
   const [error, setError] = useState<string | null>(null);
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
+  // Mirrors isTranscribing for the start guard below. A ref, not the state value: a toggle
+  // arriving microseconds after the stop that set it must see it, and state isn't readable
+  // by an already-created callback until React has re-rendered.
+  const isTranscribingRef = useRef(false);
   const llmFallbackStreak = useRef(0);   // consecutive "custom LLM warm-up not ready" fallbacks
   const lastRelevantConfigRef = useRef(""); // snapshot of provider-config fields as of the last check
 
@@ -61,6 +65,19 @@ function RecordingBar() {
     const lError = llmConfig && validateLLMConfig(llmConfig);
     window.electronAPI?.setFormatterWarning("config", lError?.reasonKey === "config");
     window.electronAPI?.setFormatterWarning("badurl", lError?.reasonKey === "badurl");
+
+    // Drives the first-run setup window's provider cards (referral only -- see
+    // electron/providerSetup.cjs). Reuses the same validation just run above; never an API key.
+    window.electronAPI?.setProviderStatus({
+      transcription: {
+        provider: (localStorage.getItem("unhush_provider") || "groq") as ProviderStatus["transcription"]["provider"],
+        reason: tError?.reasonKey ?? null,
+      },
+      formatter: {
+        provider: llmConfig?.provider ?? "none",
+        reason: lError?.reasonKey ?? null,
+      },
+    });
   }, []);
 
   // Whenever Settings closes, it may have just fixed or broken a required field, or
@@ -108,6 +125,7 @@ function RecordingBar() {
       window.electronAPI.setRecordingState(false);
     }
 
+    isTranscribingRef.current = true;
     setIsTranscribing(true);
 
     try {
@@ -148,8 +166,10 @@ function RecordingBar() {
           if (llmResult !== undefined) {
             llmLatencyMs = llmResult.latencyMs;
             if (llmOutput!.length > Math.max(transcript.length * llmConfig.lengthMultiplier, transcript.length + llmConfig.lengthFloor)) {
+              // Print lengths only in main log to protect privacy.
               window.electronAPI.log("warn",
-                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding. LLM output: ${llmOutput}`);
+                `LLM output (${llmOutput!.length} chars) exceeds length limit vs input (${transcript.length} chars) — discarding${
+                  localStorage.getItem("unhush_debug_audio") === "true" ? " (full text in llm-pass.json)" : ""}`);
               llmStatus = "rejected_over_length";
             } else {
               llmStatus = "ok";
@@ -203,11 +223,32 @@ function RecordingBar() {
         }
       }, 4000);
     } finally {
+      isTranscribingRef.current = false;
       setIsTranscribing(false);
     }
   }, [stopRecording]);
 
   const handleStartRecording = useCallback(async () => {
+    // A toggle landing while the previous transcript is still being produced must not open a
+    // second recording. It looked harmless -- the pill stays in its "working" phase, because
+    // that's what isTranscribing renders -- but the mic really did reopen, the start chime
+    // really did sound, and the stop path then hid the window on top of a live recording that
+    // nothing was left to stop. There is nothing to start into here (the transcript isn't out
+    // yet), so decline, and undo the main process's optimistic isRecording flip: toggleRecording()
+    // set it before sending, and without this the tray would sit in its recording state and the
+    // ducked audio stay ducked until the next toggle.
+    if (isTranscribingRef.current) {
+      window.electronAPI?.setRecordingState(false);
+      window.electronAPI?.log("info", "start-recording ignored: still transcribing the previous recording");
+      return;
+    }
+    if (isStartingRef.current) {
+      // A start while a start is still in flight: a stop-then-start pair pressed faster than the
+      // mic could open. The in-flight startRecording() will deliver the recording the user ended
+      // up asking for, so cancel the stop it deferred rather than opening a second one on top.
+      deferredStopRef.current = false;
+      return;
+    }
     deferredStopRef.current = false;
     isStartingRef.current = true;
     try {
@@ -251,20 +292,33 @@ function RecordingBar() {
         handleStopRecording();
       });
 
-      const savedShortcut =
-        localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space";
-      window.electronAPI.updateShortcut(savedShortcut);
-
-      window.electronAPI.setDuckingConfig({
-        amount: parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10),
-      });
-
       return () => {
         window.electronAPI.removeAllListeners("start-recording");
         window.electronAPI.removeAllListeners("stop-recording");
       };
     }
   }, [handleStartRecording, handleStopRecording]);
+
+  // One-shot startup handoff to the main process. Deliberately kept out of the effect above, whose
+  // dependencies chain back to isRecording (handleStartRecording -> startRecording), so it re-ran
+  // on every recording start and stop. Re-registering the global shortcut mid-session is what
+  // broke the second press of a toggle on Wayland, where Chromium responds to a changed command
+  // set by tearing down and recreating its portal D-Bus session.
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    window.electronAPI.updateShortcut(
+      localStorage.getItem("unhush_shortcut") || "Ctrl+Alt+Space"
+    );
+    window.electronAPI.setDuckingConfig({
+      amount: parseInt(localStorage.getItem("unhush_ducking_amount") ?? "40", 10),
+    });
+    // The main process can't read localStorage, and its first-run setup check needs to know
+    // whether the ydotool paste path is even in use before it decides whether to nag about it.
+    window.electronAPI.setOutputMethod(
+      (localStorage.getItem("unhush_output_method") as OutputMethod) || "paste"
+    );
+  }, []);
 
   const renderContent = () => {
     if (error) {

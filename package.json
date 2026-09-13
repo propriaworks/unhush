@@ -27,21 +27,20 @@
   "devDependencies": {
     "@ricky0123/vad-web": "^0.0.30",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.4.1",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
-    "electron": "43.0.0",
+    "electron": "~43.0.0",
     "electron-builder": "^26.15.3",
-    "esbuild": "0.28.2",
     "jsdom": "^29.1.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2",
-    "vitest": "^4.1.9",
+    "vite": "^8.3.0",
+    "vitest": "^4.1.11",
     "wait-on": "^9.1.0"
   },
   "desktopName": "com.propriaworks.unhush",
@@ -80,6 +79,10 @@
     "pacman": {
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
+      "fpm": [
+        "--after-upgrade",
+        "scripts/postinstall.sh"
+      ],
       "depends": [
         "ydotool"
       ]

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Unhush Setup</title>
+    <style>
+      /* Deliberately self-contained: this window is loaded straight off disk with loadFile(),
+         so it must not depend on the Vite build or on any network font. */
+      :root {
+        --bg: #ffffff; --fg: #1a1a1a; --muted: #5c5c5c;
+        --card: #f4f4f5; --border: #d8d8dc; --accent: #2563eb; --ok: #15803d;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1c1e; --fg: #ececee; --muted: #a0a0a8;
+          --card: #262629; --border: #3a3a3f; --accent: #60a5fa; --ok: #4ade80;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 20px 22px; background: var(--bg); color: var(--fg);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 19px; margin: 0 0 8px; }
+      .intro { margin: 0 0 10px; }
+      .alt {
+        color: var(--muted); margin: 0 0 18px; padding-left: 12px;
+        border-left: 2px solid var(--border);
+      }
+      .problem { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; background: var(--card); }
+      .problem h2 { font-size: 14px; margin: 0 0 6px; }
+      .problem p { margin: 0 0 10px; color: var(--muted); }
+      /* Must out-specify `.problem p` above, which would otherwise win and zero the top margin. */
+      .problem p.note { font-size: 12.5px; margin: 18px 0 0; color: var(--muted); }
+      pre {
+        margin: 0; padding: 10px 12px; border-radius: 6px; overflow-x: auto;
+        background: var(--bg); border: 1px solid var(--border);
+        font: 12.5px/1.6 ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
+        user-select: text; white-space: pre-wrap; word-break: break-all;
+      }
+      .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+      button {
+        font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+        border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .copied { color: var(--ok); font-size: 12.5px; }
+      /* Same span, failure case -- readable on both the light and dark palettes above. */
+      .copied.bad { color: #e05252; }
+      .row.links { flex-wrap: wrap; }
+      .row.links a { color: var(--accent); font-size: 12.5px; text-decoration: none; }
+      .row.links a:hover { text-decoration: underline; }
+      .footer { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+      .footer .spacer { flex: 1; }
+      label.dontshow { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12.5px; }
+      #status { margin: 0 0 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); }
+      #status.ok { color: var(--ok); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to Unhush</h1>
+    <p class="intro" id="intro-paste" hidden>
+      Unhush can type your dictation straight into whatever application you're using, but that
+      needs a one-time setup step on this system. Run the commands below in a terminal, then
+      click <strong>Re-check</strong> — no restart needed.
+    </p>
+    <p class="intro" id="intro-shortcut" hidden>
+      Unhush needs one setup step on this system before its keyboard shortcut will work.
+    </p>
+    <p class="intro" id="intro-provider" hidden>
+      Unhush needs a transcription provider configured before it can turn your voice into text.
+      This window can't set that up for you — open Settings from the card below.
+    </p>
+    <p class="alt" hidden>
+      This is optional. <strong>Clipboard mode</strong> needs no setup at all: Unhush puts each
+      transcript on your clipboard and you paste it yourself with Ctrl+V. You can switch modes at
+      any time in Settings.
+    </p>
+
+    <div id="status" hidden></div>
+    <div id="problems"></div>
+
+    <div class="footer">
+      <button id="recheck" class="primary">Re-check</button>
+      <button id="settings">Use Clipboard mode instead</button>
+      <span class="spacer"></span>
+      <label class="dontshow"><input type="checkbox" id="dontshow" /> Don't show again</label>
+      <button id="close">Close</button>
+    </div>
+
+    <script>
+      const api = window.electronAPI;
+      const problemsEl = document.getElementById("problems");
+      const statusEl = document.getElementById("status");
+
+      const introPasteEl = document.getElementById("intro-paste");
+      const introShortcutEl = document.getElementById("intro-shortcut");
+      const introProviderEl = document.getElementById("intro-provider");
+      const altEl = document.querySelector(".alt");
+      const settingsBtn = document.getElementById("settings");
+      const recheckBtn = document.getElementById("recheck");
+
+      function render(result) {
+        problemsEl.replaceChildren();
+        statusEl.hidden = true;
+        statusEl.className = "";
+        // Three problem kinds need different framing: ydotool ones are terminal commands that
+        // Re-check can verify, and that Clipboard mode genuinely avoids; the shortcut one is a
+        // command to paste into a desktop settings dialog, which Clipboard mode does nothing
+        // about; provider ones are referred to Settings (see providerSetup.cjs) and, like ydotool,
+        // can change answer on Re-check once fixed there.
+        const needsPasteSetup = result.problems.some((p) => p.kind === "ydotool");
+        const hasShortcut = result.problems.some((p) => p.kind === "shortcut");
+        const hasProvider = result.problems.some((p) => p.kind === "provider");
+        introPasteEl.hidden = result.ok || !needsPasteSetup;
+        introShortcutEl.hidden = result.ok || needsPasteSetup || !hasShortcut;
+        introProviderEl.hidden = result.ok || !hasProvider;
+        altEl.hidden = result.ok || !needsPasteSetup;
+        settingsBtn.hidden = result.ok || !needsPasteSetup;
+        // Re-check can change the answer for ydotool and provider problems (terminal commands run,
+        // or Settings fixed) but never for a shortcut-only result -- nothing here can detect a
+        // binding made in the desktop's own editor, so it would report the same thing forever,
+        // which reads as a broken button. Close is enough there.
+        recheckBtn.hidden = !result.ok && !needsPasteSetup && !hasProvider;
+
+        if (result.ok) {
+          statusEl.hidden = false;
+          statusEl.className = "ok";
+          statusEl.textContent = "All set — Unhush is ready to go.";
+          return;
+        }
+
+        for (const p of result.problems) {
+          const card = document.createElement("div");
+          card.className = "problem";
+
+          const h = document.createElement("h2");
+          h.textContent = p.title;
+          card.append(h);
+
+          const d = document.createElement("p");
+          d.textContent = p.detail;
+          card.append(d);
+
+          // Provider cards have nothing to copy into a terminal -- they only carry actions/links.
+          if (p.commands) {
+            const pre = document.createElement("pre");
+            const text = p.commands.join("\n");
+            pre.textContent = text;
+            card.append(pre);
+
+            const row = document.createElement("div");
+            row.className = "row";
+            const btn = document.createElement("button");
+            btn.textContent = "Copy";
+            const flash = document.createElement("span");
+            flash.className = "copied";
+            // Holds the timer so a rapid second click doesn't have its "Copied ✓" cleared early by
+            // the first click's still-pending timeout.
+            let flashTimer;
+            const showFlash = (text, ms, bad) => {
+              clearTimeout(flashTimer);
+              flash.textContent = text;
+              flash.className = bad ? "copied bad" : "copied";
+              flashTimer = setTimeout(() => { flash.textContent = ""; }, ms);
+            };
+            // The whole point of this window: copying must not dismiss it, and must confirm.
+            btn.addEventListener("click", async () => {
+              await api.copyToClipboard(text);
+              showFlash("Copied ✓", 2000);
+            });
+            row.append(btn);
+
+            // No "open shortcut settings" button here: this card only appears when the desktop has
+            // no GlobalShortcuts portal, and that is also what would have opened its editor. The
+            // remaining desktops in that position (sway, river, Wayfire) have no shortcut GUI at
+            // all -- their keys live in a config file -- so the note tells the user where to look.
+
+            row.append(flash);
+            card.append(row);
+          }
+
+          // Referral only (see providerSetup.cjs): this window never edits provider settings
+          // itself, it only opens Settings at the right tab. Nothing further to do on click --
+          // the window refreshes itself when Settings closes (see main.cjs's
+          // set-provider-status handler), same as Re-check does for the other card kinds.
+          if (p.actions) {
+            const row = document.createElement("div");
+            row.className = "row actions";
+            for (const a of p.actions) {
+              const btn = document.createElement("button");
+              btn.className = "primary";
+              btn.textContent = a.label;
+              btn.addEventListener("click", () => api.openSettings(a.tab));
+              row.append(btn);
+            }
+            card.append(row);
+          }
+
+          if (p.links) {
+            const row = document.createElement("div");
+            row.className = "row links";
+            for (const l of p.links) {
+              const a = document.createElement("a");
+              a.href = l.url;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = l.label;
+              row.append(a);
+            }
+            card.append(row);
+          }
+
+          if (p.note) {
+            const n = document.createElement("p");
+            n.className = "note";
+            n.textContent = p.note;
+            card.append(n);
+          }
+          problemsEl.append(card);
+        }
+      }
+
+      recheckBtn.addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "Checking…";
+        try {
+          render(await api.setupPreflight());
+        } finally {
+          e.target.disabled = false;
+          e.target.textContent = "Re-check";
+        }
+      });
+      // Actually switches the mode, rather than only pointing at the control that does: the
+      // renderer owns that setting, so Settings performs the write when it opens. Then re-check,
+      // so this window turns into the "All set" banner instead of leaving the ydotool instructions
+      // the user just opted out of on screen. Safe to do immediately: the main process records the
+      // requested mode before resolving, so the preflight already skips the ydotool checks.
+      settingsBtn.addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+          await api.openSettings("usability", "clipboard");
+          render(await api.setupPreflight());
+        } finally {
+          e.target.disabled = false;
+        }
+      });
+      document.getElementById("close").addEventListener("click", () => api.closeSetupDialog());
+      document.getElementById("dontshow").addEventListener("change", (e) => api.setSetupDialogMuted(e.target.checked));
+
+      api.onSetupResult((_event, result) => render(result));
+    </script>
+  </body>
+</html>
