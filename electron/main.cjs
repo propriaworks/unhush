@@ -24,14 +24,10 @@ const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
 
-// "Start at login" (see syncDesktopOverride, set-autostart/get-autostart-status below).
-// UNHUSH_UNIT_PATH: written unconditionally by scripts/postinstall.sh on package installs; absent
-// on AppImage/dev, which is how these features detect "not applicable" there.
-// DESKTOP_ID must track package.json's desktopName (electron-builder appends ".desktop" itself).
+// "Start at login" (see set-autostart/get-autostart-status below).
+// Written unconditionally by scripts/postinstall.sh on package installs; absent on AppImage/dev,
+// which is how these features detect "not applicable" there.
 const UNHUSH_UNIT_PATH = "/usr/lib/systemd/user/unhush.service";
-const DESKTOP_ID = "com.propriaworks.unhush.desktop";
-const SYSTEM_DESKTOP_FILE = `/usr/share/applications/${DESKTOP_ID}`;
-const USER_DESKTOP_OVERRIDE = path.join(os.homedir(), ".local/share/applications", DESKTOP_ID);
 
 // Defined here because the re-exec guard below needs it too, and that runs before initLogging().
 //
@@ -808,29 +804,9 @@ ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
 
 // --- "Start at login" (systemd --user unit, see scripts/postinstall.sh) ------------------------
 //
-// electron-builder hardcodes the installed .desktop's Exec= to /opt/Unhush/unhush -- it can't be
-// changed at build time -- so the icon's real command line is controlled here instead, at runtime,
-// via a per-user override: ~/.local/share/applications/ is searched before
-// /usr/share/applications/ per the XDG spec, and unlike the system one, it's writable by the app
-// itself. Points at /usr/local/bin/unhush rather than the raw binary, so the icon gets the same
-// systemd-preferred-with-a-direct-launch-fallback including ozone-override-flag behaviour as every
-// other launch entry point.
-async function syncDesktopOverride() {
-  if (!fs.existsSync(UNHUSH_UNIT_PATH)) return; // AppImage/dev: feature doesn't exist there
-  try {
-    // Copy the installed .desktop verbatim and swap only the executable token in Exec=, so
-    // Name/Icon/Categories/StartupWMClass -- and any trailing field code electron-builder appends
-    // (e.g. "%U") -- stay in sync with whatever the package actually ships, automatically, rather
-    // than drifting from a hand-duplicated copy.
-    const src = fs.readFileSync(SYSTEM_DESKTOP_FILE, "utf8");
-    const patched = src.replace(/^Exec=("[^"]*"|\S+)(.*)$/m, "Exec=/usr/local/bin/unhush$2");
-    fs.mkdirSync(path.dirname(USER_DESKTOP_OVERRIDE), { recursive: true });
-    fs.writeFileSync(USER_DESKTOP_OVERRIDE, patched, { mode: 0o644 });
-  } catch (e) {
-    log("warn", `desktop-file override sync failed: ${e.message}`);
-  }
-}
-
+// (The installed .desktop's Exec= -- hardcoded by electron-builder to the raw binary -- is
+// corrected once, system-wide, by scripts/postinstall.sh; nothing to do with that here.)
+//
 // Only ever touches future-login policy (the [Install] symlink), never the currently-running
 // instance: this handler only runs from inside the already-running Electron process, so one is
 // always live by construction. --now would be a harmless no-op when that instance is already
@@ -841,7 +817,6 @@ async function syncDesktopOverride() {
 ipcMain.handle("set-autostart", async (event, enabled) => {
   try {
     await execFileAsync("systemctl", ["--user", enabled ? "enable" : "disable", "unhush.service"]);
-    await syncDesktopOverride();
     log("info", `autostart ${enabled ? "enabled" : "disabled"}`);
     return { ok: true };
   } catch (err) {
@@ -1061,7 +1036,6 @@ if (!gotTheLock) {
       process.stderr.write(`Unhush ${app.getVersion()} started — look for the tray icon.\n`);
     }
     checkOutputPath();
-    syncDesktopOverride(); // fire and forget; this is idempotent
     commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
 
     // The renderer normally supplies the accelerator (it holds the stored setting) by calling

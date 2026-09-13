@@ -21,6 +21,20 @@ exec /opt/Unhush/unhush --ozone-platform=x11 "$@"
 EOF
 chmod 755 /usr/local/bin/unhush
 
+# electron-builder hardcodes the installed .desktop's Exec= to the raw binary -- it refuses to let
+# this project override that at build time ("Please specify executable name as linux.executableName
+# instead") -- so the icon is pointed at the wrapper above instead, here, once, system-wide.
+#
+# This used to be done per-user instead, at app runtime (main.cjs writing a
+# ~/.local/share/applications override, since electron-builder's own installed copy isn't writable
+# by an unprivileged process) -- needed back when the corrected line varied by a per-user setting
+# ("Start at login"). It no longer does: every user gets the same wrapper either way now, so one
+# fix here, to the file this package itself just installed, covers everyone permanently. Only
+# matches the exact line electron-builder wrote, so running this again on an upgrade, against
+# an already-patched file, is a harmless no-op.
+sed -i 's|^Exec=/opt/Unhush/unhush|Exec=/usr/local/bin/unhush|' \
+  /usr/share/applications/com.propriaworks.unhush.desktop
+
 # Helper for desktop-environment keyboard shortcuts. On Wayland we run under XWayland, where the
 # compositor won't deliver X11 key grabs to us, so the DE owns the binding and runs this; it writes
 # one line into the command fifo of the running app (see electron/commandFifo.cjs). Useful on X11

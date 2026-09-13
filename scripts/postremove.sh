@@ -126,8 +126,3 @@ udevadm control --reload-rules 2>/dev/null || true
 # withdraw it; it is per-user config a root scriptlet could not reach for every user regardless.
 # A leftover entry is inert (it runs a command that no longer exists) and the user can delete it in
 # their desktop's shortcut settings. Same for any custom shortcut they bound to unhush-toggle.
-#
-# ~/.local/share/applications/com.propriaworks.unhush.desktop (the "Start at login" desktop-icon
-# override, see electron/main.cjs' syncDesktopOverride) is left behind too, for the same
-# every-user's-home-is-unreachable reason -- it's inert once the unit above is gone, since
-# `systemctl --user start` on a missing unit just fails cleanly.
