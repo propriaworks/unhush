@@ -239,7 +239,9 @@ async function registerShortcut(shortcut) {
       toggleRecording();
     });
     shortcutRegistered = ok !== false;
-  } catch (e) {}
+  } catch (e) {
+    log("debug", `global shortcut register threw: ${e.message}`);
+  }
   log("info", `global shortcut ${shortcutRegistered ? "registered" : "NOT registered"}: ${shortcut}`);
 
   currentShortcut = shortcut;

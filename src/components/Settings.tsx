@@ -21,12 +21,15 @@ const isOutputMethod = (v: string | null): v is OutputMethod =>
   OUTPUT_METHODS.includes(v as OutputMethod);
 
 const SHORTCUT_OPTIONS = [
-  "Ctrl+Alt+\\",
+  "Ctrl+Alt+R",
   "Ctrl+Alt+Space",
   "Ctrl+Shift+Space",
   "Ctrl+Shift+Insert",
   "Alt+F12",
-]; // Note: ScrollLock, Super key, and ContextMenu key combos don't work
+]; // Note: ScrollLock, Super key, and ContextMenu key combos don't work. Punctuation keys
+// (e.g. backslash) are also unreliable: Electron's X11 accelerator reports success but
+// never actually grabs the key -- a known Chromium key-mapping gap, not distro-specific
+// (see e.g. electron/electron#7629 for the same failure mode on PrintScreen).
 
 // Paired with the setup window's overview (see electron/providerSetup.cjs), which deliberately
 // shows no per-provider links -- whichever one looks "selected" there is only ever our default,
