@@ -16,7 +16,7 @@ Both the transcription (speech-to-text) and LLM formatting steps can be run loca
 
 ## Local Transcription — speaches
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text model endpoint and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured.
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text model endpoint (as we require) and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured. An alternative server is [whisper.cpp](https://github.com/ggerganov/whisper.cpp), which can run on GGML quantized models.
 
 ### Speaches Setup
 
@@ -82,8 +82,8 @@ Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above
 
 | Model | Size | Language | Notes |
 |-------|------|----------|-------|
-| `Systran/faster-whisper-large-v3` | ~3 GB | Multilingual | Best accuracy; recommended default |
-| `Systran/faster-whisper-medium` | ~1.5 GB | Multilingual | Good balance of speed and accuracy |
+| `Systran/faster-whisper-large-v3` | ~3 GB | Multilingual | Best accuracy |
+| `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.5 GB | Multilingual | 5x faster & almost as good accuracy |
 | `Systran/faster-whisper-small` | ~470 MB | Multilingual | Fast; lower accuracy |
 | `Systran/faster-distil-whisper-large-v3` | ~1.5 GB | **English only** | Fast and accurate, but English only |
 | `Systran/faster-distil-whisper-small.en` | ~150 MB | **English only** | Very fast; English only |
