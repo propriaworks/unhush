@@ -28,6 +28,29 @@ const SHORTCUT_OPTIONS = [
   "Alt+F12",
 ]; // Note: ScrollLock, Super key, and ContextMenu key combos don't work
 
+// Paired with the setup window's overview (see electron/providerSetup.cjs), which deliberately
+// shows no per-provider links -- whichever one looks "selected" there is only ever our default,
+// not a real choice yet. Here the provider IS an actual selection, so a contextual link to the
+// right place makes sense; kept next to the field it's actually for on both the Transcription and
+// Formatting tabs.
+const GROQ_KEYS_URL = "https://console.groq.com/keys";
+const OPENAI_KEYS_URL = "https://platform.openai.com/api-keys";
+const LOCAL_MODELS_URL = "https://unhush.propriaworks.com/local-models";
+
+function ProviderHelpLink({ provider }: { provider: Provider }) {
+  const [label, url] =
+    provider === "groq" ? ["Get a free API key — the free tier covers most usage", GROQ_KEYS_URL] :
+    provider === "openai" ? ["Get an API key", OPENAI_KEYS_URL] :
+    ["Guide: running models locally for privacy", LOCAL_MODELS_URL];
+  return (
+    <p className="text-white/40 text-xs">
+      <a href={url} target="_blank" rel="noopener" className="text-primary-400 hover:underline">
+        {label}
+      </a>
+    </p>
+  );
+}
+
 function Settings() {
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
@@ -64,6 +87,11 @@ function Settings() {
   const [chimesEnabled, setChimesEnabled] = useState(true);
   const [keepMicWarm, setKeepMicWarm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // "Start at login" -- unsupported (card hidden) on AppImage/dev, where no systemd unit is
+  // shipped. Read from systemd itself, never locally cached: see get-autostart-status.
+  const [autostartSupported, setAutostartSupported] = useState(false);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartError, setAutostartError] = useState("");
 
   // LLM post-processing settings
   const [llmProvider, setLlmProvider] = useState<LLMProvider>("none");
@@ -213,6 +241,21 @@ function Settings() {
     };
   }, []);
 
+  // Own effect, not folded into the hydrating one above: this reads from systemd, not
+  // localStorage, and can drift independently (e.g. the user runs `systemctl --user
+  // enable/disable` by hand) -- so it's re-checked on focus the same way shortcut info is.
+  useEffect(() => {
+    const loadAutostartStatus = () => {
+      window.electronAPI?.getAutostartStatus().then((status) => {
+        setAutostartSupported(status.supported);
+        setAutostartEnabled(status.enabled);
+      });
+    };
+    loadAutostartStatus();
+    window.addEventListener("focus", loadAutostartStatus);
+    return () => window.removeEventListener("focus", loadAutostartStatus);
+  }, []);
+
   const handleShortcutChange = (newShortcut: string) => {
     setShortcut(newShortcut);
     localStorage.setItem("unhush_shortcut", newShortcut);
@@ -260,6 +303,20 @@ function Settings() {
   const handleKeepMicWarmChange = (enabled: boolean) => {
     setKeepMicWarm(enabled);
     localStorage.setItem("unhush_keep_mic_warm", String(enabled));
+  };
+
+  // Optimistic UI update, reverted on failure -- mirrors openShortcutEditor's async/inline-error
+  // shape above. State lives in systemd, not localStorage, so on error we re-read it rather than
+  // guess: main's set-autostart may have partially applied (e.g. enable succeeded, the desktop
+  // override write failed), and get-autostart-status reports what's actually true either way.
+  const handleAutostartChange = async (enabled: boolean) => {
+    setAutostartEnabled(enabled);
+    setAutostartError("");
+    const r = await window.electronAPI?.setAutostart(enabled);
+    if (r && !r.ok) {
+      setAutostartError(r.error || "Could not change the autostart setting.");
+      window.electronAPI?.getAutostartStatus().then((status) => setAutostartEnabled(status.enabled));
+    }
   };
 
   return (
@@ -367,6 +424,7 @@ function Settings() {
                   </button>
                 </div>
               </div>
+              <ProviderHelpLink provider={provider} />
               {provider === "custom" && (
                 <>
                   <div>
@@ -600,6 +658,40 @@ function Settings() {
                   : "The microphone is released after each recording. Some mics (especially USB) can take a second or more to wake back up."}
               </p>
             </div>
+
+            {autostartSupported && (
+              <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-white/70 text-xs font-medium">
+                    Start at login
+                  </label>
+                  <div className="flex gap-2">
+                    {([true, false] as const).map((enabled) => (
+                      <button
+                        key={String(enabled)}
+                        type="button"
+                        onClick={() => handleAutostartChange(enabled)}
+                        className={`py-1 px-4 rounded-lg text-sm font-medium transition-all ${
+                          autostartEnabled === enabled
+                            ? "bg-primary-500 text-white"
+                            : "bg-white/5 text-white/60 hover:bg-white/10"
+                        }`}
+                      >
+                        {enabled ? "On" : "Off"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-white/40 text-xs">
+                  {autostartEnabled
+                    ? "Unhush launches automatically when you log in."
+                    : "Unhush only runs when you launch it yourself."}
+                </p>
+                {autostartError && (
+                  <p className="text-red-400 text-xs">{autostartError}</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -631,6 +723,13 @@ function Settings() {
                   Uses the API key from the Transcription tab, even if not selected
                 </p>
               )}
+              {llmProvider === "none" && (
+                <p className="text-white/40 text-xs">
+                  Off: transcripts are returned exactly as transcribed, with no punctuation,
+                  grammar, or filler-word cleanup.
+                </p>
+              )}
+              {llmProvider !== "none" && <ProviderHelpLink provider={llmProvider} />}
               {llmProvider !== "none" && (
                 <>
                   <div>

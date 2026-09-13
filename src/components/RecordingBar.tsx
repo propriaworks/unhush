@@ -65,6 +65,19 @@ function RecordingBar() {
     const lError = llmConfig && validateLLMConfig(llmConfig);
     window.electronAPI?.setFormatterWarning("config", lError?.reasonKey === "config");
     window.electronAPI?.setFormatterWarning("badurl", lError?.reasonKey === "badurl");
+
+    // Drives the first-run setup window's provider cards (referral only -- see
+    // electron/providerSetup.cjs). Reuses the same validation just run above; never an API key.
+    window.electronAPI?.setProviderStatus({
+      transcription: {
+        provider: (localStorage.getItem("unhush_provider") || "groq") as ProviderStatus["transcription"]["provider"],
+        reason: tError?.reasonKey ?? null,
+      },
+      formatter: {
+        provider: llmConfig?.provider ?? "none",
+        reason: lError?.reasonKey ?? null,
+      },
+    });
   }, []);
 
   // Whenever Settings closes, it may have just fixed or broken a required field, or

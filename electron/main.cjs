@@ -16,6 +16,7 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
 const ydotool = require("./ydotool.cjs");
+const providerSetup = require("./providerSetup.cjs");
 const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
@@ -64,7 +65,8 @@ function logFilePath() {
 // the desktop-override Exec= that now points at that same script puts it there directly now,
 // and it's a no-op on an X11 session: (Electron already resolves to ozone=x11 there by default),
 // So this block only ever fires for a launch whose command line we don't own: an AppImage, a raw
-// `/opt/Unhush/unhush`, or similar.
+// `/opt/Unhush/unhush`, or similar. Note that this includes a shortcut click on initial install
+// under Wayland, since the below .desktop override will not yet be in place.
 //
 // It used to re-exec via spawn() -- a new child process, this one exiting once it was launched.
 // Under systemd that makes the child an orphan re-parented to PID 1, not to systemd, regardless of
@@ -80,7 +82,7 @@ function logFilePath() {
 // takes it.
 if (
   process.env.XDG_SESSION_TYPE === "wayland" &&
-  // The opt-out is disabled, not removed. Native Wayland cannot deliver a reliable clipboard on
+  // The opt-out is disabled, though not removed. Native Wayland cannot deliver a reliable clipboard on
   // GNOME: setting a selection while unfocused needs ext-data-control-v1 (the protocol wl-copy
   // uses), Mutter implements neither it nor its wlr- predecessor and has said it won't, and
   // wl-clipboard's only fallback there is to briefly take focus -- which would break the very
@@ -482,6 +484,17 @@ function createSettingsWindow(tab = null, outputMethod = null) {
   if (outputMethod) query.output = outputMethod;
   const search = new URLSearchParams(query).toString();
 
+  // Settings links out to provider API-key pages and local-model docs (Transcription/Formatting
+  // tabs) -- send those to the system browser and never let them open a second Electron window,
+  // exactly like the setup window (see showSetupWindow()).
+  settingsWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  settingsWindow.webContents.on("will-navigate", (event, url) => {
+    if (url !== settingsWindow.webContents.getURL()) event.preventDefault();
+  });
+
   if (isDev) {
     settingsWindow.loadURL(`http://localhost:5173/settings.html${search ? `?${search}` : ""}`);
   } else {
@@ -759,6 +772,20 @@ function noteOutputMethod(method) {
 }
 ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));
 
+// The renderer's transcription/formatter provider status (see RecordingBar.checkConfigWarnings),
+// reported alongside the existing tray-warning IPC. Only the setup window needs it -- never an
+// API key, just the provider name and the existing reasonKey -- see providerSetup.cjs.
+let reportProviderStatus;
+const providerStatusKnown = new Promise((resolve) => { reportProviderStatus = resolve; });
+let providerStatus = null;
+ipcMain.on("set-provider-status", (event, status) => {
+  providerStatus = status;
+  reportProviderStatus(status);
+  // Settings just closed and the renderer re-reported -- keep an already-open setup window honest
+  // rather than waiting for the user to click Re-check.
+  if (setupWindow) refreshSetupWindow();
+});
+
 ipcMain.handle("update-shortcut", async (event, shortcut) => {
   await registerShortcut(shortcut);
   return true;
@@ -858,12 +885,20 @@ function mutedProblems() {
   }
 }
 
-// The setup window shows one card per problem. The ydotool paste path and the global shortcut are
-// independent concerns, so they're gathered here rather than either module knowing about the other.
+// The setup window shows one card per problem. Provider config, the ydotool paste path, and the
+// global shortcut are independent concerns, so they're gathered here rather than any module
+// knowing about the others; each card is tagged with `kind` by its gatherer below.
 let setupIncludesYdotool = true;
 
 async function setupPreflight() {
-  const problems = setupIncludesYdotool ? (await ydotool.preflight()).problems : [];
+  // The renderer owns provider config (localStorage) -- wait briefly to be told rather than
+  // guess "unconfigured". Already resolved by the time Re-check can be clicked.
+  await Promise.race([providerStatusKnown, new Promise((r) => setTimeout(r, 3000).unref?.())]);
+  const problems = providerSetup.problems(providerStatus); // already tagged kind: "provider"
+
+  if (setupIncludesYdotool) {
+    problems.push(...(await ydotool.preflight()).problems.map((p) => ({ kind: "ydotool", ...p })));
+  }
   // Wait for the first portal bind to settle before deciding: on a Wayland first run that means
   // waiting out the desktop's consent dialog, and telling the user to bind a key by hand while
   // that dialog is on screen would be exactly wrong. Already resolved on X11.
@@ -871,8 +906,12 @@ async function setupPreflight() {
   // Needed whatever the output mode, unlike the ydotool checks. Returns null unless the user
   // really does have to bind the key themselves.
   const shortcut = waylandShortcut.shortcutProblem();
-  if (shortcut) problems.push(shortcut);
-  return { ok: problems.length === 0, problems };
+  if (shortcut) problems.push({ kind: "shortcut", ...shortcut });
+
+  // Optional cards (e.g. "LLM formatting is off") are advice, not faults: they ride along when
+  // the window is already going to be shown for a real problem, but must never open it alone.
+  if (problems.every((p) => p.optional)) return { ok: true, problems: [] };
+  return { ok: false, problems };
 }
 
 async function checkOutputPath() {
@@ -915,7 +954,7 @@ function showSetupWindow(result) {
   }
   setupWindow = new BrowserWindow({
     width: 640,
-    height: 620,
+    height: 700, // provider cards can push this up to five cards, taller than the old ydotool-only max of two
     minWidth: 460,
     minHeight: 320,
     resizable: true,      // the problem list varies in length, so let it be resized
@@ -939,13 +978,27 @@ function showSetupWindow(result) {
   setupWindow.webContents.on("did-finish-load", () => {
     setupWindow.webContents.send("setup-result", result);
   });
+  // The window now carries real links (API-key pages, local-model docs) -- send them to the
+  // system browser and never let them open a second Electron window or navigate the dialog away.
+  setupWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  setupWindow.webContents.on("will-navigate", (event, url) => {
+    if (url !== setupWindow.webContents.getURL()) event.preventDefault();
+  });
   setupWindow.loadFile(path.join(__dirname, "setup-dialog.html"));
 }
 
-ipcMain.handle("ydotool-preflight", async () => {
+// Re-runs the combined preflight and, if the setup window is open, pushes the fresh result into
+// it -- shared by the manual Re-check button and the automatic refresh when Settings closes.
+async function refreshSetupWindow() {
   lastSetupResult = await setupPreflight();
+  if (setupWindow) setupWindow.webContents.send("setup-result", lastSetupResult);
   return lastSetupResult;
-});
+}
+
+ipcMain.handle("setup-preflight", async () => refreshSetupWindow());
 
 ipcMain.handle("open-settings-window", (event, tab, outputMethod) => {
   // Record the requested mode now rather than waiting for Settings to mount and report it back:

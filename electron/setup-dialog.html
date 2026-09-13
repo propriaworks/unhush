@@ -48,6 +48,9 @@
       .copied { color: var(--ok); font-size: 12.5px; }
       /* Same span, failure case -- readable on both the light and dark palettes above. */
       .copied.bad { color: #e05252; }
+      .row.links { flex-wrap: wrap; }
+      .row.links a { color: var(--accent); font-size: 12.5px; text-decoration: none; }
+      .row.links a:hover { text-decoration: underline; }
       .footer { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
       .footer .spacer { flex: 1; }
       label.dontshow { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12.5px; }
@@ -65,6 +68,10 @@
     </p>
     <p class="intro" id="intro-shortcut" hidden>
       Unhush needs one setup step on this system before its keyboard shortcut will work.
+    </p>
+    <p class="intro" id="intro-provider" hidden>
+      Unhush needs a transcription provider configured before it can turn your voice into text.
+      This window can't set that up for you — open Settings from the card below.
     </p>
     <p class="alt" hidden>
       This is optional. <strong>Clipboard mode</strong> needs no setup at all: Unhush puts each
@@ -90,6 +97,7 @@
 
       const introPasteEl = document.getElementById("intro-paste");
       const introShortcutEl = document.getElementById("intro-shortcut");
+      const introProviderEl = document.getElementById("intro-provider");
       const altEl = document.querySelector(".alt");
       const settingsBtn = document.getElementById("settings");
       const recheckBtn = document.getElementById("recheck");
@@ -98,25 +106,29 @@
         problemsEl.replaceChildren();
         statusEl.hidden = true;
         statusEl.className = "";
-        // The two kinds of problem need different framing: the ydotool ones are terminal commands
-        // that Re-check can verify, and that Clipboard mode genuinely avoids; the shortcut one is a
-        // command to paste into a desktop settings dialog, which Clipboard mode does nothing about.
-        const needsPasteSetup = result.problems.some((p) => p.code !== "shortcut");
+        // Three problem kinds need different framing: ydotool ones are terminal commands that
+        // Re-check can verify, and that Clipboard mode genuinely avoids; the shortcut one is a
+        // command to paste into a desktop settings dialog, which Clipboard mode does nothing
+        // about; provider ones are referred to Settings (see providerSetup.cjs) and, like ydotool,
+        // can change answer on Re-check once fixed there.
+        const needsPasteSetup = result.problems.some((p) => p.kind === "ydotool");
+        const hasShortcut = result.problems.some((p) => p.kind === "shortcut");
+        const hasProvider = result.problems.some((p) => p.kind === "provider");
         introPasteEl.hidden = result.ok || !needsPasteSetup;
-        introShortcutEl.hidden = result.ok || needsPasteSetup;
+        introShortcutEl.hidden = result.ok || needsPasteSetup || !hasShortcut;
+        introProviderEl.hidden = result.ok || !hasProvider;
         altEl.hidden = result.ok || !needsPasteSetup;
         settingsBtn.hidden = result.ok || !needsPasteSetup;
-        // Re-check re-runs the ydotool preflight, which can genuinely change answer once the user
-        // has run the commands. It can't see a keyboard shortcut bound in someone's desktop
-        // settings, so with only that card on screen it would report the same thing forever --
+        // Re-check can change the answer for ydotool and provider problems (terminal commands run,
+        // or Settings fixed) but never for a shortcut-only result -- nothing here can detect a
+        // binding made in the desktop's own editor, so it would report the same thing forever,
         // which reads as a broken button. Close is enough there.
-        recheckBtn.hidden = !result.ok && !needsPasteSetup;
+        recheckBtn.hidden = !result.ok && !needsPasteSetup && !hasProvider;
 
         if (result.ok) {
           statusEl.hidden = false;
           statusEl.className = "ok";
-          statusEl.textContent =
-            "All set — Unhush can now output your dictation correctly as requested.";
+          statusEl.textContent = "All set — Unhush is ready to go.";
           return;
         }
 
@@ -132,41 +144,74 @@
           d.textContent = p.detail;
           card.append(d);
 
-          const pre = document.createElement("pre");
-          const text = p.commands.join("\n");
-          pre.textContent = text;
-          card.append(pre);
+          // Provider cards have nothing to copy into a terminal -- they only carry actions/links.
+          if (p.commands) {
+            const pre = document.createElement("pre");
+            const text = p.commands.join("\n");
+            pre.textContent = text;
+            card.append(pre);
 
-          const row = document.createElement("div");
-          row.className = "row";
-          const btn = document.createElement("button");
-          btn.textContent = "Copy";
-          const flash = document.createElement("span");
-          flash.className = "copied";
-          // Both buttons below acknowledge in this one span, so they share a helper: it also holds
-          // the timer, or a second click would inherit the first one's remaining time and vanish
-          // early.
-          let flashTimer;
-          const showFlash = (text, ms, bad) => {
-            clearTimeout(flashTimer);
-            flash.textContent = text;
-            flash.className = bad ? "copied bad" : "copied";
-            flashTimer = setTimeout(() => { flash.textContent = ""; }, ms);
-          };
-          // The whole point of this window: copying must not dismiss it, and must confirm.
-          btn.addEventListener("click", async () => {
-            await api.copyToClipboard(text);
-            showFlash("Copied ✓", 2000);
-          });
-          row.append(btn);
+            const row = document.createElement("div");
+            row.className = "row";
+            const btn = document.createElement("button");
+            btn.textContent = "Copy";
+            const flash = document.createElement("span");
+            flash.className = "copied";
+            // Holds the timer so a rapid second click doesn't have its "Copied ✓" cleared early by
+            // the first click's still-pending timeout.
+            let flashTimer;
+            const showFlash = (text, ms, bad) => {
+              clearTimeout(flashTimer);
+              flash.textContent = text;
+              flash.className = bad ? "copied bad" : "copied";
+              flashTimer = setTimeout(() => { flash.textContent = ""; }, ms);
+            };
+            // The whole point of this window: copying must not dismiss it, and must confirm.
+            btn.addEventListener("click", async () => {
+              await api.copyToClipboard(text);
+              showFlash("Copied ✓", 2000);
+            });
+            row.append(btn);
 
-          // No "open shortcut settings" button here: this card only appears when the desktop has
-          // no GlobalShortcuts portal, and that is also what would have opened its editor. The
-          // remaining desktops in that position (sway, river, Wayfire) have no shortcut GUI at
-          // all -- their keys live in a config file -- so the note tells the user where to look.
+            // No "open shortcut settings" button here: this card only appears when the desktop has
+            // no GlobalShortcuts portal, and that is also what would have opened its editor. The
+            // remaining desktops in that position (sway, river, Wayfire) have no shortcut GUI at
+            // all -- their keys live in a config file -- so the note tells the user where to look.
 
-          row.append(flash);
-          card.append(row);
+            row.append(flash);
+            card.append(row);
+          }
+
+          // Referral only (see providerSetup.cjs): this window never edits provider settings
+          // itself, it only opens Settings at the right tab. Nothing further to do on click --
+          // the window refreshes itself when Settings closes (see main.cjs's
+          // set-provider-status handler), same as Re-check does for the other card kinds.
+          if (p.actions) {
+            const row = document.createElement("div");
+            row.className = "row actions";
+            for (const a of p.actions) {
+              const btn = document.createElement("button");
+              btn.className = "primary";
+              btn.textContent = a.label;
+              btn.addEventListener("click", () => api.openSettings(a.tab));
+              row.append(btn);
+            }
+            card.append(row);
+          }
+
+          if (p.links) {
+            const row = document.createElement("div");
+            row.className = "row links";
+            for (const l of p.links) {
+              const a = document.createElement("a");
+              a.href = l.url;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = l.label;
+              row.append(a);
+            }
+            card.append(row);
+          }
 
           if (p.note) {
             const n = document.createElement("p");
@@ -182,7 +227,7 @@
         e.target.disabled = true;
         e.target.textContent = "Checking…";
         try {
-          render(await api.ydotoolPreflight());
+          render(await api.setupPreflight());
         } finally {
           e.target.disabled = false;
           e.target.textContent = "Re-check";
@@ -197,7 +242,7 @@
         e.target.disabled = true;
         try {
           await api.openSettings("usability", "clipboard");
-          render(await api.ydotoolPreflight());
+          render(await api.setupPreflight());
         } finally {
           e.target.disabled = false;
         }

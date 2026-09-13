@@ -17,8 +17,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
 
-  // Setup dialog (electron/setup-dialog.html) — see electron/ydotool.cjs
-  ydotoolPreflight: () => ipcRenderer.invoke("ydotool-preflight"),
+  // Setup dialog (electron/setup-dialog.html) — see electron/ydotool.cjs, waylandShortcut.cjs,
+  // and providerSetup.cjs, whose results setupPreflight() in main.cjs combines into one list.
+  setupPreflight: () => ipcRenderer.invoke("setup-preflight"),
   // outputMethod, when given, is the mode Settings should select on arrival (see
   // "Use Clipboard mode instead"): the renderer owns that setting, so it does the write.
   openSettings: (tab, outputMethod) =>
@@ -41,6 +42,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // "Start at login" (systemd --user unit; unsupported on AppImage/dev -- see get-autostart-status)
   getAutostartStatus: () => ipcRenderer.invoke("get-autostart-status"),
   setAutostart: (enabled) => ipcRenderer.invoke("set-autostart", enabled),
+  // Transcription/formatter provider status, for the setup window's provider cards (referral
+  // only -- see providerSetup.cjs). Never carries an API key, only provider name + reasonKey.
+  setProviderStatus: (status) => ipcRenderer.send("set-provider-status", status),
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

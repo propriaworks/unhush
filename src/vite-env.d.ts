@@ -4,6 +4,12 @@ export {};
 
 declare global {
   type OutputMethod = "paste" | "type" | "clipboard";
+  // Mirrors the reasonKey shape validateTranscriptionConfig/validateLLMConfig already produce --
+  // see setProviderStatus above and electron/providerSetup.cjs.
+  interface ProviderStatus {
+    transcription: { provider: "groq" | "openai" | "custom"; reason: "config" | "badurl" | null };
+    formatter: { provider: "none" | "groq" | "openai" | "custom"; reason: "config" | "badurl" | null };
+  }
   const __APP_VERSION__: string;
   interface Window {
     electronAPI: {
@@ -42,6 +48,9 @@ declare global {
       // "Start at login": supported is false on AppImage/dev (no systemd unit shipped there).
       getAutostartStatus: () => Promise<{ supported: boolean; enabled: boolean }>;
       setAutostart: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
+      // Reported alongside the tray-warning signals below: drives the setup window's provider
+      // cards (referral only -- see electron/providerSetup.cjs). Never an API key.
+      setProviderStatus: (status: ProviderStatus) => void;
       removeAllListeners: (channel: string) => void;
       log: (level: "debug" | "info" | "warn" | "error", message: string) => void;
       saveDebugAudio: (arrayBuffer: ArrayBuffer, mimeType: string, subdir?: string, filename?: string) => Promise<string | null>;
