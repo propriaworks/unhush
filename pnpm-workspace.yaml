@@ -5,3 +5,5 @@ onlyBuiltDependencies:
   - electron
   - electron-winstaller
   - esbuild
+
+minimumReleaseAge: 4320  # 3 days
