@@ -245,10 +245,11 @@ This can be done in several ways, depending partly upon how you installed:
   Service unit notes:
   - `--no-sandbox` is AppImage-specific: Chromium's sandbox helper needs to be root-owned with the setuid bit, but an
     AppImage extracts to a FUSE mount owned by you, so the bit can never take effect there.
-  - Plain `Type=simple` (the default) is fine here — on a Wayland session Unhush re-execs itself
-    under XWayland, but stays attached as a supervisor around that child rather than detaching and
-    exiting, so this process (the real `ExecStart=` one) stays alive and correctly trackable for
-    the app's whole life.
+  - Plain `Type=simple` (the default) is fine here — there is only ever one process for the app's
+    whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
+  - `--ozone-platform=x11` picks XWayland on a Wayland session (Chromium needs this on the real
+    command line) and is a no-op on X11, so it's safe to include unconditionally. Leaving it off
+    also works — Unhush falls back to re-execing itself in place (same PID) if it's missing.
   - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
@@ -257,7 +258,7 @@ This can be done in several ways, depending partly upon how you installed:
 
   [Service]
   KillMode=mixed
-  ExecStart=/path/to/Unhush.AppImage --no-sandbox
+  ExecStart=/path/to/Unhush.AppImage --no-sandbox --ozone-platform=x11
   Restart=on-failure
 
   [Install]

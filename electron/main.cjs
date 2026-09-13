@@ -50,25 +50,6 @@ function logFilePath() {
   return file;
 }
 
-// Where the re-exec'd child's stdout/stderr should go: the log file, always. Chromium writes its
-// own diagnostics from C++ straight to fd 2 -- GPU failures, "Failed to connect to Wayland
-// display", crash output -- so none of it passes through log() and none of it would otherwise
-// land in our file. Inheriting the terminal instead was worse than it sounds: the parent has
-// already exited and handed the prompt back, so the child's output arrives *after* the prompt,
-// interleaved with whatever the user typed next, for as long as the app runs. To watch that
-// stream live rather than in the log, launch with --ozone-platform=x11 yourself -- the guard
-// below then leaves the process alone and its output stays attached to the terminal.
-function childStdio() {
-  try {
-    const fd = fs.openSync(logFilePath(), "a", 0o600);
-    return ["ignore", fd, fd];
-  } catch (e) {
-    // Nowhere to put it. Discard rather than inherit: a terminal the user has already got back
-    // is not a log, and this only happens when the log directory itself is unusable.
-    return "ignore";
-  }
-}
-
 // Whether *this exact process* is currently running inside unhush.service's own cgroup -- used by
 // the tray Quit handler to decide whether to route through systemctl. Deliberately not just
 // `process.env.INVOCATION_ID`: that's an ordinary environment variable, inherited like any other,
@@ -96,13 +77,29 @@ function isRunningAsUnhushService() {
 // already sidestep Wayland's input model anyway by injecting keystrokes through /dev/uinput.
 //
 // Chromium picks its ozone platform long before this script runs, so appendSwitch() is far too
-// late -- the flag must be on the real command line, which means re-execing ourselves. (Putting it
-// in the packaged .desktop Exec line instead would avoid that, but electron-builder refuses to
-// override Exec: "Please specify executable name as linux.executableName instead".) One mechanism
-// covering every launch style is the simpler outcome anyway; it costs one extra Electron init,
-// only on Wayland, and only up to this point -- no window is created before we exit.
+// late -- the flag must be on the real command line. Every launch path we control (the systemd
+// unit's ExecStart=, the user's desktop-override Exec=, scripts/postinstall.sh's symlink target)
+// puts it there directly now -- see scripts/postinstall.sh and syncDesktopOverride() below -- and the flag
+// is a no-op on an X11 session: Electron already resolves to ozone=x11 there by default (verified
+// -- an unflagged X11 launch's own GPU/renderer children carry --ozone-platform=x11 in their argv,
+// Chromium propagating the platform it already picked). So this block only ever fires for a launch
+// whose command line we don't own: an AppImage, a raw `/opt/Unhush/unhush`, or a hand-rolled
+// systemd unit predating this flag.
 //
-// This runs before requestSingleInstanceLock() below, so the process about to die never takes it.
+// It used to re-exec via spawn() -- a new child process, this one exiting once it was launched.
+// Under systemd that makes the child an orphan re-parented to PID 1, not to systemd, regardless of
+// any MAINPID reassignment attempted afterwards -- confirmed by systemd's own diagnostic for
+// exactly this situation: "Supervising process N which is not our child. We'll most likely not
+// notice when it exits." Unable to reliably tell when the real app exits, `systemctl stop`/
+// `restart` became racy -- observed sending SIGKILL to the whole cgroup almost immediately rather
+// than a clean SIGTERM-driven shutdown. A supervisor process kept alive solely to forward signals
+// worked around that, at the cost of a whole second idle Electron runtime per launch. execve()
+// avoids the problem at its root: it replaces this process's image in place, same PID, so whatever
+// launched us (systemd via ExecStart=, or a shell) is still watching the process it actually
+// started -- no orphan, no supervisor, one process, one SIGTERM.
+//
+// This runs before requestSingleInstanceLock() below, so the process about to be replaced never
+// takes it.
 if (
   process.env.XDG_SESSION_TYPE === "wayland" &&
   // The opt-out is disabled, not removed. Native Wayland cannot deliver a reliable clipboard on
@@ -112,57 +109,14 @@ if (
   // paste we are setting up. A mode whose core function can't work on half the Linux desktop
   // isn't one to offer. Re-enable this line if that ever changes.
   // process.env.UNHUSH_NATIVE_WAYLAND !== "1" &&
-  !process.env.UNHUSH_REEXEC && // belt-and-braces against an exec loop
-  // Someone who passes the flag themselves is still honoured -- unsupported, but not fought.
+  // Someone who passes the flag themselves is still honoured -- unsupported, but not fought. This
+  // is also the exec-loop guard: the re-exec'd process carries the flag, so it never re-enters.
   !process.argv.some((a) => a.startsWith("--ozone-platform"))
 ) {
-  const { spawn } = require("child_process");
-  // Detached everywhere except under systemd (see below for why). NOT detached there: a plain
-  // fork+exit (spawn a detached child, exit this process) makes the child an orphan reparented to
-  // PID 1, not to systemd -- outside systemd's own process-tree supervision entirely, regardless
-  // of any MAINPID reassignment attempted afterwards. That was tried first and confirmed broken by
-  // systemd's own diagnostic for exactly this situation: "Supervising process N which is not our
-  // child. We'll most likely not notice when it exits." Unable to reliably tell when the real app
-  // exits, `systemctl stop`/`restart` became racy -- observed sending SIGKILL to the whole cgroup
-  // almost immediately rather than a clean SIGTERM-driven shutdown, sometimes killing only one
-  // process, sometimes the whole tree. See [[project_unhush_wayland_reexec_systemd]].
-  const underSystemd = isRunningAsUnhushService();
-  const child = spawn(process.execPath, ["--ozone-platform=x11", ...process.argv.slice(1)], {
-    detached: !underSystemd,
-    stdio: childStdio(),
-    env: { ...process.env, UNHUSH_REEXEC: "1" },
-  });
-
-  if (underSystemd) {
-    // Stay alive as a thin supervisor instead: this process is the one systemd actually forked
-    // via ExecStart=, so keeping it around for the child's whole life (rather than exiting the
-    // instant the child is spawned) keeps it a real, waitpid()-able parent throughout -- systemd's
-    // default Type=simple tracking of *this* process then just works, exactly as it already does
-    // for the X11 case where no re-exec happens at all. Forward whatever KillMode=mixed sends us
-    // (see scripts/postinstall.sh) to the real child, then exit with its status once it's gone.
-    for (const sig of ["SIGTERM", "SIGINT"]) {
-      process.on(sig, () => { try { child.kill(sig); } catch (e) {} });
-    }
-    child.on("exit", (code, signal) => {
-      process.exit(signal ? 1 : (code ?? 0));
-    });
-    return; // nothing below this point runs in the supervisor -- that's the child's job
-  }
-
-  // Separate statement, not chained: unref() returns undefined (not the ChildProcess), so
-  // chaining it onto the assignment above left `child` undefined and crashed the next line.
-  child.unref();
-  // The parent exits the instant the child is spawned, so from a terminal `unhush` looks like it
-  // failed: the prompt comes straight back before the child has drawn anything. Say what actually
-  // happened -- but only when someone is there to read it. With no TTY this is nobody's business:
-  // the child's own startup banner records the same facts in the log.
-  if (process.stderr.isTTY) {
-    process.stderr.write(
-      `Unhush ${app.getVersion()}: Wayland session — relaunching under XWayland.\n` +
-      `Starting in the background; look for the tray icon.\n`
-    );
-  }
-  process.exit(0);
+  // Never returns on success -- the current process image is gone. argv[0] is conventionally the
+  // program path (execve doesn't otherwise care), matching what Node itself put there.
+  process.execve(process.execPath,
+    [process.execPath, "--ozone-platform=x11", ...process.argv.slice(1)], process.env);
 }
 
 let mainWindow = null;
@@ -886,25 +840,29 @@ ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());
 // --- "Start at login" (systemd --user unit, see scripts/postinstall.sh) ------------------------
 //
 // electron-builder hardcodes the installed .desktop's Exec= to /opt/Unhush/unhush -- it can't be
-// changed at build time -- so redirecting the desktop icon through systemd instead happens here,
-// at runtime, via a per-user override: ~/.local/share/applications/ is searched before
+// changed at build time -- so the icon's real command line is controlled here instead, at runtime,
+// via a per-user override: ~/.local/share/applications/ is searched before
 // /usr/share/applications/ per the XDG spec, and unlike the system one, it's writable by the app
-// itself. Zero detection code needed elsewhere: the override either exists (icon launches via
-// systemd) or doesn't (icon launches the binary directly), and nothing else has to know which.
+// itself. This is also where --ozone-platform=x11 reaches the icon on a Wayland session (see the
+// re-exec comment above): rather than mutating the package-owned system file, both cases -- icon
+// launches via systemd, icon launches the binary directly -- are handled by writing this same
+// override, differing only in Exec=. Always written now (autostart on or off), so a Wayland icon
+// launch never has to fall back to main.cjs's execve() at all.
 async function syncDesktopOverride(enabled) {
   if (!fs.existsSync(UNHUSH_UNIT_PATH)) return; // AppImage/dev: feature doesn't exist there
   try {
-    if (enabled) {
-      // Copy the installed .desktop verbatim and swap only Exec=, so Name/Icon/Categories/
-      // StartupWMClass stay in sync with whatever the package actually ships, automatically,
-      // rather than drifting from a hand-duplicated copy.
-      const src = fs.readFileSync(SYSTEM_DESKTOP_FILE, "utf8");
-      const patched = src.replace(/^Exec=.*$/m, "Exec=systemctl --user start unhush.service");
-      fs.mkdirSync(path.dirname(USER_DESKTOP_OVERRIDE), { recursive: true });
-      fs.writeFileSync(USER_DESKTOP_OVERRIDE, patched, { mode: 0o644 });
-    } else {
-      fs.rmSync(USER_DESKTOP_OVERRIDE, { force: true });
-    }
+    // Copy the installed .desktop verbatim and swap only Exec=, so Name/Icon/Categories/
+    // StartupWMClass stay in sync with whatever the package actually ships, automatically, rather
+    // than drifting from a hand-duplicated copy.
+    const src = fs.readFileSync(SYSTEM_DESKTOP_FILE, "utf8");
+    const newExec = enabled
+      ? "Exec=systemctl --user start unhush.service"
+      // Insert the flag right after the executable token (quoted or not) rather than rewrite the
+      // whole line, so a trailing field code electron-builder appends (e.g. "%U") is preserved.
+      : "Exec=$1 --ozone-platform=x11$2";
+    const patched = src.replace(/^Exec=("[^"]*"|\S+)(.*)$/m, newExec);
+    fs.mkdirSync(path.dirname(USER_DESKTOP_OVERRIDE), { recursive: true });
+    fs.writeFileSync(USER_DESKTOP_OVERRIDE, patched, { mode: 0o644 });
   } catch (e) {
     log("warn", `desktop-file override sync failed: ${e.message}`);
   }

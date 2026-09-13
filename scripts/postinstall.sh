@@ -45,17 +45,20 @@ udevadm settle --timeout=10 || true
 # hand-rolled instructions, so anyone who already followed those is silently subsumed: identical
 # file, no behavior change, and their next enable/disable goes through Settings instead.
 #
-# Plain Type=simple (the default -- deliberately not specified): on a Wayland session main.cjs
-# re-execs itself under XWayland (Chromium's ozone platform can only be chosen on the real command
-# line, before this script or main.cjs ever runs), but stays attached and alive as a thin
-# supervisor around that child rather than detaching and exiting -- see the isRunningAsUnhushService
-# branch in main.cjs's re-exec block. A detach-and-exit here (tried first) orphans the real child to
-# PID 1, not to systemd, which can then only warn "Supervising process N which is not our child"
-# and loses reliable track of it regardless of any MAINPID reassignment -- see
-# [[project_unhush_wayland_reexec_systemd]] for the full story of why Type=notify + MAINPID= was
-# tried and abandoned. Staying attached keeps this the genuine ExecStart= process for the app's
-# entire life, so plain Type=simple tracking (already correct for the X11 case, where no re-exec
-# happens at all) just works here too.
+# Plain Type=simple (the default -- deliberately not specified): correct by construction now,
+# because there is only ever one process for the app's whole life, on both session types.
+# --ozone-platform=x11 is right here on ExecStart= -- a no-op on an X11 session (Electron already
+# resolves to that ozone backend by default there) and exactly what's needed on Wayland, where
+# Chromium picks its ozone platform from the real command line before main.cjs ever runs. This used
+# to be main.cjs's job instead, re-execing itself on Wayland only -- which meant a second process
+# that systemd hadn't itself forked, since a plain fork+exit orphans the real child to PID 1, not to
+# systemd ("Supervising process N which is not our child"), and a supervisor kept alive to forward
+# signals worked but cost a whole second idle Electron runtime per launch. Putting the flag directly
+# on the one command line systemd forks removes the need for either. main.cjs still execve()s itself
+# (same PID, no new process) as a fallback for launch paths that don't go through ExecStart= here --
+# see the comment above the re-exec block in main.cjs. See
+# [[project_unhush_wayland_reexec_systemd]] for the full history, including why Type=notify +
+# MAINPID= was tried and abandoned before any of this.
 #
 # KillMode=mixed, not the control-group default: systemd's default sends SIGTERM to every process
 # in the unit's cgroup at once on stop/restart -- the Chromium browser process *and* every zygote/
@@ -72,7 +75,7 @@ Description=Unhush Voice Dictation
 
 [Service]
 KillMode=mixed
-ExecStart=/usr/local/bin/unhush
+ExecStart=/usr/local/bin/unhush --ozone-platform=x11
 Restart=on-failure
 
 [Install]
