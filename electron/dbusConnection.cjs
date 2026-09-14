@@ -135,6 +135,7 @@ class DBusConnection {
       }
       return;
     }
+    // Inbound METHOD_CALLs are ignored: we're a client only, and export no objects.
     if (msg.type === MESSAGE_TYPE.SIGNAL) {
       for (const h of this.signalHandlers.slice()) {
         if (h.path && h.path !== msg.path) continue;

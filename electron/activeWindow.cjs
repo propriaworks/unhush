@@ -6,14 +6,15 @@
 //   - X11: xprop (both KDE and other DEs running an X11 session go through this path)
 //   - Sway / Hyprland: their own IPC (swaymsg / hyprctl), bundled with those compositors
 //   - GNOME (Wayland): GNOME has no supported external query — its own Mutter maintainer
-//     rejected wlr-foreign-toplevel-management for breaking client isolation, and the private
+//     rejected wlr-foreign-toplevel-management for breaking client isolation (Mutter ships
+//     ext-foreign-toplevel-list-v1 instead, which omits focus state by design), and the private
 //     Eval/Introspect D-Bus escape hatches are being actively locked down. We instead use the
 //     community "Focused Window D-Bus" GNOME Shell extension if the user has it installed
 //     (https://extensions.gnome.org/extension/5592/focused-window-d-bus/) — already the
 //     ActivityWatch-recommended solution for this exact problem. If it's not installed, we
 //     silently fall back to "unknown."
-//   - KDE Plasma (Wayland): not implemented (see getViaKwin() below for why) — falls back to
-//     "unknown." KDE X11 sessions are already covered by the xprop path above.
+//   - KDE Plasma (Wayland): not implemented — falls back to "unknown" (tractable now though; see
+//     getViaKwin() below). KDE X11 sessions are already covered by the xprop path above.
 //
 // IMPORTANT: unlike waylandShortcut.cjs (whose shell-outs run once at startup/settings-change
 // time and use spawnSync), this module runs on every single paste, so all shell-outs here use
@@ -142,15 +143,19 @@ async function getViaGnomeExtension() {
   return { app: info.wm_class_instance || info.wm_class || 'unknown', title: info.title || '' };
 }
 
-// KDE Plasma Wayland: not implemented. KWin scripts run in a sandbox with no file I/O, and
-// the org.kde.KWin.Scripting loadScript/run D-Bus methods don't return values — the only way
-// to get data back out (per how kdotool does it) is for the script to emit a custom D-Bus
-// signal to a listener that's already subscribed before the script runs, which needs a real
-// D-Bus client connection (not just shelling out to qdbus/dbus-send). Doing that without a
-// D-Bus library dependency (deliberately avoided — see file header) means racing a
-// `dbus-monitor` subprocess and scraping its text output, which isn't something to blind-code
-// without a real KDE session to verify against. Falls back to "unknown" until this can be
-// built and tested against actual KDE Plasma Wayland hardware.
+// KDE Plasma Wayland: not implemented, but no longer blocked. KWin scripts can't return values, so
+// (as kdotool does) the script pushes results with callDBus(<our unique bus name>, "/", "", member,
+// ...) — a plain method call back into our own connection, not the custom signal previously assumed
+// here. That needs a real D-Bus client, which dbusConnection.cjs now gives us.
+//
+// Sketch: loadScript(path, name) on org.kde.KWin /Scripting org.kde.kwin.Scripting → id (-1 if that
+// name is already loaded), run() on /Scripting/Script{id}, unloadScript(name) after; the script
+// reads workspace.activeWindow (.resourceClass/.caption) or hooks workspace.windowActivated.
+// Undecided: load/run/unload per paste (only ever learns the window pasted into) vs. a resident
+// script (free at paste time, but streams us every window title). Wants its own DBusConnection —
+// the portal's is module-private and only conditionally alive — plus two gaps filled: _dispatch()
+// drops inbound METHOD_CALL, and call() has no timeout (idiom in portalShortcuts.cjs). Unverified
+// without real KDE Plasma Wayland hardware.
 async function getViaKwin() {
   return null;
 }

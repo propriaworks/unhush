@@ -4,9 +4,9 @@
 [![Status](https://img.shields.io/badge/status-actively--maintained-brightgreen)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
 
-Unhush is a fast, system-wide voice input application for Linux.
+Unhush delivers fast, system-wide voice input for Linux.
 
-For the longest time, computer input has been quiet. Just keyboard and mouse. No longer. Unlock the power of your voice with *Unhush*, for at least 3x faster input.
+For the longest time, computer input has been quiet. Just keyboard and mouse. No longer! Unlock the power of your voice with *Unhush*, for at least 3x faster input.
 
 Unhush provides seamless speech-to-text using AI transcription, allowing you to dictate anywhere and have text delivered instantly. It offers functionality comparable to *Wispr Flow* (a commercial voice dictation app for Windows and macOS).
 
@@ -20,29 +20,23 @@ Unhush provides seamless speech-to-text using AI transcription, allowing you to 
 - **Multilingual** - Supports 99+ languages with automatic detection
 - **Minimal UI** - Slim, transparent recording bar with real-time audio waveform
 - **System Tray** - Quick access to settings and app controls
-- **Wayland & X11 Support** - Works on both display servers (Wayland more require [more setup](#wayland-setup))
-- **Privacy First** - Records locally before sending to API. Both the transcription and formatting endpoints can be local for *total privacy* — see [Using Local Models](docs/local-models.md)
+- **Wayland & X11 Support** - Works on both display servers (Wayland may require [more setup](#wayland-setup))
+- **Privacy First** - Records locally before sending to API. Both the transcription and formatting API endpoints can be local for *total privacy* — see [Using Local Models](docs/local-models.md)
 - **Auto-start & Warm-up** - Unhush can start local servers automatically on first use and pre-load models into GPU memory to reduce first-request latency
-- **Attenuate Background Audio** - Optionally lowers other apps' volume while recording (with a smooth ramp, not an abrupt cut), so ambient music or notifications don't compete with your voice
+- **Attenuate Background Audio** - Optionally lowers other apps' volume while recording, so ambient music or notifications don't compete with your voice
 
 ## Requirements
 
 - Linux (Debian 10+ / Ubuntu 22.04+ / Fedora 32+ / Arch Linux) with native packages, or anything with AppImage and glibc 2.29+ (which includes Ubuntu 18.04+)
 - Microphone access
 - Internet connection (for cloud API calls) or a local Whisper server (see below)
-- **ydotool** — Required for **Paste** (default) and **Type** output modes; not needed for **Clipboard** mode
-  - `.deb` / `.rpm` / `.pacman` installs: ydotool is installed automatically as a package dependency
-  - AppImage: install ydotool manually (see below)
-- **xprop** (X11 sessions only, optional) — enables the "sent ➜ \<app\>" tray indicator (see [System Tray](#system-tray)); harmless if absent, the tray just won't show a destination
-  - Usually already installed (it's a base X11 utility). `.deb` installs recommend it automatically; `.rpm`/`.pacman`/AppImage: install manually if missing — `x11-utils` (Debian/Ubuntu), `xprop` (Fedora/RHEL), `xorg-xprop` (Arch)
-  - Not applicable on Wayland sessions (see [Wayland Setup](#wayland-setup) for what's supported there instead)
 
 ## Installation
 
 <details open>
 <summary>As a system package</summary>
 
-Download the latest release from the [Releases](https://github.com/propriaworks/unhush/releases) page and install:
+Download the latest release from the [Releases](https://github.com/propriaworks/unhush/releases) page and install using the applicable command:
 
 ```bash
 sudo apt install ./unhush_*.deb          # Debian / Ubuntu / Mint
@@ -64,15 +58,12 @@ The `.deb`, `.rpm`, and `.pacman` packages automatically:
 <details>
 <summary>AppImage</summary>
 
-Download and run the AppImage, no installation needed (after making it executable).
+Download and run the AppImage, no installation needed (after making it executable with `chmod +x unhush-*.AppImage`).
 
-Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcribed text to the active input field, so is normally required, unless you want to instead manually paste using the clipboard. AppImage users need to install it themselves; it's normally available via platform package managers.
+Unhush uses [`ydotool`](https://github.com/ReimuNotMoe/ydotool) to send transcribed text to the active input field, so is normally required, unless you want to instead manually paste using the clipboard.
 
-In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
+AppImage users need to install it (and optionally `xprop`) themselves. See [Manual Setup](#manual-setup-of-dependencies) below for further instructions.
 
-`ydotool` needs write access to `/dev/uinput`. At startup Unhush checks for everything it needs to paste — the `ydotool` binary, `/dev/uinput` access, and the `ydotoold` daemon — and if anything is missing it opens a setup window naming the specific problem, with the commands to fix it and a **Re-check** button. Since AppImage installs run no post-install script, this is where you'll be told what to do.
-
-On X11 sessions, also install `xprop` if you want the tray's "sent ➜ \<app\>" indicator (package name varies by distro — see [Requirements](#requirements)); it's optional and everything else works fine without it.
 </details>
 
 <details>
@@ -89,26 +80,43 @@ pnpm install
 # Run in development mode
 pnpm run electron:dev
 ```
+
+You may need to install or set up dependencies as described below.
+
 </details>
 
-### The `ydotoold` daemon
+### Manual setup of dependencies
 
-Nothing to do — Unhush handles this. ydotool 1.x is only a client: it forwards keystrokes over a
-unix socket to the `ydotoold` daemon, which is what actually holds `/dev/uinput` open. At startup
-Unhush looks for a daemon it can use and, finding none, starts its own as a child process on a
-socket private to Unhush (`$XDG_RUNTIME_DIR/unhush-ydotool.sock`). It exits with the app.
+If you're not using an installer, here's how to set up:
 
-If a ydotoold is already running on ydotool's default socket — because you started one yourself,
-or enabled Debian's or Arch's `ydotool.service` — Unhush adopts that one instead of starting a
-second.
+<details>
+<summary>ydotool and the ydotoold daemon</summary>
+
+`ydotool` allows Unhush to write the transcription output to whatever window you are currently using. It is required for **Paste** (default) and **Type** output modes. In **Clipboard** mode, you are responsible for pasting the output where you want it, so `ydotool` is not needed.
+
+At startup Unhush checks for everything it needs to paste — the `ydotool` binary, `/dev/uinput` access, and the `ydotoold` daemon — and if anything is missing it opens a setup window naming the specific problem, with the commands to fix it and a **Re-check** button. If you haven't used an installer, this is where you'll be told what to do.
+
+As a first step, install [ydotool](https://github.com/ReimuNotMoe/ydotool) manually (it's called `ydotool` in most major packaging systems).
+
+Once ydotool package is installed and your user has permission to write to `/dev/uinput`, you normally have nothing else to do for the `ydotoold` daemon to run — Unhush will handle this. ydotool 1.x is only a client: it forwards keystrokes over a unix socket to the `ydotoold` daemon, which is what actually holds `/dev/uinput` open. At startup Unhush looks for a daemon it can use and, finding none, starts its own as a child process on a socket private to Unhush (`$XDG_RUNTIME_DIR/unhush-ydotool.sock`). It exits with the app.
+
+If a ydotoold is already running on ydotool's default socket — because you started one yourself, or enabled Debian's or Arch's `ydotool.service` — Unhush adopts that one instead of starting a second.
+
+In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest ydotool release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
+
 
 Two distro notes:
-- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes
-  `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
-- As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does
-  not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds
-  `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in
-  `/run/user/<uid>/` and finds nothing. Leave it disabled.
+- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
+- As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in `/run/user/<uid>/` and finds nothing. Leave it disabled.
+</details>
+
+<details>
+<summary>xprop</summary>
+
+`xprop` allows Unhush to identify the destination window where the transcription is being sent, for informational purposes. This is optional, and only useful for X11 sessions. If it's installed, it enables the "sent ➜ \<app\>" tray indicator (see [System Tray](#system-tray)). If it's absent, or if we're running Wayland, the tray just won't show a destination
+
+On X11, `xprop` is usually already installed (it's a base X11 utility). `.deb` installs recommend it automatically; `.rpm`/`.pacman`/AppImage: install manually if missing — `x11-utils` (Debian/Ubuntu), `xprop` (Fedora/RHEL), `xorg-xprop` (Arch)
+</details>
 
 ## Usage
 
@@ -129,9 +137,9 @@ Two distro notes:
 
 ### Recording
 
-1. Press your *hotkey* to start recording (bar appears)
+1. Press your *hotkey* or click the systray icon to start recording (bar appears)
 2. When the chime sounds and the bar turns red, **speak into your microphone** — there is no time limit
-3. Press your *hotkey* again to stop — a second chime plays and a thinking indicator appears while your speech is transcribed
+3. Press your *hotkey* or the icon again to stop — a second chime plays and a thinking indicator appears while your speech is transcribed
 4. Text is delivered to your cursor — pasted instantly by default (see Output mode in Settings)
 
 ### Choosing a Microphone
@@ -149,7 +157,7 @@ The change takes effect on the next recording — no restart needed.
 
 - **Left-click**: Toggle recording (same as hotkey-press)
 - **Right-click**: Open menu (Settings, Copy last transcript, Quit)
-- After a **Paste**/**Type** output, the menu shows which app/window received it (e.g. "sent ➜ firefox — some title"), right under "Copy last". This is tray-only and never written to the log file, since window titles can contain sensitive content. Platform support varies:
+- After a **Paste**/**Type** output, the menu shows which app/window received it (e.g. "sent ➜ firefox — some title"), right under "Copy last". This is tray-only and never written to the log file, to preserve privacy. Platform support varies:
 
   | Platform | Support |
   |---|---|
@@ -170,53 +178,40 @@ portal** over D-Bus, which is independent of XWayland. On first run Unhush asks 
 <details>
 <summary>Changing the shortcut on Wayland</summary>
 
-The key belongs to your desktop environment, not to Unhush — Unhush can only make a suggestion when it first registers, and after that only your desktop can change it. **Settings → Usability** shows the key
-that is live and a **Change shortcut…** button, which opens your desktop's own shortcut editor
-focused on Unhush's entry. Add whichever key you prefer there; on KDE you can also untick the
-default one, so just your own (added) key keeps working.
+The key is controlled by your desktop environment, not Unhush — Unhush can only make a suggestion when it first registers, and after that only your desktop can change it. **Settings → Usability** shows the key that is live and a **Change shortcut…** button, which opens your desktop's own shortcut editor focused on Unhush's entry. Add whichever key you prefer there; on KDE at least, you can also untick the default one, so just your own (added) key keeps working.
 
 Two things worth knowing:
 
-- The entry stays in your desktop's shortcut settings after uninstalling Unhush. The portal has no
-  way to remove a binding — delete the Unhush entry by hand if you want it gone.
-- If you untick *every* key for Unhush, the shortcut is registered but can't fire. Settings says so
-  rather than showing a key that does nothing.
+- The entry stays in your desktop's shortcut settings after uninstalling Unhush. The portal has no way to remove a binding — delete the Unhush entry by hand if you want it gone.
+- If you untick *every* key for Unhush, the shortcut is registered but can't fire.
 
 </details>
 
 <details>
-<summary>If your compositor has no GlobalShortcuts portal</summary>
+<summary>Manual Shortcut Key setup</summary>
 
-The portal's GlobalShortcuts interface is implemented by KDE Plasma, GNOME and Hyprland. The
-wlroots-based compositors (sway, river, Wayfire) don't have it, so there Unhush cannot register
-anything and you bind the key yourself, to:
+Unhush can make use of the GlobalShortcuts interface implemented by KDE Plasma, GNOME and Hyprland (it can also fully manage it from X11). But the wlroots-based compositors (sway, river, Wayfire) don't have it, so you'll need to bind the key yourself, to:
 
 ```
 unhush-toggle
 ```
 
-That helper is installed by the deb/rpm/pacman packages. It toggles recording on/off, or, if Unhush
-isn't running, starts it. On an **AppImage** or custom build, there's no installer to place the
-helper, so use the [command it wraps instead](#the-command-pipe) — Unhush shows the exact line to use
+That helper is installed by the deb/rpm/pacman packages. It toggles recording on/off, or, if Unhush isn't running, starts it. On an **AppImage** or custom build, there's no installer to place the helper, so use the [command it wraps instead](#the-command-pipe) — Unhush shows the exact line to use
 in **Settings → Usability**, and in the setup window on first run.
 
-Where to add it: your compositor's config file (`~/.config/sway/config` and friends), or the
-"custom shortcuts" page of whatever settings app your desktop provides.
+Where to add it: your compositor's config file (`~/.config/sway/config` and friends), or the "custom shortcuts" page of whatever settings app your desktop provides.
 
 </details>
 
 ### The command pipe
 
-Unhush listens on a named pipe at `$XDG_RUNTIME_DIR/unhush.fifo` on every session type, X11
-included. Anything that can write a line can drive it:
+Unhush listens on a named pipe at `$XDG_RUNTIME_DIR/unhush.fifo` on every session type, X11 included — this is the method used by `unhush-toggle`. If you don't have `unhush-toggle`, you can do it yourself:
 
 ```sh
 printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"
 ```
 
-This is useful beyond Wayland — it lets you bind a key the Settings dropdown doesn't offer, or start
-and stop dictation from a script. The pipe is created mode 0600 inside your own runtime directory,
-and is removed when Unhush exits.
+This is useful beyond Wayland — it lets you bind a key the Settings dropdown doesn't offer, or start and stop dictation from a script. The pipe is created mode 0600 inside your own runtime directory, and is removed when Unhush exits.
 
 ## Auto-starting Unhush
 
@@ -225,9 +220,7 @@ and is removed when Unhush exits.
 
 This can be done in several ways, depending partly upon how you installed:
 
-- **Package install — Settings toggle** (recommended): open **Settings → Usability** and turn on
-  **Start at login**. The package ships a systemd `--user` unit (disabled by default); this just
-  enables it.
+- **Package install — Settings toggle** (recommended): open **Settings → Usability** and turn on **Start at login**. The package ships a systemd `--user` unit (disabled by default); this just enables it.
 
 - **Package install — XDG autostart** (works on GNOME, KDE, XFCE, and most DEs):
   ```bash
@@ -240,16 +233,11 @@ This can be done in several ways, depending partly upon how you installed:
   - **KDE Plasma**: open **System Settings → Autostart** and add `/usr/local/bin/unhush`
   - **Other**: most have an Autostart or Session Startup settings configuration; add Unhush as `/usr/local/bin/unhush`
 
-- **AppImage**: no installer, so no systemd service is provided — use the Desktop Environment approach,
-  or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command.
+- **AppImage**: no installer, so no systemd service is provided — use the Desktop Environment approach (preferred), or write a systemd `--user` unit by hand, substituting `/path/to/Unhush.AppImage` as the command.
   Service unit notes:
-  - `--no-sandbox` is AppImage-specific: Chromium's sandbox helper needs to be root-owned with the setuid bit, but an
-    AppImage extracts to a FUSE mount owned by you, so the bit can never take effect there.
-  - Plain `Type=simple` (the default) is fine here — there is only ever one process for the app's
-    whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
-  - `--ozone-platform=x11` picks XWayland on a Wayland session (Chromium needs this on the real
-    command line) and is a no-op on X11, so it's safe to include unconditionally. Leaving it off
-    also works — Unhush falls back to re-execing itself in place (same PID) if it's missing.
+  - `--no-sandbox` is AppImage-specific: Chromium's sandbox helper needs to be root-owned with the setuid bit, but an AppImage extracts to a FUSE mount owned by you, so the bit can never take effect there.
+  - Keep the default `Type=simple` here — there is only ever one parent process for the app's whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
+  - `--ozone-platform=x11` picks XWayland on a Wayland session and is a no-op on X11, so it's safe to include unconditionally. Leaving it off also works — Unhush falls back to re-execing itself in place (same PID) if it's missing, but including it saves time.
   - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
@@ -274,7 +262,7 @@ This can be done in several ways, depending partly upon how you installed:
 
 | Provider | Model | Cost | Get API Key |
 |----------|-------|------|-------------|
-| **Groq** | `whisper-large-v3-turbo` | Free tier for most | [console.groq.com](https://console.groq.com/keys) |
+| **Groq** | `whisper-large-v3-turbo` | Free tier for most, then paid | [console.groq.com](https://console.groq.com/keys) |
 | **OpenAI** | `whisper-1` | Paid | [platform.openai.com](https://platform.openai.com/api-keys) |
 | **Custom** | Any OpenAI-compatible transcriptions endpoint | Free if local | — |
 
@@ -286,7 +274,7 @@ After transcription, Unhush can send the raw transcript to an LLM to clean it up
 
 | Provider | Default model | Cost | Notes |
 |----------|--------------|------|-------|
-| **Groq** | `llama-3.3-70b-versatile` | Free tier | Uses your Groq API key from the transcription tab |
+| **Groq** | `llama-3.3-70b-versatile` | Free tier, then paid | Uses your Groq API key from the transcription tab |
 | **OpenAI** | `gpt-4.1-mini` | Paid | Uses your OpenAI API key from the transcription tab |
 | **Custom** | — | Free if local | Default URL: `http://localhost:11434` ([ollama](https://ollama.com)) |
 
@@ -351,7 +339,7 @@ Settings in this file are loaded at startup and take precedence over any previou
 
 ## Troubleshooting
 
-Unhush logs to `~/.config/unhush/logs/unhush.log` (Linux). When something goes wrong, check there first.
+Unhush logs to `~/.config/unhush/logs/unhush.log`. When something goes wrong, check there first.
 
 <details>
 <summary>Text not being typed / ydotool not working</summary>
