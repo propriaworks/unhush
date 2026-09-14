@@ -10,13 +10,21 @@ Running Unhush entirely locally gives you:
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
-Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an nVidia GPU.
+Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an NVidia GPU. 
 
 ---
 
-## Local Transcription — speaches
+## Local Transcription 
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text model endpoint (as we require) and supports GPU acceleration via faster-whisper. Speaches also supports Text-to-Speech models, but this is not used by Unhush and need not be configured. An alternative server is [whisper.cpp](https://github.com/ggerganov/whisper.cpp), which can run on GGML quantized models.
+Unhush requires a speech-to-text engine which exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint. For this we recommend `speaches`, which is described in detail below. There are other compatible alternatives available, however, and these are particularly interesting if your GPU has little available memory, or if you need to use a CPU instead.
+
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) is capable of running GGML quantized models, which can be smaller
+- [parakeet server](https://github.com/achetronic/parakeet) supports surprisingly fast CPU-optimized execution with the parakeet models
+- [stt server](https://github.com/PhilHem/stt-server) is a flexible and performant model server supporting both parakeet and other models, with or without GPU
+
+### Speaches
+
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It supports the openAI endpoint we require, along with GPU acceleration via faster-whisper, and model auto-loading. Speaches also supports Text-to-Speech models, but this is not used by Unhush and that part need not be configured. 
 
 ### Speaches Setup
 
@@ -88,9 +96,11 @@ Replace `compose.cuda-cdi.yaml` with whichever variant you need (see setup above
 | `Systran/faster-distil-whisper-large-v3` | ~1.5 GB | **English only** | Fast and accurate, but English only |
 | `Systran/faster-distil-whisper-small.en` | ~150 MB | **English only** | Very fast; English only |
 
-- **Note:** `distil-whisper` models are English-only — they will transcribe non-English speech as English regardless of input language. Use a non-distilled model for multilingual use.
+- **Note:** `distil-whisper` models are typically English-only — they will transcribe non-English speech as English regardless of input language. Use a non-distilled model for multilingual use.
 
 - To list all models available for download: `SPEACHES_BASE_URL="http://localhost:8000" uvx speaches-cli registry ls --task automatic-speech-recognition | jq '.data[].id' | sort` (requires `uv` and `jq`)
+
+The NVidia Parakeet models are particularly small and still have very good accuracy, while supporting a subset of European languages. Despite being created by NVidia, they can run well on CPU. This is an alternative worth exploring if you are memory or compute-constrained. (See [alternative servers](#local-transcription) above, as speaches is not designed to use Parakeet models).
 
 ---
 
