@@ -6,11 +6,13 @@ import {
   validateTranscriptionConfig,
   transcribeAudioBlob,
 } from "../audio/transcriptionApi";
+import { languageFromText } from "../audio/languageDetection";
 import { VAD_CONFIG } from "../audio/vadConfig";
 import { getBaseUrl, invalidateServiceContact } from "../audio/customModelService";
 
 interface UseAudioRecorderReturn {
   isRecording: boolean;
+  detectedLanguage: string | null;
   audioLevel: number;
   transcriptionProgress: { completed: number; total: number } | null;
   fatalTranscriptionError: Error | null;
@@ -23,6 +25,7 @@ interface UseAudioRecorderReturn {
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [transcriptionProgress, setTranscriptionProgress] = useState<{
     completed: number;
@@ -51,6 +54,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const vadActiveRef = useRef(false); // current recording is using the VAD path
   const segmentAccumulatorRef = useRef<SegmentAccumulator | null>(null);
   const whisperQueueRef = useRef<WhisperQueue | null>(null);
+  // Only allow a later segment to replace the indicator. Network responses can finish out of
+  // order when more than one transcription request is in flight.
+  const latestLanguageSegmentRef = useRef(-1);
   // Per-recording gates read by the persistent onFrameProcessed callback
   const accumulateFramesRef = useRef(false); // don't accumulate audio until chime finishes
   const firstFrameResolveRef = useRef<(() => void) | null>(null);
@@ -277,6 +283,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     const config = getTranscriptionConfig();
     const validationError = validateTranscriptionConfig(config);
     if (validationError) throw new Error(validationError.message);
+    setDetectedLanguage(null);
+    latestLanguageSegmentRef.current = -1;
 
     try {
       // Stage timings for the one-line startup summary logged below. getUserMedia is the
@@ -355,12 +363,19 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       };
       whisperQueue.onLog = wlog;
       whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
-      if (debugAudio) {
-        debugSegmentTranscriptsRef.current = new Map();
-        whisperQueue.onSegmentTranscribed = (idx, text, latencyMs) => {
+      whisperQueue.onSegmentTranscribed = (idx, text, latencyMs, language) => {
+        const detected = language || languageFromText(text);
+        if (detected && idx >= latestLanguageSegmentRef.current) {
+          latestLanguageSegmentRef.current = idx;
+          setDetectedLanguage(detected);
+        }
+        if (debugAudio) {
           const existing = debugSegmentTranscriptsRef.current.get(idx);
           debugSegmentTranscriptsRef.current.set(idx, { text, durationSec: existing?.durationSec ?? 0, latencyMs });
-        };
+        }
+      };
+      if (debugAudio) {
+        debugSegmentTranscriptsRef.current = new Map();
       }
       whisperQueueRef.current = whisperQueue;
 
@@ -589,7 +604,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         saveDebugBlob(audioBlob, `full-recording.${ext}`);
 
         setTranscriptionProgress({ completed: 0, total: 1 });
-        transcript = await transcribeAudioBlob(audioBlob, config);
+        const result = await transcribeAudioBlob(audioBlob, config);
+        transcript = result.text;
+        if (result.language) {
+          latestLanguageSegmentRef.current = 0;
+          setDetectedLanguage(result.language);
+        }
         setTranscriptionProgress({ completed: 1, total: 1 });
 
         if (debugSessionRef.current) {
@@ -621,6 +641,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   return {
     isRecording,
+    detectedLanguage,
     audioLevel,
     transcriptionProgress,
     fatalTranscriptionError,

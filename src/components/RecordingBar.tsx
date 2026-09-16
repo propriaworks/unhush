@@ -21,6 +21,7 @@ function RecordingBar() {
 
   const {
     isRecording,
+    detectedLanguage,
     audioLevel,
     fatalTranscriptionError,
     startRecording,
@@ -351,10 +352,10 @@ function RecordingBar() {
     }
 
     if (isRecording) {
-      return <Waveform audioLevel={audioLevel} isRecording={isRecording} />;
+      return <Waveform audioLevel={audioLevel} isRecording={isRecording} language={detectedLanguage} />;
     }
 
-    return <Waveform audioLevel={0} isRecording={false} />;
+    return <Waveform audioLevel={0} isRecording={false} language={detectedLanguage} />;
   };
 
   return (
