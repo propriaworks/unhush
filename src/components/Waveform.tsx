@@ -1,15 +1,18 @@
 import { useEffect, useRef } from "react";
+import { getLanguageStyle } from "../audio/languageDetection";
 
 interface WaveformProps {
   audioLevel: number;
   isRecording: boolean;
+  language?: string | null;
   onClick?: () => void;
 }
 
-export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
+export function Waveform({ audioLevel, isRecording, language, onClick }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>(0);
   const prevBarsRef = useRef<number[]>([]);
+  const languageStyle = getLanguageStyle(language);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -37,11 +40,11 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
     // its slice, so the highlight band appears continuous across all bars.
     // Appears as chrome cylinder lit from straight ahead.
     const metalGradient = ctx.createLinearGradient(0, 0, 0, height);
-    metalGradient.addColorStop(0,    "#1a3dbe"); // shadow at top edge
-    metalGradient.addColorStop(0.35, "#2e5bff"); // primary rising
-    metalGradient.addColorStop(0.5,  "#a0b4ff"); // specular at bar centers
-    metalGradient.addColorStop(0.65, "#2e5bff"); // primary falling
-    metalGradient.addColorStop(1,    "#1a3dbe"); // shadow at bottom edge
+    metalGradient.addColorStop(0, languageStyle.color);
+    metalGradient.addColorStop(0.35, languageStyle.color);
+    metalGradient.addColorStop(0.5, "#ffffff"); // specular at bar centers
+    metalGradient.addColorStop(0.65, languageStyle.color);
+    metalGradient.addColorStop(1, languageStyle.color);
 
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
@@ -106,14 +109,26 @@ export function Waveform({ audioLevel, isRecording, onClick }: WaveformProps) {
     return () => {
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [audioLevel, isRecording]);
+  }, [audioLevel, isRecording, language, languageStyle.color]);
 
   return (
     <div
-      className="flex items-center justify-center py-2 cursor-pointer"
+      className="relative flex items-center justify-center py-2 cursor-pointer"
       onClick={onClick}
     >
       <canvas ref={canvasRef} width={160} height={60} />
+      {isRecording && (
+        <span
+          className="absolute right-0 top-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
+          style={{
+            color: languageStyle.color,
+            border: `1px solid ${languageStyle.color}`,
+          }}
+          aria-live="polite"
+        >
+          {languageStyle.label}
+        </span>
+      )}
     </div>
   );
 }

@@ -2,11 +2,17 @@
 export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000";
 
 import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
+import { languageFromText, normalizeLanguageCode } from "./languageDetection";
 
 export interface TranscriptionConfig {
   apiUrl: string;
   apiKey: string;
   model: string;
+}
+
+export interface TranscriptionResult {
+  text: string;
+  language: string;
 }
 
 /** reasonKey distinguishes causes that need separate tray messages (see main.cjs
@@ -60,7 +66,7 @@ export function validateTranscriptionConfig(config: TranscriptionConfig): Config
 export async function transcribeAudioBlob(
   audioBlob: Blob,
   config: TranscriptionConfig,
-): Promise<string> {
+): Promise<TranscriptionResult> {
   const provider = localStorage.getItem("unhush_provider") || "groq";
   const formData = new FormData();
 
@@ -105,6 +111,32 @@ export async function transcribeAudioBlob(
     }
   }
 
-  const text = await response.text();
-  return text.trim();
+  // OpenAI-compatible services normally return plain text here. Custom multilingual services can
+  // additionally expose X-Unhush-Language (or a JSON language/language_code field) without
+  // changing that contract. Keep script detection as a safe fallback for native-script output.
+  const headerLanguage = response.headers.get("X-Unhush-Language")
+    || response.headers.get("X-Detected-Language")
+    || "";
+  const contentType = response.headers.get("content-type") || "";
+  let text = "";
+  let responseLanguage = headerLanguage;
+  if (contentType.toLowerCase().includes("json")) {
+    const payload: unknown = await response.json();
+    if (typeof payload === "string") {
+      text = payload;
+    } else if (payload && typeof payload === "object") {
+      const record = payload as Record<string, unknown>;
+      const rawText = record.text ?? record.transcript ?? "";
+      text = rawText == null ? "" : String(rawText);
+      const rawLanguage = record.language ?? record.language_code ?? "";
+      if (!responseLanguage && rawLanguage != null) responseLanguage = String(rawLanguage);
+    }
+  } else {
+    text = await response.text();
+  }
+
+  return {
+    text: text.trim(),
+    language: normalizeLanguageCode(responseLanguage) || languageFromText(text),
+  };
 }

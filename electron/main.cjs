@@ -662,6 +662,13 @@ ipcMain.handle("output-text", async (event, text, method) => {
         await doPaste();
         break;
       case "type": {
+        // xdotool's X11 keysym mapper cannot reliably emit Indic and other non-ASCII characters.
+        // Use the clipboard-selection path for Unicode so Bengali/Hindi text is not transliterated
+        // or corrupted by the current keyboard layout; ASCII keeps the fast key-by-key path.
+        if ([...text].some((character) => character.codePointAt(0) > 0x7f)) {
+          await doPaste();
+          break;
+        }
         // The dictated text is written to disk, because `ydotool type` needs to read it from a file.
         // Only one ever exists at a time and it is unlinked in the finally below. It is written
         // into XDG_RUNTIME_DIR (0700, tmpfs, cleared at logout -- if it exists) rather than /tmp.
