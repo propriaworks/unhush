@@ -84,7 +84,13 @@ async function outputText(text, method) {
   }
 
   async function doPaste() {
-    const saved = await clipboard.save();
+    // A failed save only costs the restore below; it must not stop the paste itself.
+    let saved = null;
+    try {
+      saved = await clipboard.save();
+    } catch (err) {
+      log('warn', `clipboard: could not save previous contents (${err.message}) — it won't be restored`);
+    }
     await clipboard.writeTextBoth(text); // both selections -- see writeTextBoth for why
     await new Promise(resolve => setTimeout(resolve, 250));
     captureDestination();
@@ -117,7 +123,7 @@ async function outputText(text, method) {
     // annoyance rather than a loss, but an avoidable one.
     setTimeout(async () => {
       try {
-        if (keySent && await clipboard.readText() === text) {
+        if (keySent && saved && await clipboard.readText() === text) {
           await clipboard.restore(saved);
         }
       } catch (err) {
