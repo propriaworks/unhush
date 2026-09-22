@@ -105,8 +105,16 @@ If a ydotoold is already running on ydotool's default socket — because you sta
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest ydotool release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
 
+**Keyboard layouts are a reason to prefer 1.x.** If you use a layout other than US-QWERTY, and run X11, or Wayland with sway or hyperland, you should use 1.x if you want **Type** mode output. **Paste** mode is unaffected on every version, since the text travels through the clipboard instead.
+
+ydotool types by sending key *positions* from a fixed US-QWERTY table, which your desktop then maps through whatever layout you actually use — so on AZERTY, QWERTZ, Dvorak, a Spanish layout and so on, **Type** mode produces the wrong characters. On AZERTY, asking for `q` gives `a` and `1` gives `&`; on a Spanish layout `;` becomes `ñ`, and the apostrophe becomes a dead key that swallows the following letter, so `it's` is typed `itś`.
+
+With ydotool **1.x**, Unhush fixes this automatically: `ydotoold` keeps one virtual keyboard open for as long as it runs, so Unhush gives *that device* its own US layout and leaves your real keyboard alone. Nothing to configure. It needs a display server that supports per-device keyboard configuration — currently X11 (any desktop), sway, or Hyprland. Under GNOME or KDE on Wayland there is no such mechanism, and so **Type** mode only works properly on US-QWERTY.
+
+With ydotool **0.x** it cannot be fixed on any desktop: the client opens `/dev/uinput` for each keystroke and closes it again, so there is no lasting device to configure. If you want to use a non-QWERTY layout with **Type** mode, **upgrade to ydotool 1.x**.
+
 Two distro notes:
-- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
+- **Ubuntu** 22.04 (and Linux Mint 22) ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run (although the 0.1.8 package does still install a `ydotoold` binary), and it uses key *names* rather than the keycodes 1.x wants. This version cannot support non-QWERTY layouts, as explained above.
 - As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in `/run/user/<uid>/` and finds nothing. Leave it disabled.
 </details>
 
@@ -239,15 +247,21 @@ This can be done in several ways, depending partly upon how you installed:
   - Keep the default `Type=simple` here — there is only ever one parent process for the app's whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
   - `--ozone-platform=x11` picks XWayland on a Wayland session and is a no-op on X11, so it's safe to include unconditionally. Leaving it off also works — Unhush falls back to re-execing itself in place (same PID) if it's missing, but including it saves time.
   - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
+  - `RestartSec=5` with a relaxed start limit: a unit pulled in by `default.target` starts when the
+    login session opens, which can be a few seconds before anything exports `DISPLAY`. Unhush exits
+    straight away in that case, and these settings let systemd keep retrying for about two and a half minutes instead of giving up after five tries in ten seconds.
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
   [Unit]
   Description=Unhush Voice Dictation
+  StartLimitIntervalSec=300
+  StartLimitBurst=30
 
   [Service]
   KillMode=mixed
   ExecStart=/path/to/Unhush.AppImage --no-sandbox --ozone-platform=x11
   Restart=on-failure
+  RestartSec=5
 
   [Install]
   WantedBy=default.target
@@ -363,6 +377,23 @@ The checks it runs, if you'd rather do them by hand:
   If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
 
   In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>` — but note that a running process can't pick up new group membership, so log out and back in afterwards.
+</details>
+
+<details>
+<summary>Type mode produces the wrong characters on my keyboard layout</summary>
+
+Typed output is wrong but plausible — `q` comes out `a`, `;` comes out `ñ`, or `it's` comes out `itś` — while **Paste** mode is fine.
+
+ydotool sends key *positions*, not characters, so what arrives depends on your keyboard layout. Unhush corrects this by giving ydotool's own virtual keyboard a US layout, but that needs ydotool **1.x** *and* X11, sway or Hyprland. See [ydotool and the ydotoold daemon](#ydotool-and-the-ydotoold-daemon) for what to do — in short, upgrade to ydotool 1.x, or use **Paste** mode, which is never affected.
+
+The Settings window says which applies to you: under **Type**, "Only the QWERTY keyboard layout is supported" means the correction is not available in this session. With `debug_logging` on, the startup log says so too — look for `virtual keyboard: pinned device ... to the us layout`.
+
+Text with accents or non-Latin scripts is a separate matter: it can't be typed at all, so it is always pasted instead, whatever your layout.
+</details>
+
+<details>
+<summary>I'm getting weird characters like 4114 / Unhush isn't using the right `ydotoold`</summary>
+**If you have more than one ydotool installed** — say your distribution's package in `/usr/bin` plus a newer build in `~/.local/bin` — Unhush picks one deliberately rather than taking whatever `PATH` happens to resolve to. It looks along `PATH` and then in `~/.local/bin`, `/usr/local/bin`, `/usr/bin` and `/bin`, asks each `ydotool` it finds which generation it is, and prefers a complete 1.x install (a `ydotool` with a `ydotoold` in the *same* directory) over a 0.x one; a 0.x install wins only if there is no complete 1.x. Client and daemon are always taken from the same directory, since the two generations cannot talk to each other. The startup log line says which was chosen and what else was found. We need to search beyond `PATH` because at login a `systemd --user` unit often starts before your session's `PATH` reaches systemd. If the wrong version is being used you may need to uninstall one or move the right one to one of these locations. If a v0.x ydotool is errantly sent commands from v1.x, it will produce gibberish. Ensure a consistent version is available in these paths.
 </details>
 
 <details>

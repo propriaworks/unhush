@@ -4,6 +4,7 @@ import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
 import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
+import { normalizePunctuation } from "../audio/textNormalization";
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -128,9 +129,18 @@ function RecordingBar() {
     isTranscribingRef.current = true;
     setIsTranscribing(true);
 
+    // Splits the wait between the hotkey and the text appearing into its two halves, so a slow
+    // dictation can be blamed on the transcription server or the formatting pass without turning
+    // on debug_audio (which writes every audio segment to disk). The per-segment latencies that
+    // does record are the finer measure; this is the wall clock, which on the chunked path is
+    // not their sum, since segments transcribe while recording continues.
+    const tStop = Date.now();
+    let tTranscribed = 0;
+
     try {
       const llmConfig = getLLMConfig();
       const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
+      tTranscribed = Date.now();
       window.electronAPI?.setTranscriptionWarning("runtime", false);
 
       if (transcript && window.electronAPI) {
@@ -182,6 +192,7 @@ function RecordingBar() {
               );
             }
           }
+          finalTranscript = normalizePunctuation(finalTranscript)
           if (localStorage.getItem("unhush_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
@@ -205,6 +216,8 @@ function RecordingBar() {
         }
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
+        window.electronAPI.log("debug",
+          `stop-recording: transcribe ${tTranscribed - tStop}ms, format ${Date.now() - tTranscribed}ms`);
         const outputMethod = (localStorage.getItem("unhush_output_method") || "paste") as OutputMethod;
         window.electronAPI.outputText(finalTranscript, outputMethod);
       } else if (window.electronAPI) {

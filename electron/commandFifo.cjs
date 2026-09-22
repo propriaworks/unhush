@@ -27,14 +27,9 @@ let fifoPath = null;
 let fd = null;
 let stream = null;
 
-// Where per-user transient state belongs: XDG_RUNTIME_DIR is mode 0700, on tmpfs, and cleared when
+// XDG_RUNTIME_DIR is where per-user transient state belongs: mode 0700, on tmpfs, and cleared when
 // the session ends -- so anything left there by a crash cannot outlive the login, and nothing
-// another user can read. Exported because main.cjs wants the same place for the scratch file that
-// Type mode hands to ydotool.
-function runtimeDir() {
-  return process.env.XDG_RUNTIME_DIR || os.tmpdir();
-}
-
+// another user can read.
 function resolvePath() {
   const xrd = process.env.XDG_RUNTIME_DIR;
   if (xrd) return path.join(xrd, "unhush.fifo");
@@ -119,4 +114,4 @@ function stop() {
   fd = null;
 }
 
-module.exports = { init, start, stop, socketPath, toggleCommand, runtimeDir };
+module.exports = { init, start, stop, socketPath, toggleCommand };

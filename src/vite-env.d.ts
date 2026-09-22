@@ -31,6 +31,12 @@ declare global {
       // persisted setting from Settings to main; this one *commands* Settings to select a value.
       onSetOutputMethodUiSetting: (callback: (event: unknown, method: string) => void) => void;
       updateShortcut: (shortcut: string) => Promise<boolean>;
+      getTypeModeInfo: () => Promise<{
+        // True when ydotool's virtual keyboard has its own US layout, which makes Type mode
+        // correct on any layout. False means Type mode only produces US-QWERTY correctly:
+        // ydotool 0.x, or Wayland outside sway/Hyprland.
+        layoutPinned: boolean;
+      }>;
       getShortcutInfo: () => Promise<{
         // native: we hold the key grab (X11). portal: the desktop holds it for us (Wayland).
         // manual: no portal here, so the user binds `command` themselves.
