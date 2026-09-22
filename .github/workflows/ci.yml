@@ -223,3 +223,6 @@ jobs:
         with:
           files: release/*
           generate_release_notes: true
+          # Semver suffix (v3.3.0-pre1, -rc1, ...) → pre-release, which GitHub never
+          # treats as "latest", so the website's releases/latest links stay on stable
+          prerelease: ${{ contains(github.ref_name, '-') }}

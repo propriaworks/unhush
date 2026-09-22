@@ -15,6 +15,15 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg  = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
 
 const version     = pkg.version;
+
+// Pre-release versions (semver suffix, e.g. 3.3.0-pre1) are published as GitHub
+// pre-releases, which releases/latest/download never resolves to; leave the
+// download links pointing at the last stable version.
+if (version.includes('-')) {
+  console.log(`v${version} is a pre-release; docs/index.html left unchanged.`);
+  process.exit(0);
+}
+
 const productName = pkg.build?.productName ?? pkg.name;
 const pkgName     = pkg.name;                              // lowercase, used in deb/rpm filenames
 const targets     = pkg.build?.linux?.target ?? ['AppImage'];
