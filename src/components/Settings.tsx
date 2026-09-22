@@ -20,6 +20,20 @@ const OUTPUT_METHODS: OutputMethod[] = ["paste", "type", "clipboard"];
 const isOutputMethod = (v: string | null): v is OutputMethod =>
   OUTPUT_METHODS.includes(v as OutputMethod);
 
+export type TypeModeInfo = { layoutPinned: boolean };
+
+// What to warn about under Type, which depends on things only the main process can see. ydotool
+// sends key *positions* from a fixed US-QWERTY table, so the characters that arrive depend on
+// the user's layout -- unless its virtual keyboard has been given a US layout of its own, which
+// needs ydotool 1.x and either X11, sway or Hyprland (see electron/virtualKeyboard.cjs). Text
+// outside ASCII is pasted rather than typed either way. Until the main process answers, only the
+// part that is true everywhere is shown, so the text never changes from wrong to right.
+export function typeModeCaveat(info: TypeModeInfo | null): string {
+  const nonAscii = "Text with accents or non-Latin scripts is pasted instead.";
+  if (!info || info.layoutPinned) return nonAscii;
+  return `Only the QWERTY keyboard layout is supported. ${nonAscii}`;
+}
+
 const SHORTCUT_OPTIONS = [
   "Ctrl+Alt+R",
   "Ctrl+Alt+Space",
@@ -106,6 +120,8 @@ function Settings() {
   const [llmSystemPrompt, setLlmSystemPrompt] = useState(LLM_DEFAULT_SYSTEM_PROMPT);
   const [customStartCmd, setCustomStartCmd] = useState("");
   const [llmCustomStartCmd, setLlmCustomStartCmd] = useState("");
+  // null until the main process answers; Type's description depends on it (see typeModeCaveat).
+  const [typeModeInfo, setTypeModeInfo] = useState<TypeModeInfo | null>(null);
   const [transcriptionModels, setTranscriptionModels] = useState<ModelInfo[]>([]);
   const [llmModels, setLlmModels] = useState<ModelInfo[]>([]);
 
@@ -136,6 +152,8 @@ function Settings() {
     if (cachedT) setTranscriptionModels(cachedT);
     const cachedL = getCachedModels(getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || ""));
     if (cachedL) setLlmModels(cachedL);
+
+    window.electronAPI?.getTypeModeInfo().then(setTypeModeInfo);
 
     const loadShortcutInfo = () => {
       window.electronAPI?.getShortcutInfo().then((info) => {
@@ -499,7 +517,7 @@ function Settings() {
               </div>
               <p className="text-white/40 text-xs">
                 {outputMethod === "paste" && "Text is pasted instantly via the clipboard. Works in terminals and GUI apps. Avoids unexpected results."}
-                {outputMethod === "type" && "Characters typed one-by-one. Slower, but you can read the text as it appears."}
+                {outputMethod === "type" && `Characters typed one-by-one. Slower, but you can read the text as it appears. ${typeModeCaveat(typeModeInfo)}`}
                 {outputMethod === "clipboard" && "Text is copied to clipboard. You paste manually."}
               </p>
             </div>

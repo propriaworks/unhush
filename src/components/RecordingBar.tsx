@@ -129,9 +129,11 @@ function RecordingBar() {
     isTranscribingRef.current = true;
     setIsTranscribing(true);
 
-    // Phase timings for the gap between the hotkey and output-text, which is otherwise a single
-    // unexplained interval in the main log. Whichever of stop/transcribe and the LLM pass is
-    // responsible shows up here; nothing in this window touches the typing backend.
+    // Splits the wait between the hotkey and the text appearing into its two halves, so a slow
+    // dictation can be blamed on the transcription server or the formatting pass without turning
+    // on debug_audio (which writes every audio segment to disk). The per-segment latencies that
+    // does record are the finer measure; this is the wall clock, which on the chunked path is
+    // not their sum, since segments transcribe while recording continues.
     const tStop = Date.now();
     let tTranscribed = 0;
 
@@ -215,8 +217,7 @@ function RecordingBar() {
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
         window.electronAPI.log("debug",
-          `stop-recording: transcribe ${tTranscribed - tStop}ms, format ${Date.now() - tTranscribed}ms, `
-          + `${finalTranscript.length} chars`);
+          `stop-recording: transcribe ${tTranscribed - tStop}ms, format ${Date.now() - tTranscribed}ms`);
         const outputMethod = (localStorage.getItem("unhush_output_method") || "paste") as OutputMethod;
         window.electronAPI.outputText(finalTranscript, outputMethod);
       } else if (window.electronAPI) {

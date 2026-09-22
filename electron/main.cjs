@@ -708,6 +708,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
     await xSelectionDiag('pre-key');
     const sinceHotkey = lastHotkeyAt ? Date.now() - lastHotkeyAt : -1;
     const t0 = Date.now();
+    let keySent = false;
     try {
       // execFile (async), not execSync: this keeps the main process' event loop free to service
       // the target app's clipboard-selection request, which we must answer as clipboard owner on
@@ -716,20 +717,23 @@ ipcMain.handle("output-text", async (event, text, method) => {
       // and errors/timeouts are still caught below -- this isn't fire-and-forget.
       // The binary and the key syntax both come from ydotool.cjs since they depend on the version.
       const { stderr } = await execFileAsync(ydotool.clientPath(), ydotool.pasteKeyArgs(20), { timeout: 5000, env: ydotool.env() });
+      keySent = true;
       log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
-      log('error', `output-text paste key simulation failed: ${err.message}`);
+      log('error', `output-text paste key simulation failed: ${err.message} — leaving the transcript on the clipboard`);
     }
     // One more reading after the paste should have landed, to catch ownership being lost/replaced
     // in the window around the keystroke itself.
     setTimeout(() => { xSelectionDiag('post-key+500ms'); }, 500);
     // Scheduled rather than awaited so this handler's promise resolves immediately instead of
-    // keeping the renderer's invoke() pending for RESTORE_CLIPBOARD_DELAY_MS. Skips the restore
-    // if the clipboard no longer holds our transcript: that means the user (or another process,
-    // e.g. a clipboard manager) has since taken ownership, and blindly restoring the old value
-    // would clobber that instead of being a harmless no-op.
+    // keeping the renderer's invoke() pending for RESTORE_CLIPBOARD_DELAY_MS. Skipped in two
+    // cases. If the clipboard no longer holds our transcript, the user (or a clipboard manager)
+    // has since taken ownership, and blindly restoring the old value would clobber that rather
+    // than be a harmless no-op. And if the keystroke never went out, we let the transcript stay
+    // on the clipboard unpasted. The tray's "Copy last" can always put it back, so that is an
+    // annoyance rather than a loss, but an avoidable one.
     setTimeout(() => {
-      if (clipboard.readText() === text) {
+      if (keySent && clipboard.readText() === text) {
         restoreClipboard(saved);
       }
     }, RESTORE_CLIPBOARD_DELAY_MS);
@@ -754,10 +758,21 @@ ipcMain.handle("output-text", async (event, text, method) => {
         // and never appears in a command line. This replaced a 0600 scratch file in
         // XDG_RUNTIME_DIR; the pipe is strictly better -- nothing to unlink, nothing for a crash
         // to leave behind.
-        const tSetup = Date.now();
-        await new Promise(resolve => setTimeout(resolve, 250));
-        await captureDestination();
-        const setupMs = Date.now() - tSetup;
+        // Both of these are disabled on trial, and kept here because the reasoning is not
+        // airtight. The 250ms was inherited from doPaste(), where it earns its place letting a
+        // clipboard write settle before the paste key; nothing is written to the clipboard on
+        // this path. It was also suspected of giving focus time to return to the target app --
+        // but the recording pill is focusable:false and window-type notification, so it never
+        // holds focus for the hotkey path. The tray's "Toggle Recording" item *does* take focus
+        // while its menu is open, and that is the case to watch: there, a whole transcription
+        // round trip (seconds) elapses before we get here, which should cover it many times over.
+        // captureDestination() was awaited only because the old execFileSync blocked the event
+        // loop for the entire typing run, so an un-awaited call would not have resolved until
+        // afterwards; the async call below removed that reason.
+        // Restore both if the first characters of a transcript ever go astray.
+        // await new Promise(resolve => setTimeout(resolve, 250));
+        // await captureDestination();
+        captureDestination();
         const timeout = Math.max(5000, text.length * 50);
         // Time per character, start to start. ydotool splits it into a key hold and a gap, both
         // of which default to 20ms -- so setting only --key-delay leaves that hold underneath it.
@@ -771,21 +786,20 @@ ipcMain.handle("output-text", async (event, text, method) => {
           // long transcript takes seconds, and execFileSync would block this process' event loop
           // for every one of them, leaving us unable to answer anything in the meantime.
           // Still awaited, so the catch below still sees real failures.
-          const t0 = Date.now();
           const typing = execFileAsync(ydotool.clientPath(), ydotool.typeStdinArgs(TYPE_PERIOD_MS),
             { timeout, env: ydotool.env() });
           typing.child.stdin.end(text);
           await typing;
-          // Attribution for "typing feels slow": `setup` is our own fixed delay before a key is
-          // sent at all, `expected` is period x length -- the speed we asked for -- and anything
-          // in `took` beyond that is ydotool or the target application falling behind.
-          log('debug', `output-text: typed ${text.length} chars — `
-            + `setup ${setupMs}ms, took ${Date.now() - t0}ms, expected ~${text.length * TYPE_PERIOD_MS}ms`);
         } catch (err) {
-          // ydotool needs its daemon, which can die after having been reachable at startup.
-          // Losing the transcript over that would be the worst outcome, so fall back to pasting.
-          log('error', `output-text: ydotool type failed (${err.message}) — pasting instead`);
-          await doPaste();
+          // Deliberately not doPaste(). That presses Shift+Insert through the same ydotool that
+          // just failed, so the keystroke would almost certainly fail too -- and on a timeout it
+          // is worse than useless: ydotool may already have typed part of the transcript, so
+          // pasting the whole of it would duplicate what is there. Leave the text on the
+          // clipboard instead, exactly as the "ydotool is not installed" path above does, and
+          // let the user paste it themselves.
+          log('error', `output-text: ydotool type failed (${err.message}) — left on the clipboard`);
+          clipboard.writeText(text);
+          clipboard.writeText(text, 'selection');
         }
         break;
       }
@@ -910,6 +924,11 @@ ipcMain.handle("get-shortcut-info", async () => {
   await waylandShortcut.refresh();
   return waylandShortcut.shortcutInfo();
 });
+
+// What Type mode can manage in this session, for the description Settings shows under it. The
+// renderer cannot see any of it: whether ydotool's virtual keyboard could be given its own us
+// layout depends on the ydotool generation and the display server (see virtualKeyboard.cjs).
+ipcMain.handle("get-type-mode-info", () => ({ layoutPinned: ydotool.layoutPinned() }));
 
 // The only way to change a portal-bound key: the desktop's own editor, focused on our entry.
 ipcMain.handle("configure-shortcut", () => waylandShortcut.configure());

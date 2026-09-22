@@ -105,8 +105,16 @@ If a ydotoold is already running on ydotool's default socket — because you sta
 In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to use the [latest ydotool release](https://github.com/ReimuNotMoe/ydotool/releases/latest).
 
 
+**Keyboard layouts are a reason to prefer 1.x.** If you use a layout other than US-QWERTY, and run X11, or Wayland with sway or hyperland, you should use 1.x if you want **Type** mode output. **Paste** mode is unaffected on every version, since the text travels through the clipboard instead.
+
+ydotool types by sending key *positions* from a fixed US-QWERTY table, which your desktop then maps through whatever layout you actually use — so on AZERTY, QWERTZ, Dvorak, a Spanish layout and so on, **Type** mode produces the wrong characters. On AZERTY, asking for `q` gives `a` and `1` gives `&`; on a Spanish layout `;` becomes `ñ`, and the apostrophe becomes a dead key that swallows the following letter, so `it's` is typed `itś`.
+
+With ydotool **1.x**, Unhush fixes this automatically: `ydotoold` keeps one virtual keyboard open for as long as it runs, so Unhush gives *that device* its own US layout and leaves your real keyboard alone. Nothing to configure. It needs a display server that supports per-device keyboard configuration — currently X11 (any desktop), sway, or Hyprland. Under GNOME or KDE on Wayland there is no such mechanism, and so **Type** mode only works properly on US-QWERTY.
+
+With ydotool **0.x** it cannot be fixed on any desktop: the client opens `/dev/uinput` for each keystroke and closes it again, so there is no lasting device to configure. If you want to use a non-QWERTY layout with **Type** mode, **upgrade to ydotool 1.x**.
+
 Two distro notes:
-- **Ubuntu** (and Linux Mint) ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try — it also sends 0.x the key *names* that version expects rather than the keycodes 1.x wants. Note that the 0.1.8 package does still install a `ydotoold` binary; it is not a 1.x daemon, and starting it would not help.
+- **Ubuntu** 22.04 (and Linux Mint 22) ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run (although the 0.1.8 package does still install a `ydotoold` binary), and it uses key *names* rather than the keycodes 1.x wants. This version cannot support non-QWERTY layouts, as explained above.
 - As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in `/run/user/<uid>/` and finds nothing. Leave it disabled.
 </details>
 
@@ -369,6 +377,18 @@ The checks it runs, if you'd rather do them by hand:
   If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
 
   In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>` — but note that a running process can't pick up new group membership, so log out and back in afterwards.
+</details>
+
+<details>
+<summary>Type mode produces the wrong characters on my keyboard layout</summary>
+
+Typed output is wrong but plausible — `q` comes out `a`, `;` comes out `ñ`, or `it's` comes out `itś` — while **Paste** mode is fine.
+
+ydotool sends key *positions*, not characters, so what arrives depends on your keyboard layout. Unhush corrects this by giving ydotool's own virtual keyboard a US layout, but that needs ydotool **1.x** *and* X11, sway or Hyprland. See [ydotool and the ydotoold daemon](#ydotool-and-the-ydotoold-daemon) for what to do — in short, upgrade to ydotool 1.x, or use **Paste** mode, which is never affected.
+
+The Settings window says which applies to you: under **Type**, "Only the QWERTY keyboard layout is supported" means the correction is not available in this session. With `debug_logging` on, the startup log says so too — look for `virtual keyboard: pinned device ... to the us layout`.
+
+Text with accents or non-Latin scripts is a separate matter: it can't be typed at all, so it is always pasted instead, whatever your layout.
 </details>
 
 <details>

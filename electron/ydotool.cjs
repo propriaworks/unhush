@@ -46,6 +46,7 @@ let userDataPath = "";
 // depend on electron, and without it the socket-path and distro logic is testable as plain node.
 function init(logFn, userData) {
   log = logFn;
+  virtualKeyboard.init(logFn);
   userDataPath = userData || "";
   // Only reached when there's no XDG_RUNTIME_DIR, so a missing path here would go unnoticed until
   // the socket landed somewhere relative to the cwd. Say so instead.
@@ -66,6 +67,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // can't use its findBinary() helper, which stops at the first match: detecting the generation
 // split below needs every ydotool on the system, not just the first.
 const { candidateDirs, isExecutableFile } = require("./findBinary.cjs");
+const virtualKeyboard = require("./virtualKeyboard.cjs");
 
 // ydotool major version detection
 // 0 or 1, or null when the client didn't run or said something we don't recognise. `ydotool help`
@@ -246,6 +248,7 @@ function spawnDaemon(ydotooldPath, sockPath) {
     respawned = true;
     log("info", "restarting ydotoold");
     child = spawnDaemon(ydotooldPath, sockPath);
+    pinLayout(); // new daemon, new uinput device, so the layout must be pinned again
   });
   proc.on("error", (err) => log("error", `failed to spawn ydotoold: ${err.message}`));
   return proc;
@@ -299,6 +302,7 @@ async function ensureDaemon() {
     resolvedSocket = p;
     if (probeSocket(p)) {
       log("info", `using ydotoold at YDOTOOL_SOCKET=${p}`);
+      pinLayout();
       return { ok: true, adopted: true };
     }
     log("warn", `YDOTOOL_SOCKET=${p} is set but no daemon is listening there`);
@@ -310,6 +314,7 @@ async function ensureDaemon() {
   if (probeSocket(mine)) {
     resolvedSocket = mine;
     log("info", `adopted existing Unhush ydotoold at ${mine}`);
+    pinLayout();
     return { ok: true, adopted: true };
   }
 
@@ -319,6 +324,7 @@ async function ensureDaemon() {
   if (probeSocket(dflt)) {
     resolvedSocket = dflt;
     log("info", `adopted existing ydotoold at ${dflt}`);
+    pinLayout();
     return { ok: true, adopted: true };
   }
 
@@ -343,7 +349,17 @@ async function ensureDaemon() {
   }
   resolvedSocket = mine;
   log("info", "ydotoold is up");
+  pinLayout();
   return { ok: true, started: true };
+}
+
+// ydotoold's uinput device is recreated with every daemon, so the layout has to be re-pinned
+// each time one becomes reachable -- including the crash replacement, which does not come back
+// through ensureDaemon(). Deliberately not awaited: it retries for a few seconds waiting for the
+// display server to notice the new device, and nothing should wait on it. Only meaningful for
+// 1.x, where the device outlives a single keystroke (see virtualKeyboard.cjs).
+function pinLayout() {
+  void virtualKeyboard.pinUsLayout().catch(() => {});
 }
 
 // ---------------------------------------------------------------------------- uinput access
@@ -463,6 +479,8 @@ async function preflight() {
 module.exports = {
   init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon,
   clientPath, generation, pasteKeyArgs, typeStdinArgs,
+  // True when Type mode is layout-independent (see virtualKeyboard.cjs); false means US-QWERTY only.
+  layoutPinned: virtualKeyboard.isPinned,
   _internal: {
     defaultSocketPath, managedSocketPath, installCommandFor, isRpmDistroFor,
     generationFromHelp, chooseInstall, pasteKeyArgsFor,

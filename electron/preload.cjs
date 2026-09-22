@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // How the global shortcut is managed here, plus the command a desktop-environment shortcut
   // should run (see electron/waylandShortcut.cjs and electron/commandFifo.cjs).
   getShortcutInfo: () => ipcRenderer.invoke("get-shortcut-info"),
+  // Whether Type mode works on keyboard layouts other than US-QWERTY in this session.
+  getTypeModeInfo: () => ipcRenderer.invoke("get-type-mode-info"),
   configureShortcut: () => ipcRenderer.invoke("configure-shortcut"),
   setDuckingConfig: (config) => ipcRenderer.send("set-ducking-config", config),
   setOutputMethod: (method) => ipcRenderer.send("set-output-method", method),

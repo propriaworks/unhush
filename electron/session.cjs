@@ -14,4 +14,19 @@ function isX11() {
   return !!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 }
 
-module.exports = { isX11 };
+// The two Wayland compositors that expose per-device input configuration, which is what lets
+// ydotool's virtual keyboard be given its own layout (see virtualKeyboard.cjs). Both advertise
+// themselves with a variable naming their socket or instance, set for every client they start.
+// GNOME and KDE have no equivalent, so there is deliberately nothing to detect for them.
+
+/** True under sway. */
+function isSway() {
+  return !!process.env.SWAYSOCK;
+}
+
+/** True under Hyprland. */
+function isHyprland() {
+  return !!process.env.HYPRLAND_INSTANCE_SIGNATURE;
+}
+
+module.exports = { isX11, isSway, isHyprland };
