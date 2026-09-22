@@ -106,7 +106,7 @@ In case of trouble (see [Troubleshooting](#troubleshooting)), you may want to us
 
 
 Two distro notes:
-- **Ubuntu** ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try.
+- **Ubuntu** (and Linux Mint) ships ydotool **0.1.8**, which predates the client/daemon split and writes `/dev/uinput` directly. There is no daemon to run, and Unhush doesn't try — it also sends 0.x the key *names* that version expects rather than the keycodes 1.x wants. Note that the 0.1.8 package does still install a `ydotoold` binary; it is not a 1.x daemon, and starting it would not help.
 - As of now, **Fedora**'s `ydotool` package ships `ydotool.service` as a *system* service. Enabling it does not help: a system service has no `XDG_RUNTIME_DIR`, so root's ydotoold binds `/tmp/.ydotool_socket` at mode 0600 owned by root, while your client looks in `/run/user/<uid>/` and finds nothing. Leave it disabled.
 </details>
 
@@ -239,15 +239,21 @@ This can be done in several ways, depending partly upon how you installed:
   - Keep the default `Type=simple` here — there is only ever one parent process for the app's whole life, on both session types, so `ExecStart=`'s process is always the one systemd tracks.
   - `--ozone-platform=x11` picks XWayland on a Wayland session and is a no-op on X11, so it's safe to include unconditionally. Leaving it off also works — Unhush falls back to re-execing itself in place (same PID) if it's missing, but including it saves time.
   - `KillMode=mixed`, sends `SIGTERM` to only the main process for shutdown
+  - `RestartSec=5` with a relaxed start limit: a unit pulled in by `default.target` starts when the
+    login session opens, which can be a few seconds before anything exports `DISPLAY`. Unhush exits
+    straight away in that case, and these settings let systemd keep retrying for about two and a half minutes instead of giving up after five tries in ten seconds.
   ```bash
   cat > ~/.config/systemd/user/unhush.service << 'EOF'
   [Unit]
   Description=Unhush Voice Dictation
+  StartLimitIntervalSec=300
+  StartLimitBurst=30
 
   [Service]
   KillMode=mixed
   ExecStart=/path/to/Unhush.AppImage --no-sandbox --ozone-platform=x11
   Restart=on-failure
+  RestartSec=5
 
   [Install]
   WantedBy=default.target
@@ -363,6 +369,11 @@ The checks it runs, if you'd rather do them by hand:
   If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
 
   In case this should fail, you can also explicitly add yourself to the input group: `usermod -aG input <USER>` — but note that a running process can't pick up new group membership, so log out and back in afterwards.
+</details>
+
+<details>
+<summary>I'm getting weird characters like 4114 / Unhush isn't using the right `ydotoold`</summary>
+**If you have more than one ydotool installed** — say your distribution's package in `/usr/bin` plus a newer build in `~/.local/bin` — Unhush picks one deliberately rather than taking whatever `PATH` happens to resolve to. It looks along `PATH` and then in `~/.local/bin`, `/usr/local/bin`, `/usr/bin` and `/bin`, asks each `ydotool` it finds which generation it is, and prefers a complete 1.x install (a `ydotool` with a `ydotoold` in the *same* directory) over a 0.x one; a 0.x install wins only if there is no complete 1.x. Client and daemon are always taken from the same directory, since the two generations cannot talk to each other. The startup log line says which was chosen and what else was found. We need to search beyond `PATH` because at login a `systemd --user` unit often starts before your session's `PATH` reaches systemd. If the wrong version is being used you may need to uninstall one or move the right one to one of these locations. If a v0.x ydotool is errantly sent commands from v1.x, it will produce gibberish. Ensure a consistent version is available in these paths.
 </details>
 
 <details>

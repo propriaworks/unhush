@@ -143,7 +143,11 @@ function log(level, message) {
   const localISO = new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, -1);
   const line = `[${localISO}] ${level.toUpperCase()}: ${message}\n`;
   fs.appendFileSync(logFile, line);
+  // Under systemd our stderr is the journal, so anything written here is what someone sees in
+  // `journalctl --user -u unhush`. Send warnings and errors there always; the rest stays in the
+  // log file.
   if (isDev) console.log(line.trimEnd());
+  else if (level === "warn" || level === "error") process.stderr.write(line);
 }
 
 // Opens the log at module load rather than in whenReady(), so everything from the very first
@@ -175,14 +179,43 @@ function uptimeString(ms) {
 // Logged once per real launch (not for the second-instance hotkey relaunches, which would
 // otherwise banner the log on every dictation toggle under the Wayland fallback).
 function logStartup() {
-  log("info", `=== Unhush ${app.getVersion()} starting: electron ${process.versions.electron}, ` +
-    `node ${process.versions.node}, pid ${process.pid}, ${isDev ? "dev" : "packaged"} ===`);
-  log("info", `platform: ${os.type()} ${os.release()} ${process.arch}, ` +
-    `session=${process.env.XDG_SESSION_TYPE || "?"}, desktop=${process.env.XDG_CURRENT_DESKTOP || "?"}, ` +
-    `ozone=${waylandShortcut.displayBackend()}, logs=${logFile}`);
+  const banner = `=== Unhush ${app.getVersion()} starting: electron ${process.versions.electron}, `
+    + `node ${process.versions.node}, pid ${process.pid}, ${isDev ? "dev" : "packaged"} ===`;
+  const platform = `platform: ${os.type()} ${os.release()} ${process.arch}, `
+    + `session=${process.env.XDG_SESSION_TYPE || "?"}, desktop=${process.env.XDG_CURRENT_DESKTOP || "?"}, `
+    + `ozone=${waylandShortcut.displayBackend()}, logs=${logFile}`;
+  log("info", banner);
+  log("info", platform);
+  // These two also go to the journal, unlike the rest of the info-level log: (log() mirrors only
+  // warnings and errors by itself.)
+  if (!isDev) process.stderr.write(`${banner}\n${platform}\n`);
 }
 
 initLogging();
+
+// No X11 display server yet? Exit now, cleanly, and let whoever started us try again.
+//
+// At login the systemd --user unit is started the moment logind opens the PAM session, which can
+// be seconds before anything sets DISPLAY -- and, on a machine where a short-lived session (a
+// remote login, a display-manager greeter) starts the user manager first, before there is any X
+// server at all. Electron's own reaction to that is not graceful: ozone logs "Missing X server or
+// $DISPLAY", calls it a day, and the process then dies with SIGSEGV in uv_close on the way out.
+// systemd counts that as a crash, restarts us immediately, we crash again, and after five rounds
+// it hits the start limit and gives up on autostart *for that whole login* -- the app never
+// appears, with nothing but core dumps to explain it.
+//
+// We cannot wait for DISPLAY in-process: a process's environment is fixed at exec. Only a fresh
+// start can see it, which is why this exits non-zero (asking systemd's Restart=on-failure to do
+// exactly that). scripts/postinstall.sh spaces those retries out and allows enough of them to
+// cover a slow login.
+if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+  // Self-contained: this runs before the usual startup banner, which needs a display to be
+  // worth printing.
+  log("warn", `Unhush ${app.getVersion()} (pid ${process.pid}): no DISPLAY or WAYLAND_DISPLAY — `
+    + "no display server to attach to yet; exiting for a retry");
+  process.exit(1);
+}
+
 // ydotool takes the userData path rather than requiring electron itself — it's its only reason
 // to, and without it it's testable as plain node. waylandShortcut needs nothing from electron.
 waylandShortcut.init(log);
@@ -349,6 +382,43 @@ function toggleRecording() {
       mainWindow.webContents.send("stop-recording");
       setRecordingActive(false);
     }
+  }
+}
+
+// If a transparent window is created before the desktop's compositor exists, it is painted opaque
+// black and stays that way for the life of the process. At login that is easy to hit: our unit
+// starts when logind opens the PAM session, several seconds before the session's window manager.
+//
+// So wait for one. _NET_SUPPORTING_WM_CHECK on the root window is the standard "a window manager
+// is running" signal, and on every desktop that composites (Cinnamon, GNOME, KDE, Xfce with
+// compositing enabled) the window manager *is* the compositor, so its arrival is what we want.
+// Deliberately best-effort: xprop comes from x11-utils, which the package only recommends, and
+// a bare X session with no window manager at all is a legitimate (if unlovely) setup. In both
+// cases we time out and carry on, which is just the old behaviour.
+async function waitForWindowManager(timeoutMs = 15000) {
+  // Wayland always composites -- there is no X window manager to wait for
+  if (process.env.WAYLAND_DISPLAY || !process.env.DISPLAY) return;
+  const deadline = Date.now() + timeoutMs;
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const { stdout } = await execFileAsync("xprop", ["-root", "-notype", "_NET_SUPPORTING_WM_CHECK"], { timeout: 2000 });
+      // xprop exits 0 for a missing property too, reporting "not found" on stdout.
+      if (/window id # 0x[0-9a-f]+/i.test(stdout)) {
+        if (Date.now() - t0 > 250) log("info", `window manager appeared after ${Date.now() - t0}ms`);
+        return;
+      }
+    } catch (e) {
+      log("warn", `cannot check for a window manager (${e.code === "ENOENT" ? "xprop not installed" : e.message}); `
+        + "creating windows straight away");
+      return;
+    }
+    if (Date.now() >= deadline) {
+      log("warn", `no window manager after ${timeoutMs}ms; creating windows anyway — `
+        + "the recording bar may show as a black rectangle if nothing is compositing");
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
 }
 
@@ -562,11 +632,18 @@ function restoreClipboard(saved) {
 }
 
 ipcMain.handle("output-text", async (event, text, method) => {
-  const { execSync } = require("child_process");
+  const { execFileSync } = require("child_process");
 
   if (!text) {
     log('info', 'output-text: no text to output');
     return true;
+  }
+
+  // If ydotool is not present/working, fall back to clipboard mode rather than failing.
+  // Tell the user once, clearly.
+  if ((method === "paste" || method === "type") && !ydotool.clientPath()) {
+    log('error', `output-text: ydotool is not installed — leaving the text on the clipboard instead of using ${method}`);
+    method = "clipboard";
   }
 
   log('info', `output-text: ${method} (${text.length} chars)`);
@@ -636,7 +713,8 @@ ipcMain.handle("output-text", async (event, text, method) => {
       // this same thread. Blocking here for the time ydotool takes to run risks stalling that
       // response right when it's needed most. Still awaited, so callers see the real outcome
       // and errors/timeouts are still caught below -- this isn't fire-and-forget.
-      const { stderr } = await execFileAsync('ydotool', ['key', '--key-delay', '20', '42:1', '110:1', '110:0', '42:0'], { timeout: 5000, env: ydotool.env() });
+      // The binary and the key syntax both come from ydotool.cjs since they depend on the version.
+      const { stderr } = await execFileAsync(ydotool.clientPath(), ydotool.pasteKeyArgs(20), { timeout: 5000, env: ydotool.env() });
       log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
       log('error', `output-text paste key simulation failed: ${err.message}`);
@@ -673,7 +751,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
           await captureDestination();
           const timeout = Math.max(5000, text.length * 50);
           // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execSync(`ydotool type --key-delay 12 --file ${tempFile}`, { timeout, stdio: 'ignore', env: ydotool.env() });
+          execFileSync(ydotool.clientPath(), ydotool.typeFileArgs(tempFile, 12), { timeout, stdio: 'ignore', env: ydotool.env() });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }
@@ -1026,10 +1104,12 @@ if (!gotTheLock) {
 
   logStartup();
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     log("info", `app ready after ${Date.now() - startedAt}ms`);
     Menu.setApplicationMenu(null);
     const offsetFromBottom = 45; /* window bottom from desktop bottom) */
+    // Before creating any window or the system tray icon:
+    await waitForWindowManager();
     createWindow(offsetFromBottom);
     createTray();
     // Being a tray app, a successful start is silent. Once tray/window creation above has actually
