@@ -129,9 +129,16 @@ function RecordingBar() {
     isTranscribingRef.current = true;
     setIsTranscribing(true);
 
+    // Phase timings for the gap between the hotkey and output-text, which is otherwise a single
+    // unexplained interval in the main log. Whichever of stop/transcribe and the LLM pass is
+    // responsible shows up here; nothing in this window touches the typing backend.
+    const tStop = Date.now();
+    let tTranscribed = 0;
+
     try {
       const llmConfig = getLLMConfig();
       const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
+      tTranscribed = Date.now();
       window.electronAPI?.setTranscriptionWarning("runtime", false);
 
       if (transcript && window.electronAPI) {
@@ -207,6 +214,9 @@ function RecordingBar() {
         }
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
+        window.electronAPI.log("debug",
+          `stop-recording: transcribe ${tTranscribed - tStop}ms, format ${Date.now() - tTranscribed}ms, `
+          + `${finalTranscript.length} chars`);
         const outputMethod = (localStorage.getItem("unhush_output_method") || "paste") as OutputMethod;
         window.electronAPI.outputText(finalTranscript, outputMethod);
       } else if (window.electronAPI) {

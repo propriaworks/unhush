@@ -23,11 +23,11 @@
 // for a purely cosmetic tray indicator.
 
 const { spawn } = require("child_process");
+const session = require("./session.cjs");
 
 let log = () => {};
 function init(logFn) { log = logFn; }
 
-const sessionType = (process.env.XDG_SESSION_TYPE || '').toLowerCase();
 const desktop = (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase();
 const isGnome = desktop.includes('gnome');
 const isKde = desktop.includes('kde') || desktop.includes('plasma');
@@ -37,7 +37,7 @@ const isHyprland = !!process.env.HYPRLAND_INSTANCE_SIGNATURE;
 let _mechanism; // 'xprop' | 'sway' | 'hyprland' | 'kde-wayland' | 'gnome-extension' | 'unknown'
 function resolveMechanism() {
   if (_mechanism !== undefined) return _mechanism;
-  if (sessionType === 'x11' || (!sessionType && !process.env.WAYLAND_DISPLAY)) _mechanism = 'xprop';
+  if (session.isX11()) _mechanism = 'xprop';
   else if (isSway) _mechanism = 'sway';
   else if (isHyprland) _mechanism = 'hyprland';
   else if (isKde) _mechanism = 'kde-wayland';

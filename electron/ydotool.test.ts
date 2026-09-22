@@ -195,6 +195,22 @@ describe("chooseInstall", () => {
   });
 });
 
+describe("typeStdinArgs", () => {
+  // Both of ydotool's delays default to 20ms, so setting only --key-delay leaves that hold
+  // underneath: the period is hold + gap, not the flag alone. Halving keeps the two backends
+  // typing at the same speed for the same requested period.
+  it("splits the per-character period into an equal hold and gap", () => {
+    expect(ydotool.typeStdinArgs(32)).toEqual(
+      ["type", "--key-hold", "16", "--key-delay", "16", "--file", "-"]);
+  });
+
+  // A period small enough to round to zero must still press the key for a measurable time.
+  it("never emits a zero hold", () => {
+    expect(ydotool.typeStdinArgs(1)).toEqual(
+      ["type", "--key-hold", "1", "--key-delay", "1", "--file", "-"]);
+  });
+});
+
 describe("pasteKeyArgsFor", () => {
   // 0.x parses key *names*, and answers anything else by typing that token's first character:
   // traced against the real 0.1.8 binary, "42:1" emits KEY_4 and "f13" emits KEY_F, both with

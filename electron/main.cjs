@@ -16,6 +16,7 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const waylandShortcut = require("./waylandShortcut.cjs");
 const ydotool = require("./ydotool.cjs");
+const session = require("./session.cjs");
 const providerSetup = require("./providerSetup.cjs");
 const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
@@ -396,7 +397,7 @@ function toggleRecording() {
 // cases we time out and carry on, which is just the old behaviour.
 async function waitForWindowManager(timeoutMs = 15000) {
   // Wayland always composites -- there is no X window manager to wait for
-  if (process.env.WAYLAND_DISPLAY || !process.env.DISPLAY) return;
+  if (!session.isX11()) return;
   const deadline = Date.now() + timeoutMs;
   const t0 = Date.now();
   for (;;) {
@@ -631,8 +632,6 @@ function restoreClipboard(saved) {
 }
 
 ipcMain.handle("output-text", async (event, text, method) => {
-  const { execFileSync } = require("child_process");
-
   if (!text) {
     log('info', 'output-text: no text to output');
     return true;
@@ -685,7 +684,7 @@ ipcMain.handle("output-text", async (event, text, method) => {
   // Only possible because the ydotool call below is async: while awaiting xclip, our event
   // loop stays free to answer xclip's own selection request (execSync would deadlock here).
   async function xSelectionDiag(label) {
-    if (!debugLogging || process.env.XDG_SESSION_TYPE === 'wayland') return;
+    if (!debugLogging || !session.isX11()) return;
     const read = async (sel) => {
       try {
         const { stdout } = await execFileAsync('xclip', ['-o', '-selection', sel, '-t', 'UTF8_STRING'], { timeout: 500 });
@@ -755,13 +754,39 @@ ipcMain.handle("output-text", async (event, text, method) => {
         // and never appears in a command line. This replaced a 0600 scratch file in
         // XDG_RUNTIME_DIR; the pipe is strictly better -- nothing to unlink, nothing for a crash
         // to leave behind.
+        const tSetup = Date.now();
         await new Promise(resolve => setTimeout(resolve, 250));
         await captureDestination();
+        const setupMs = Date.now() - tSetup;
         const timeout = Math.max(5000, text.length * 50);
+        // Time per character, start to start. ydotool splits it into a key hold and a gap, both
+        // of which default to 20ms -- so setting only --key-delay leaves that hold underneath it.
+        // Lower is faster; the point of Type mode is that the text is readable as it lands, so
+        // this is a feel setting.
+        const TYPE_PERIOD_MS = 32;
         // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-        // stderr is discarded: 0.x chatters on it ("File path was set to -.") even on success.
-        execFileSync(ydotool.clientPath(), ydotool.typeStdinArgs(12),
-          { input: text, timeout, stdio: ['pipe', 'ignore', 'ignore'], env: ydotool.env() });
+        // stderr is discarded: ydotool 0.x chatters on it ("File path was set to -.") even on success.
+        try {
+          // execFile (async), not execFileSync, for the reason doPaste() gives above: typing a
+          // long transcript takes seconds, and execFileSync would block this process' event loop
+          // for every one of them, leaving us unable to answer anything in the meantime.
+          // Still awaited, so the catch below still sees real failures.
+          const t0 = Date.now();
+          const typing = execFileAsync(ydotool.clientPath(), ydotool.typeStdinArgs(TYPE_PERIOD_MS),
+            { timeout, env: ydotool.env() });
+          typing.child.stdin.end(text);
+          await typing;
+          // Attribution for "typing feels slow": `setup` is our own fixed delay before a key is
+          // sent at all, `expected` is period x length -- the speed we asked for -- and anything
+          // in `took` beyond that is ydotool or the target application falling behind.
+          log('debug', `output-text: typed ${text.length} chars — `
+            + `setup ${setupMs}ms, took ${Date.now() - t0}ms, expected ~${text.length * TYPE_PERIOD_MS}ms`);
+        } catch (err) {
+          // ydotool needs its daemon, which can die after having been reachable at startup.
+          // Losing the transcript over that would be the worst outcome, so fall back to pasting.
+          log('error', `output-text: ydotool type failed (${err.message}) — pasting instead`);
+          await doPaste();
+        }
         break;
       }
       case "clipboard":

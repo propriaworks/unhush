@@ -63,9 +63,22 @@
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
       "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
         "ydotool"
       ],
       "recommends": [
+        "libappindicator3-1"
+      ],
+      "fpm": [
+        "--deb-suggests",
         "x11-utils"
       ]
     },
@@ -73,7 +86,19 @@
       "afterInstall": "scripts/postinstall.sh",
       "afterRemove": "scripts/postremove.sh",
       "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "(libXtst or libXtst6)",
+        "xdg-utils",
+        "at-spi2-core",
+        "(libuuid or libuuid1)",
         "ydotool"
+      ],
+      "fpm": [
+        "--rpm-tag",
+        "Suggests: xprop"
       ]
     },
     "pacman": {
@@ -81,7 +106,9 @@
       "afterRemove": "scripts/postremove.sh",
       "fpm": [
         "--after-upgrade",
-        "scripts/postinstall.sh"
+        "scripts/postinstall.sh",
+        "--pacman-optional-depends",
+        "xorg-xprop: show the paste destination in the system tray (X11 only)"
       ],
       "depends": [
         "ydotool"

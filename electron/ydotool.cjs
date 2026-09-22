@@ -62,36 +62,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------- resolving the install
 
-// Directories to look in, in preference order: everything on PATH, then the usual install
-// locations in case PATH is not the session's own (see the header -- at login it frequently
-// isn't). Deduplicated by real path, so the /bin -> /usr/bin symlink is not probed twice.
-function candidateDirs() {
-  const seen = new Set();
-  const dirs = [];
-  const add = (d) => {
-    // Relative PATH entries (including "", which means the working directory) are skipped:
-    // running a `ydotool` that happened to be sitting in our working directory is never right.
-    if (!d || !path.isAbsolute(d)) return;
-    let real = d;
-    try { real = fs.realpathSync(d); } catch (e) {} // doesn't exist: keep it, it simply won't match
-    if (seen.has(real)) return;
-    seen.add(real);
-    dirs.push(d);
-  };
-  for (const d of (process.env.PATH || "").split(path.delimiter)) add(d);
-  for (const d of [path.join(os.homedir(), ".local", "bin"), "/usr/local/bin", "/usr/bin", "/bin"]) add(d);
-  return dirs;
-}
-
-function isExecutableFile(p) {
-  try {
-    if (!fs.statSync(p).isFile()) return false;
-    fs.accessSync(p, fs.constants.X_OK);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
+// Directory search and the executable test live in findBinary.cjs, kept generic. This module
+// can't use its findBinary() helper, which stops at the first match: detecting the generation
+// split below needs every ydotool on the system, not just the first.
+const { candidateDirs, isExecutableFile } = require("./findBinary.cjs");
 
 // ydotool major version detection
 // 0 or 1, or null when the client didn't run or said something we don't recognise. `ydotool help`
@@ -194,8 +168,13 @@ function pasteKeyArgs(keyDelayMs = 20) { return pasteKeyArgsFor(generation(), ke
 // `--file -` makes `type` read the text from stdin rather than the command line, so the
 // transcript never has to touch the disk. Both generations accept the "-" spelling, and
 // both disable backslash escaping when typing from a file, so the text is taken literally.
-function typeStdinArgs(keyDelayMs = 12) {
-  return ["type", "--key-delay", String(keyDelayMs), "--file", "-"];
+// periodMs is the time one character takes, start to start, so that Type mode runs at the same
+// speed whichever backend types it. ydotool splits that into a hold and a gap and defaults BOTH
+// to 20ms, so passing only --key-delay leaves a 20ms hold underneath it -- which is why
+// --key-delay 12 was really 32ms per character. Both are set explicitly now.
+function typeStdinArgs(periodMs = 32) {
+  const half = String(Math.max(1, Math.round(periodMs / 2)));
+  return ["type", "--key-hold", half, "--key-delay", half, "--file", "-"];
 }
 
 // ---------------------------------------------------------------------------- paths & probing
