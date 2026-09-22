@@ -22,7 +22,6 @@ const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const fs = require("fs");
 const os = require("os");
-const crypto = require("crypto");
 
 // "Start at login" (see set-autostart/get-autostart-status below).
 // Written unconditionally by scripts/postinstall.sh on package installs; absent on AppImage/dev,
@@ -700,6 +699,9 @@ ipcMain.handle("output-text", async (event, text, method) => {
 
   async function doPaste() {
     const saved = saveClipboard();
+    // Write both selections, deliberately. Shift+Insert is historically the *primary*-selection paste
+    // in X11 and terminals still bind it that way, while GUI toolkits read CLIPBOARD. Writing
+    // only one would silently paste nothing in whichever half of the desktop doesn't match.
     clipboard.writeText(text);
     clipboard.writeText(text, 'selection');
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -740,18 +742,26 @@ ipcMain.handle("output-text", async (event, text, method) => {
         await doPaste();
         break;
       case "type": {
-        // The dictated text is written to disk, because `ydotool type` needs to read it from a file.
-        // Only one ever exists at a time and it is unlinked in the finally below. It is written
-        // into XDG_RUNTIME_DIR (0700, tmpfs, cleared at logout -- if it exists) rather than /tmp.
-        // Random name also guards against symlink races, 0600 in case the fallback puts us in /tmp after all.
-        const tempFile = path.join(commandFifo.runtimeDir(), `unhush-${crypto.randomBytes(8).toString('hex')}.txt`);
-        try {
-          fs.writeFileSync(tempFile, text, { mode: 0o600 });
-          await new Promise(resolve => setTimeout(resolve, 250));
-          await captureDestination();
-          const timeout = Math.max(5000, text.length * 50);
-          // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
-          execFileSync(ydotool.clientPath(), ydotool.typeFileArgs(tempFile, 12), { timeout, stdio: 'ignore', env: ydotool.env() });
+        // `ydotool type` maps each *byte* through a 128-entry US-QWERTY table (Client/tool_type.c),
+        // in which only tab, newline and 0x20-0x7e have entries. Basically anything outside
+        // ordinary English will fail, as will anything where the keyboard layout differs from QWERTY.
+        // In the former case we can detect this and so we paste instead.
+        if (/[^\t\n\x20-\x7e]/.test(text)) {
+          log('info', "output-text: text has characters ydotool can't type — pasting instead");
+          await doPaste();
+          break;
+        }
+        // The dictated text goes to ydotool over stdin (`--file -`), so it never lands on disk
+        // and never appears in a command line. This replaced a 0600 scratch file in
+        // XDG_RUNTIME_DIR; the pipe is strictly better -- nothing to unlink, nothing for a crash
+        // to leave behind.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        await captureDestination();
+        const timeout = Math.max(5000, text.length * 50);
+        // Note: Previously we used a --delay 100 to give time for the OS focus to return to the target app; seems no longer needed (?)
+        // stderr is discarded: 0.x chatters on it ("File path was set to -.") even on success.
+        execFileSync(ydotool.clientPath(), ydotool.typeStdinArgs(12),
+          { input: text, timeout, stdio: ['pipe', 'ignore', 'ignore'], env: ydotool.env() });
         } finally {
           try { fs.unlinkSync(tempFile); } catch {}
         }

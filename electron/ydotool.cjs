@@ -178,10 +178,10 @@ function generation() {
   return i ? i.gen : null;
 }
 
-// Shift+Insert, spelled for whichever generation we resolved, and worth getting right: 0.x
-// answers a name it cannot parse by typing that token's first character (see the header), so a
-// 1.x keycode sequence sent to a 0.x client types "4114" and exits 0. Both spellings below were
-// confirmed against the real binaries by tracing their /dev/uinput writes: each emits
+// Shift+Insert rather than Ctrl+V because we need it to work in graphical apps and terminal alike,
+// and Shift+Insert is also robust to keyboard mappings.
+//
+// Invoked differently depending upon ydotool version, both confirmed: each emits
 // KEY_LEFTSHIFT down, KEY_INSERT down, KEY_INSERT up, KEY_LEFTSHIFT up.
 function pasteKeyArgsFor(gen, keyDelayMs) {
   const delay = ["--key-delay", String(keyDelayMs)];
@@ -191,10 +191,11 @@ function pasteKeyArgsFor(gen, keyDelayMs) {
 }
 function pasteKeyArgs(keyDelayMs = 20) { return pasteKeyArgsFor(generation(), keyDelayMs); }
 
-// `type --file` reads the text from disk rather than the command line, and is spelled the same
-// way in both generations.
-function typeFileArgs(file, keyDelayMs = 12) {
-  return ["type", "--key-delay", String(keyDelayMs), "--file", file];
+// `--file -` makes `type` read the text from stdin rather than the command line, so the
+// transcript never has to touch the disk. Both generations accept the "-" spelling, and
+// both disable backslash escaping when typing from a file, so the text is taken literally.
+function typeStdinArgs(keyDelayMs = 12) {
+  return ["type", "--key-delay", String(keyDelayMs), "--file", "-"];
 }
 
 // ---------------------------------------------------------------------------- paths & probing
@@ -482,7 +483,7 @@ async function preflight() {
 
 module.exports = {
   init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon,
-  clientPath, generation, pasteKeyArgs, typeFileArgs,
+  clientPath, generation, pasteKeyArgs, typeStdinArgs,
   _internal: {
     defaultSocketPath, managedSocketPath, installCommandFor, isRpmDistroFor,
     generationFromHelp, chooseInstall, pasteKeyArgsFor,
