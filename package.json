@@ -14,7 +14,8 @@
     "electron:dev": "pnpm run copy-vad-assets && trap 'exit 0' INT TERM; concurrently --kill-others --success first 'vite' 'wait-on http://localhost:5173 && electron . --no-sandbox'",
     "package": "pnpm run build && electron-builder --linux AppImage deb rpm",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:clipboard": "xvfb-run -a electron --no-sandbox electron/clipboardAccess.integration.cjs"
   },
   "keywords": [
     "voice",
