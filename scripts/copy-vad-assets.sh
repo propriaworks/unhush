@@ -7,7 +7,7 @@ DEST="public/vad"
 mkdir -p "$DEST"
 
 # Find vad-web dist directory (works with pnpm, npm, yarn)
-VAD_DIST=$(node -e "console.log(require.resolve('@ricky0123/vad-web/dist/silero_vad_v5.onnx'))" 2>/dev/null | xargs dirname)
+VAD_DIST=$(node -e "console.log(require.resolve('@ricky0123/vad-web/dist/silero_vad_v6.onnx'))" 2>/dev/null | xargs dirname)
 if [ -z "$VAD_DIST" ]; then
   VAD_DIST="node_modules/@ricky0123/vad-web/dist"
 fi
@@ -41,8 +41,8 @@ fi
 echo "Copying VAD assets from: $VAD_DIST"
 echo "Copying ONNX Runtime assets from: $ORT_DIST"
 
-# VAD model (v5 only, ~2MB)
-cp "$VAD_DIST/silero_vad_v5.onnx" "$DEST/"
+# VAD model (v6 only, ~2MB)
+cp "$VAD_DIST/silero_vad_v6.onnx" "$DEST/"
 
 # AudioWorklet script
 cp "$VAD_DIST/vad.worklet.bundle.min.js" "$DEST/"
