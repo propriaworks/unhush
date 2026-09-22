@@ -569,8 +569,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Acknowledgments
 
-Unhush was based upon [wisper](https://github.com/taraksh01/wisper), but is now independently maintained.
-> The predecessor project has had no activity since February 2026.
+Unhush was based upon a predecessor of [wisper](https://github.com/taraksh01/wisper), but is now independently maintained.
 
 ### Key Improvements
 
