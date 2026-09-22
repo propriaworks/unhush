@@ -762,9 +762,6 @@ ipcMain.handle("output-text", async (event, text, method) => {
         // stderr is discarded: 0.x chatters on it ("File path was set to -.") even on success.
         execFileSync(ydotool.clientPath(), ydotool.typeStdinArgs(12),
           { input: text, timeout, stdio: ['pipe', 'ignore', 'ignore'], env: ydotool.env() });
-        } finally {
-          try { fs.unlinkSync(tempFile); } catch {}
-        }
         break;
       }
       case "clipboard":

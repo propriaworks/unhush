@@ -4,6 +4,7 @@ import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
 import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
+import { normalizePunctuation } from "../audio/textNormalization";
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -182,6 +183,7 @@ function RecordingBar() {
               );
             }
           }
+          finalTranscript = normalizePunctuation(finalTranscript)
           if (localStorage.getItem("unhush_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
