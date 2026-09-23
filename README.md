@@ -51,8 +51,10 @@ sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 The `.deb`, `.rpm`, and `.pacman` packages automatically:
-- Install ydotool as a dependency
+- Install ydotool: as a dependency for `.deb` and `.pacman`, but only as a *recommended* package for `.rpm`, since not every RPM-based distribution carries it (see [Manual Setup](#manual-setup-of-dependencies) if it's missing)
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
+
+Two more tools are optional: `pactl` (lowers other apps' audio while recording) is recommended; `xprop` is only suggested.
 </details>
 
 <details>
@@ -123,7 +125,7 @@ Two distro notes:
 
 `xprop` allows Unhush to identify the destination window where the transcription is being sent, for informational purposes. This is optional, and only useful for X11 sessions. If it's installed, it enables the "sent ➜ \<app\>" tray indicator (see [System Tray](#system-tray)). If it's absent, or if we're running Wayland, the tray just won't show a destination
 
-On X11, `xprop` is usually already installed (it's a base X11 utility). `.deb` installs recommend it automatically; `.rpm`/`.pacman`/AppImage: install manually if missing — `x11-utils` (Debian/Ubuntu), `xprop` (Fedora/RHEL), `xorg-xprop` (Arch)
+On X11, `xprop` is usually already installed (it's a base X11 utility). The packages only *suggest* it, which no package manager installs automatically, so install it manually if missing (also for the AppImage) — `x11-utils` (Debian/Ubuntu), `xprop` (Fedora/RHEL/openSUSE), `xorg-xprop` (Arch)
 </details>
 
 ## Usage
@@ -366,7 +368,7 @@ window with "Don't show again", delete `~/.config/unhush/.setup-dialog-muted` to
 The checks it runs, if you'd rather do them by hand:
 
 - Test manually: `YDOTOOL_SOCKET=$XDG_RUNTIME_DIR/unhush-ydotool.sock ydotool type "hello"` — the word should appear in your terminal
-- Ensure ydotool is installed (`.deb`/`.rpm`/`.pacman` installs it automatically; AppImage users need to install it manually)
+- Ensure ydotool is installed (`.deb`/`.pacman` installs it automatically, and so does `.rpm` unless your package manager skips recommended packages or your distribution doesn't carry it; AppImage users need to install it manually)
 - Ensure the daemon runs. Unhush starts its own `ydotoold` and stops it on exit, so check while Unhush is running: `ydotool debug` exits 0 when it can reach a daemon. See [The `ydotoold` daemon](#the-ydotoold-daemon) — in particular, do **not** expect Fedora's packaged `ydotool.service` to help.
 - **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users need to do it themselves:
   ```bash

@@ -1,6 +1,6 @@
 {
   "name": "unhush",
-  "version": "3.3.0-pre1",
+  "version": "3.3.0",
   "description": "Voice input for Linux",
   "main": "electron/main.cjs",
   "homepage": "https://unhush.propriaworks.com",
@@ -72,11 +72,11 @@
         "xdg-utils",
         "libatspi2.0-0",
         "libuuid1",
-        "libsecret-1-0",
         "ydotool"
       ],
       "recommends": [
-        "libappindicator3-1"
+        "libappindicator3-1",
+        "pulseaudio-utils"
       ],
       "fpm": [
         "--deb-suggests",
@@ -94,12 +94,15 @@
         "(libXtst or libXtst6)",
         "xdg-utils",
         "at-spi2-core",
-        "(libuuid or libuuid1)",
-        "ydotool"
+        "(libuuid or libuuid1)"
       ],
       "fpm": [
         "--rpm-tag",
-        "Suggests: xprop"
+        "Suggests: xprop",
+        "--rpm-tag",
+        "Recommends: pulseaudio-utils",
+        "--rpm-tag",
+        "Recommends: ydotool"
       ]
     },
     "pacman": {
@@ -109,9 +112,19 @@
         "--after-upgrade",
         "scripts/postinstall.sh",
         "--pacman-optional-depends",
-        "xorg-xprop: show the paste destination in the system tray (X11 only)"
+        "xorg-xprop: show the paste destination in the system tray (X11 only)",
+        "--pacman-optional-depends",
+        "libpulse: lower other apps' audio while recording (pactl)"
       ],
       "depends": [
+        "gtk3",
+        "nss",
+        "libnotify",
+        "libxss",
+        "libxtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "util-linux-libs",
         "ydotool"
       ]
     },

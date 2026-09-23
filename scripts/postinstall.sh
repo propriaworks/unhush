@@ -68,6 +68,15 @@ udevadm trigger --name-match=uinput 2>/dev/null || udevadm trigger --subsystem-m
 # its setup warning unnecessarily.
 udevadm settle --timeout=10 || true
 
+# pacman only: fpm 1.17 never writes optdepend lines (its template reads a different attribute
+# from the one --pacman-optional-depends fills; jordansissel/fpm#1619, still open, as is 1.18),
+# so pacman can't list the optional packages itself
+# and we say so here. Each line goes quiet once its tool is present. Drop this once fpm is fixed.
+if command -v pacman >/dev/null 2>&1; then
+  command -v pactl >/dev/null 2>&1 || echo "unhush: optional: 'pacman -S libpulse' lets Unhush lower other apps' audio while recording."
+  command -v xprop >/dev/null 2>&1 || echo "unhush: optional: 'pacman -S xorg-xprop' shows the paste target in the tray (X11 only)."
+fi
+
 # systemd --user unit, shipped but disabled by default -- opted into via Settings -> "Start at
 # login" (electron/main.cjs' set-autostart handler). Same unit name and ExecStart as the README's
 # hand-rolled instructions, so anyone who already followed those is silently subsumed: identical
