@@ -94,6 +94,7 @@ udevadm settle --timeout=10 || true
 # for it. A lingering zygote/GPU child getting SIGKILL'd this way is expected and harmless -- its
 # parent's exit already closed the socket it blocks on (CLOEXEC), so it's already unwinding on its
 # own; systemd's sweep just wins the race to actually reap it.
+#
 # WantedBy=default.target, and the login-time environment race that comes with it: a user unit
 # pulled in by default.target starts when logind opens the PAM session, which can be *before*
 # the Xsession.d scripts run, so the session's full environment -- notably the user's PATH --
@@ -112,8 +113,8 @@ Description=Unhush Voice Dictation
 # The restarts below are for a login race, not for a crash loop: when the unit starts before
 # the session exports DISPLAY, Unhush logs the reason and exits 1 immediately (a process can
 # never see an environment exported after its own exec, so only a fresh start can pick it up).
-# systemd's defaults are far too tight for that. Thirty tries, five seconds apart, covers
-# about two and a half minutes of a slow login and still gives up eventually on a machine
+# systemd's defaults are far too tight for that. Thirty tries, ten seconds apart, covers
+# about five minutes of a slow login and still gives up eventually on a machine
 # that has no display at all.
 StartLimitIntervalSec=300
 StartLimitBurst=30
@@ -122,7 +123,7 @@ StartLimitBurst=30
 KillMode=mixed
 ExecStart=/opt/Unhush/unhush --ozone-platform=x11
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=default.target
