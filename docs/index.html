@@ -993,7 +993,8 @@
 			}
 		</style>
 		<script async defer src="https://nocookieanalytics.com/latest.js"></script>
-		<script>document.addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;var h=a.getAttribute('href');if(!h||h.charAt(0)==='#')return;if(typeof nca_event==='function')nca_event('linkto_'+a.href);if(a.target!=='_blank'&&!h.startsWith('mailto:')){e.preventDefault();setTimeout(function(){window.location.href=a.href},150)}})</script>
+		<!-- Link-click events: download buttons send 'download_<format>' (appimage/deb/rpm/pacman; event values are numeric-only); other links send 'linkto_<url>' -->
+		<script>document.addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;var h=a.getAttribute('href');if(!h||h.charAt(0)==='#')return;if(typeof nca_event==='function'){if(a.classList.contains('download-btn'))nca_event('download_'+h.split('.').pop().toLowerCase());else nca_event('linkto_'+a.href)}if(a.target!=='_blank'&&!h.startsWith('mailto:')){e.preventDefault();setTimeout(function(){window.location.href=a.href},150)}})</script>
 	</head>
 	<body>
 		<header>
