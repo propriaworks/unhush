@@ -344,7 +344,7 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 | `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
 | `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
 | `provider_restart_stale_min` | Minutes since a custom server (transcription or LLM) was last successfully reached, after which Unhush will re-check it and, if unreachable, re-run its Start Command. Also triggers immediately after editing the Start Command, regardless of this interval | `60` |
-| `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disbles this feature. Has no effect on non-Ollama servers. | `"2h"` |
+| `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disables this feature. Not applied if the server's own keep-alive (`OLLAMA_KEEP_ALIVE`) is already longer. Has no effect on non-Ollama servers. | `"2h"` |
 | `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |
 | `llm_excess_length_floor` | Minimum character headroom above input length regardless of multiplier | `20` |
 | `llm_final_instructions` | Instruction appended to the user message sent to the LLM, after the transcript | `"Output the cleaned transcript only. No commentary, no explanations, no preamble."` |

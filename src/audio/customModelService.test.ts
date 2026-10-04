@@ -315,3 +315,107 @@ describe("ensureCustomServices — Phase 2 warm-up gating", () => {
     expect(modelsCalls()).toBe(after1); // Phase 1 never re-triggered
   });
 });
+
+describe("parseKeepAliveMs", () => {
+  it.each([
+    ["2h", 7_200_000],
+    ["1h30m", 5_400_000],
+    ["90s", 90_000],
+    ["500ms", 500],
+    ["1.5h", 5_400_000],
+    ["300", 300_000],
+    ["-1", Infinity],
+    ["-1m", Infinity],
+    ["forever", undefined],
+    ["2 h", undefined],
+  ])("%s → %s", (input, expected) => {
+    expect(mod.parseKeepAliveMs(input)).toBe(expected);
+  });
+});
+
+describe("pinOllamaKeepAlive — skips pinning when the server default is longer", () => {
+  const BASE = "http://localhost:11434";
+  const HOUR = 3_600_000;
+
+  // An Ollama server whose /api/ps reports `model` unloading `remainingMs` from now
+  function ollamaMock(remainingMs: number | null, listedName = "mistral:latest") {
+    return makeFetchMock((url) => {
+      if (url.endsWith("/api/version")) return { ok: true };
+      if (url.endsWith("/api/ps")) return {
+        ok: true,
+        json: async () => ({
+          models: remainingMs === null ? [] : [{ name: listedName, model: listedName, expires_at: new Date(Date.now() + remainingMs).toISOString() }],
+        }),
+      };
+      if (url.endsWith("/api/generate")) return { ok: true };
+      return { ok: false };
+    });
+  }
+  const callsTo = (fetchMock: ReturnType<typeof makeFetchMock>, path: string) =>
+    fetchMock.mock.calls.filter(([url]) => url.endsWith(path)).length;
+
+  it("doesn't pin, and doesn't re-check, while the server keeps the model longer than requested", async () => {
+    const fetchMock = ollamaMock(4 * HOUR);
+    vi.stubGlobal("fetch", fetchMock);
+    for (let i = 0; i < 3; i++) await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(0);
+    expect(callsTo(fetchMock, "/api/ps")).toBe(1);
+  });
+
+  it("treats an infinite server default (far-future expires_at) as longer", async () => {
+    const fetchMock = ollamaMock(290 * 365 * 24 * HOUR);
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(0);
+  });
+
+  it("pins every time, checking only once, when the server default is shorter", async () => {
+    const fetchMock = ollamaMock(5 * 60_000);
+    vi.stubGlobal("fetch", fetchMock);
+    for (let i = 0; i < 3; i++) await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(3);
+    expect(callsTo(fetchMock, "/api/ps")).toBe(1);
+  });
+
+  it("pins when the remaining time is just our own earlier pin of the same duration", async () => {
+    const fetchMock = ollamaMock(2 * HOUR);
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(1);
+  });
+
+  it("always pins an infinite request without consulting /api/ps", async () => {
+    const fetchMock = ollamaMock(4 * HOUR);
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "-1", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(1);
+    expect(callsTo(fetchMock, "/api/ps")).toBe(0);
+  });
+
+  it("pins and re-checks next time when the model isn't listed", async () => {
+    const fetchMock = ollamaMock(null);
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/generate")).toBe(2);
+    expect(callsTo(fetchMock, "/api/ps")).toBe(2);
+  });
+
+  it("re-decides when the selected model changes", async () => {
+    const fetchMock = ollamaMock(4 * HOUR, "qwen3:8b");
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "qwen3:8b", "2h", noopLog); // longer → skip
+    expect(callsTo(fetchMock, "/api/generate")).toBe(0);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog); // not listed → pin
+    expect(callsTo(fetchMock, "/api/generate")).toBe(1);
+    expect(callsTo(fetchMock, "/api/ps")).toBe(2);
+  });
+
+  it("sends bare seconds as a JSON number, which Ollama requires", async () => {
+    const fetchMock = ollamaMock(60_000);
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "7200", noopLog);
+    const [, init] = fetchMock.mock.calls.find(([url]) => url.endsWith("/api/generate"))!;
+    expect(JSON.parse(init!.body as string).keep_alive).toBe(7200);
+  });
+});

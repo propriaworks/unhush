@@ -184,7 +184,7 @@ function RecordingBar() {
             } else {
               llmStatus = "ok";
               finalTranscript = llmOutput!;
-              // Re-pin the Ollama model unload timer; /v1 requests reset it to the server default (~5 min)
+              // Extend the Ollama model unload timer beyond the server default (~5 min unless configured)
               void pinOllamaKeepAlive(
                 getBaseUrl(llmConfig.apiUrl), llmConfig.apiKey, llmConfig.model,
                 localStorage.getItem("unhush_llm_keep_alive") ?? "2h",
