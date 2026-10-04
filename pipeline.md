@@ -127,10 +127,11 @@ flowchart TD
     WAIT --> CONCAT["`Concatenate results
     in segment order`"]
     CONCAT --> TRANSCRIPT["`**Raw transcript**
-    with segment split markers`"]
+    (VAD path: with
+    segment split markers)`"]
     TRANSCRIPT --> EMPTY{"`Transcript
     empty?`"}
-    DIRECT --> EMPTY
+    DIRECT --> TRANSCRIPT
     EMPTY -->|Yes| NOOUT
     EMPTY -->|No| LLMCHECK{"`LLM formatting
     enabled?`"}

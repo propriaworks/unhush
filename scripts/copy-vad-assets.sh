@@ -4,6 +4,7 @@
 set -e
 
 DEST="public/vad"
+rm -rf "$DEST"
 mkdir -p "$DEST"
 
 # Find vad-web dist directory (works with pnpm, npm, yarn)
