@@ -1,0 +1,11 @@
+# Read by the CI security scan (osv-scanner looks next to the scanned pnpm-lock.yaml).
+# Each entry ignores one advisory until its date, after which the scan fails again; remove the
+# entry once a fixed version is installable.
+
+[[IgnoredVulns]]
+id = "GHSA-ch52-4w7c-c8xp"
+ignoreUntil = 2026-11-30
+reason = """
+http-cache-semantics <= 4.2.0: shared-cache max-stale can serve another user's cached response.
+No fixed release yet. Build-time only, nothing of which ships in the app.
+"""
