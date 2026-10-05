@@ -234,7 +234,8 @@ textOutput.init({
   getActiveWindowInfo: activeWindow.getActiveWindowInfo,
   log,
   isDebug: () => debugLogging,
-  isX11: session.isX11,
+  // Under xwayland-satellite xclip still reaches the X selections, through satellite's Xwayland.
+  canReadXSelections: () => session.isX11() || waylandClipboard.active(),
   msSinceHotkey: () => (lastHotkeyAt ? Date.now() - lastHotkeyAt : -1),
   onOutput: (text) => {
     lastTranscript = text;
@@ -723,6 +724,12 @@ const outputMethodKnown = new Promise((resolve) => { reportOutputMethod = resolv
 // Also keeps the setup window's Re-check honest if the user switches mode while it is open.
 function noteOutputMethod(method) {
   reportOutputMethod(method);
+  // Leaving Clipboard mode: the startup check skipped ydotool, so get the daemon going now rather
+  // than on the first paste. Only on that transition, so at startup the setup check still runs the
+  // uinput check before any daemon is started.
+  if (!setupIncludesYdotool && method !== "clipboard") {
+    ydotool.ready().catch((err) => log("error", `ydotool: daemon setup failed: ${err.message}`));
+  }
   setupIncludesYdotool = method !== "clipboard";
 }
 ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));

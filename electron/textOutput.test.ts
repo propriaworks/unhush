@@ -56,6 +56,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     clipboard,
     ydotool: {
       clientPath: () => "/usr/bin/ydotool",
+      ready: vi.fn(async () => true),
       pasteKeyArgs: vi.fn(() => PASTE_ARGS),
       typeStdinArgs: vi.fn(() => TYPE_ARGS),
       env: () => ({ YDOTOOL_SOCKET: "/run/test.sock" }),
@@ -64,7 +65,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     getActiveWindowInfo: vi.fn(async () => ({ app: "kitty", title: "shell" })),
     log: vi.fn(),
     isDebug: () => false, // keeps the xclip diagnostics out of the exec calls
-    isX11: () => true,
+    canReadXSelections: () => true,
     msSinceHotkey: () => 100,
     onOutput: vi.fn(),
     onDestination: vi.fn(),
@@ -108,6 +109,17 @@ describe("clipboard mode", () => {
     }
     expect(clipboard.writeTextBoth).toHaveBeenCalledTimes(2);
     expect(exec.fn).not.toHaveBeenCalled();
+  });
+
+  it("is used instead of paste or type when no ydotool daemon is reachable", async () => {
+    setup({ ydotool: { ...deps.ydotool, ready: vi.fn(async () => false) } });
+    for (const method of ["paste", "type"]) {
+      await run("hello", method);
+    }
+    expect(deps.ydotool.ready).toHaveBeenCalledTimes(2);
+    expect(clipboard.writeTextBoth).toHaveBeenCalledTimes(2);
+    expect(exec.fn).not.toHaveBeenCalled();
+    expect(deps.log).toHaveBeenCalledWith("error", expect.stringContaining("no ydotool daemon is reachable"));
   });
 
   it("does nothing for empty text", async () => {
@@ -172,6 +184,18 @@ describe("paste mode", () => {
     expect(clipboard.restore).not.toHaveBeenCalled();
     expect(clipboard.contents).toBe("hello");
     expect(deps.log).toHaveBeenCalledWith("error", expect.stringContaining("paste key simulation failed"));
+  });
+
+  it("logs ydotool's stdout with a failure, since 1.x reports socket errors there", async () => {
+    setup({
+      execFileAsync: vi.fn(async () => {
+        throw Object.assign(new Error("Command failed: ydotool key\n"),
+          { stdout: "failed to connect socket `/run/x.sock': No such file or directory\n" });
+      }),
+    });
+    await run("hello", "paste");
+    expect(deps.log).toHaveBeenCalledWith("error",
+      expect.stringContaining("(stdout: failed to connect socket `/run/x.sock': No such file or directory)"));
   });
 
   it("still pastes when saving the old clipboard fails, and skips the restore", async () => {

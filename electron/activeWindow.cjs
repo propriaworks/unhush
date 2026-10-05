@@ -1,10 +1,12 @@
 // Paste-destination detection: identifies the app/window that receives a paste, purely for
-// display in the tray menu (never written to the persistent log file — window titles can
-// contain sensitive content like email subjects or chat messages).
+// display in the tray menu. Titles are never written to the persistent log file — they can
+// contain sensitive content like email subjects or chat messages. (textOutput.cjs's temporary
+// debug diagnostics log the app name only.)
 //
 // Detection is compositor/display-server specific, since there's no single cross-platform API:
 //   - X11: xprop (both KDE and other DEs running an X11 session go through this path)
 //   - Sway / Hyprland: their own IPC (swaymsg / hyprctl), bundled with those compositors
+//   - Niri: its IPC socket, directly (niriIpc.cjs)
 //   - GNOME (Wayland): GNOME has no supported external query — its own Mutter maintainer
 //     rejected wlr-foreign-toplevel-management for breaking client isolation (Mutter ships
 //     ext-foreign-toplevel-list-v1 instead, which omits focus state by design), and the private
@@ -24,6 +26,7 @@
 
 const { spawn } = require("child_process");
 const session = require("./session.cjs");
+const niriIpc = require("./niriIpc.cjs");
 
 let log = () => {};
 function init(logFn) { log = logFn; }
@@ -34,12 +37,13 @@ const isKde = desktop.includes('kde') || desktop.includes('plasma');
 const isSway = session.isSway();
 const isHyprland = session.isHyprland();
 
-let _mechanism; // 'xprop' | 'sway' | 'hyprland' | 'kde-wayland' | 'gnome-extension' | 'unknown'
+let _mechanism; // 'xprop' | 'sway' | 'hyprland' | 'niri' | 'kde-wayland' | 'gnome-extension' | 'unknown'
 function resolveMechanism() {
   if (_mechanism !== undefined) return _mechanism;
   if (session.isX11()) _mechanism = 'xprop';
   else if (isSway) _mechanism = 'sway';
   else if (isHyprland) _mechanism = 'hyprland';
+  else if (session.isNiri()) _mechanism = 'niri';
   else if (isKde) _mechanism = 'kde-wayland';
   else if (isGnome) _mechanism = 'gnome-extension';
   else _mechanism = 'unknown';
@@ -127,6 +131,12 @@ async function getViaHyprland() {
   return { app: obj.class, title: obj.title || '' };
 }
 
+async function getViaNiri() {
+  const { FocusedWindow: win } = await niriIpc.request('FocusedWindow');
+  if (!win) return null; // nothing focused
+  return { app: win.app_id || 'unknown', title: win.title || '' };
+}
+
 async function getViaGnomeExtension() {
   const out = await run('gdbus', [
     'call', '--session', '--dest', 'org.gnome.Shell',
@@ -166,6 +176,7 @@ async function getActiveWindowInfo() {
       case 'xprop': return await getViaXprop();
       case 'sway': return await getViaSway();
       case 'hyprland': return await getViaHyprland();
+      case 'niri': return await getViaNiri();
       case 'kde-wayland': return await getViaKwin();
       case 'gnome-extension': return await getViaGnomeExtension();
       default: return null; // unknown

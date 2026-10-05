@@ -10,7 +10,10 @@ import os from "os";
 import path from "path";
 // @ts-expect-error - plain CommonJS module, no type declarations
 import niriWindowRule from "./niriWindowRule.cjs";
-const { request, problemFor, BAR_TITLE } = niriWindowRule._internal;
+// @ts-expect-error - plain CommonJS module, no type declarations
+import niriIpc from "./niriIpc.cjs";
+const { request } = niriIpc;
+const { problemFor, BAR_TITLE } = niriWindowRule._internal;
 
 type Win = { title: string; is_floating: boolean; is_focused: boolean; app_id?: string };
 

@@ -102,11 +102,11 @@ function active() {
     const paste = findBinary("wl-paste");
     if (copy && paste) {
       tools = { copy, paste };
-      log("info", "clipboard: xwayland-satellite detected — also setting the Wayland clipboard with wl-copy");
+      log("info", "clipboard: xwayland-satellite detected — setting the Wayland clipboard with wl-copy");
     } else if (!missingLogged) {
       missingLogged = true;
       log("error", "clipboard: xwayland-satellite detected but wl-clipboard (wl-copy, wl-paste) is not "
-        + "installed — Wayland apps will paste their previous clipboard. Install wl-clipboard.");
+        + "installed — Wayland apps will paste their previous clipboard contents. Install wl-clipboard.");
     }
   }
   return !!tools;
