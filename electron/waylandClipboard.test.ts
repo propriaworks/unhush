@@ -33,8 +33,9 @@ describe("chooseType", () => {
     expect(chooseType(["text/html", "UTF8_STRING"])).toBe("UTF8_STRING");
   });
 
-  it("keeps an image-only copy as its image", () => {
-    expect(chooseType(["image/png", "image/jpeg"])).toBe("image/png");
+  it("keeps an image-only copy as its image, preferring PNG wherever it is listed", () => {
+    expect(chooseType(["image/jpeg", "image/bmp", "image/png"])).toBe("image/png");
+    expect(chooseType(["image/jpeg", "image/bmp"])).toBe("image/jpeg");
   });
 
   it("restores nothing when there is neither text nor an image", () => {

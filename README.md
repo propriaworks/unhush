@@ -442,6 +442,16 @@ On Wayland the key binding is controlled by your desktop environment, not Unhush
 </details>
 
 <details>
+<summary>My clipboard wasn't put back after a paste</summary>
+
+In **Paste** mode, Unhush puts whatever you had copied back on the clipboard a few seconds after pasting. It deliberately leaves two kinds of copy alone, so the transcript stays on the clipboard instead:
+- passwords copied from a password manager, which Unhush doesn't read;
+- copied files, which can't be put back exactly (e.g. a cut could come back as a copy).
+
+It also skips the restore if you copy something else in the meantime. Also, due to a limitation of `wl-paste`, on Niri (`xwayland-satellite`), rich text such as formatted text from a browser will come back as plain text.
+</details>
+
+<details>
 <summary>Recording is slow to start (sometimes)</summary>
 
 The chime and red bar appear only once the microphone is actually delivering audio, so a slow start means the device itself is slow to wake. Most systems suspend an idle microphone a few seconds after its last use, and USB mics (especially webcams) may then also be put into USB power saving — waking one can take a second or more. You'd notice that starts are instant when recordings are very close together but slower after a pause.

@@ -44,15 +44,12 @@ const { promisify } = require("util");
 const fs = require("fs");
 const path = require("path");
 const { findBinary } = require("./findBinary.cjs");
+const { SENSITIVE_HINT, GNOME_FILES, URI_LIST, isFileUriList } = require("./clipboardTypes.cjs");
 
 const execFileAsync = promisify(execFile);
 
 const SATELLITE = "xwayland-satellite";
 const TEXT_TYPE = "text/plain;charset=utf-8";
-// Set by password managers so that clipboard history skips the entry. Released wl-copy (2.2.1)
-// cannot set it, so such an entry is not restored: re-offered without the hint, a clipboard
-// manager would record the password. Password managers clear the clipboard themselves anyway.
-const SENSITIVE_HINT = "x-kde-passwordManagerHint";
 // Reads are answered by the clipboard's owner, which may be slow (an X app, through satellite);
 // save() is awaited before the paste, so this bounds how long a slow owner can delay it.
 const READ_TIMEOUT_MS = 1000;
@@ -194,12 +191,23 @@ async function readText() {
 // One type per selection, since wl-copy offers a single type (plus generic aliases for text). A
 // rich copy, such as HTML with a plain-text twin, therefore comes back as plain text. Text is
 // preferred as the part that is nearly always present and matters most; an image-only copy keeps
-// its image; anything else is not restored.
+// its image, as PNG when offered, since that is the type nearly every app accepts for pasting;
+// anything else is not restored.
 const TEXT_PREFERENCE = [TEXT_TYPE, "text/plain", "UTF8_STRING"];
 function chooseType(types) {
   return TEXT_PREFERENCE.find((t) => types.includes(t))
-    || types.find((t) => t.startsWith("image/"))
+    || (types.includes("image/png") ? "image/png" : types.find((t) => t.startsWith("image/")))
     || null;
+}
+
+// Passwords and copied files are not restored at all (see clipboardTypes.cjs); the password
+// itself is never read, only the list of types.
+async function restorable(primary, types, opts) {
+  if (types.includes(SENSITIVE_HINT) || types.includes(GNOME_FILES)) return false;
+  if (!types.includes(URI_LIST)) return true;
+  const { stdout } = await execFileAsync(tools.paste,
+    [...selectionArgs(primary), "--no-newline", "--type", URI_LIST], opts);
+  return !isFileUriList(stdout);
 }
 
 async function saveOne(primary) {
@@ -207,8 +215,8 @@ async function saveOne(primary) {
   try {
     const { stdout } = await execFileAsync(tools.paste, [...selectionArgs(primary), "--list-types"], opts);
     const types = stdout.split("\n").filter(Boolean);
-    const type = types.includes(SENSITIVE_HINT) ? null : chooseType(types);
-    if (!type) return null;
+    const type = chooseType(types);
+    if (!type || !(await restorable(primary, types, opts))) return null;
     const { stdout: data } = await execFileAsync(tools.paste,
       [...selectionArgs(primary), "--no-newline", "--type", type], { ...opts, encoding: "buffer" });
     return { type, data };

@@ -12,6 +12,7 @@
 
 const { clipboard } = require("electron");
 const waylandClipboard = require("./waylandClipboard.cjs");
+const { SENSITIVE_HINT, GNOME_FILES, URI_LIST, isFileUriList } = require("./clipboardTypes.cjs");
 
 // Write the text to both X selections, deliberately. Shift+Insert is historically the
 // *primary*-selection paste in X11 and terminals still bind it that way, while GUI toolkits read
@@ -33,9 +34,19 @@ async function readText() {
   return waylandClipboard.active() ? waylandClipboard.readText() : clipboard.readText();
 }
 
+// Passwords and copied files are not restored at all (see clipboardTypes.cjs). Their marker types
+// are not in availableFormats(), which lists only standard ones, so they are asked for by name;
+// for the password, that reads only the hint's own value, never the password.
+function restorable(type, formats) {
+  if (clipboard.readBuffer(SENSITIVE_HINT, type).length > 0) return false;
+  if (clipboard.readBuffer(GNOME_FILES, type).length > 0) return false;
+  return !(formats.includes(URI_LIST) && isFileUriList(clipboard.readBuffer(URI_LIST, type).toString()));
+}
+
 function snapshot(type) {
   const saved = {};
   const formats = clipboard.availableFormats(type);
+  if (!restorable(type, formats)) return saved;
   if (formats.some(f => f.startsWith("text/plain"))) saved.text = clipboard.readText(type);
   if (formats.some(f => f.startsWith("text/html"))) saved.html = clipboard.readHTML(type);
   if (formats.some(f => f.startsWith("image/"))) saved.image = clipboard.readImage(type);
@@ -59,4 +70,4 @@ async function restore(saved) {
   if (Object.keys(saved.selection).length > 0) clipboard.write(saved.selection, "selection");
 }
 
-module.exports = { writeTextBoth, readText, save, restore };
+module.exports = { writeTextBoth, readText, save, restore, _internal: { restorable } };
