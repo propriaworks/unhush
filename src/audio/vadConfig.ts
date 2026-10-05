@@ -15,5 +15,5 @@ export const VAD_CONFIG = {
   retryAttempts: 2,
   retryBaseDelayMs: 1000,
   sampleRate: 16000,
-  frameSizeSamples: 512,      // v5 model: 32ms per frame
+  frameSizeSamples: 512,      // v5/v6 models: 32ms per frame
 } as const;

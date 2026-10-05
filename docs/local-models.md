@@ -10,11 +10,11 @@ Running Unhush entirely locally gives you:
 - **No API costs** — no usage fees or rate limits
 - **Offline use** — works without an internet connection
 
-Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an NVidia GPU. 
+Both the transcription (speech-to-text) and LLM formatting steps can be run locally and independently. You can mix and match: for example, use a local transcription server with a cloud LLM, or vice versa. For good fully local performance, you'll want to choose models that can both fit in memory at the same time and ideally run on an NVidia GPU.
 
 ---
 
-## Local Transcription 
+## Local Transcription
 
 Unhush requires a speech-to-text engine which exposes an OpenAI-compatible `/v1/audio/transcriptions` speech-to-text endpoint. For this we recommend `speaches`, which is described in detail below. There are other compatible alternatives available, however, and these are particularly interesting if your GPU has little available memory, or if you need to use a CPU instead.
 
@@ -24,7 +24,7 @@ Unhush requires a speech-to-text engine which exposes an OpenAI-compatible `/v1/
 
 ### Speaches
 
-[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It supports the openAI endpoint we require, along with GPU acceleration via faster-whisper, and model auto-loading. Speaches also supports Text-to-Speech models, but this is not used by Unhush and that part need not be configured. 
+[**speaches**](https://speaches.ai) is the recommended self-hosted Whisper server. It supports the openAI endpoint we require, along with GPU acceleration via faster-whisper, and model auto-loading. Speaches also supports Text-to-Speech models, but this is not used by Unhush and that part need not be configured.
 
 ### Speaches Setup
 
@@ -158,7 +158,9 @@ The warm-up runs in the background while you speak. If it hasn't completed by th
 
 ### Keeping the Ollama model resident
 
-Ollama unloads models from VRAM after 5 minutes of inactivity by default. After each dictation, Unhush automatically calls Ollama's native API to extend this timer by `llm_keep_alive` (default `"2h"`), so the model stays loaded between dictations without holding the GPU indefinitely. This can be configured via `llm_keep_alive` in `settings.json` (see [Advanced Settings](../README.md#advanced-settings)).
+Ollama unloads models from VRAM after 5 minutes of inactivity by default. After each dictation, Unhush automatically calls Ollama's native API to extend this timer to `llm_keep_alive` (default `"2h"`), so the model stays loaded between dictations without holding the GPU indefinitely. This can be configured via `llm_keep_alive` in `settings.json` (see [Advanced Settings](../README.md#advanced-settings)).
+
+If the server already keeps the model loaded longer than `llm_keep_alive` (e.g. `OLLAMA_KEEP_ALIVE=-1` or `24h`, see below), Unhush detects this and leaves the server's setting alone while that model is selected.
 
 This mechanism only applies to Ollama (auto-detected). Other local servers (llama.cpp-server, vLLM, LM Studio, LocalAI) keep models loaded for the process lifetime by default and do not need this.
 
@@ -198,7 +200,7 @@ Then apply the change:
 sudo systemctl daemon-reload && sudo systemctl restart ollama
 ```
 
-Use `OLLAMA_KEEP_ALIVE=2h` instead of `-1` on a shared GPU — the model unloads 2 hours after last use, freeing VRAM when you're not dictating. The in-app `llm_keep_alive` setting achieves the same on a per-dictation basis; that feature can be disabled (set to `""`) if set at the service level.
+Use `OLLAMA_KEEP_ALIVE=2h` (e.g.) instead of `-1` on a shared GPU — the model unloads 2 hours after last use, freeing VRAM when you're not dictating. The in-app `llm_keep_alive` setting achieves the same on a per-dictation basis; it won't shorten a longer service-level value, but can be disabled (set to `""`) if you prefer.
 
 ---
 

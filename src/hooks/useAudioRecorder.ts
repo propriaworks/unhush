@@ -201,7 +201,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       // current dev build is known to fall back to single-threaded, but performs well enough. This could be fixable for dev but is harder for prod, so leave as-is for now.
 
       return await MicVAD.new({
-        model: "v5",
+        model: "v6",
         baseAssetPath: "./vad/",
         onnxWASMBasePath: new URL("./vad/", window.location.href).href,
         audioContext: audioContextRef.current!,

@@ -344,7 +344,7 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 | `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
 | `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
 | `provider_restart_stale_min` | Minutes since a custom server (transcription or LLM) was last successfully reached, after which Unhush will re-check it and, if unreachable, re-run its Start Command. Also triggers immediately after editing the Start Command, regardless of this interval | `60` |
-| `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disbles this feature. Has no effect on non-Ollama servers. | `"2h"` |
+| `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disables this feature. Not applied if the server's own keep-alive (`OLLAMA_KEEP_ALIVE`) is already longer. Has no effect on non-Ollama servers. | `"2h"` |
 | `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |
 | `llm_excess_length_floor` | Minimum character headroom above input length regardless of multiplier | `20` |
 | `llm_final_instructions` | Instruction appended to the user message sent to the LLM, after the transcript | `"Output the cleaned transcript only. No commentary, no explanations, no preamble."` |
@@ -523,13 +523,13 @@ Most Wayland testing has been on KDE. Your experience with GNOME and Hyprland on
 <details>
 <summary>Developer notes</summary>
 
-Run `pnpm install` to install dependencies, or update them based upon a changed `package.json` (changes to lockfile are limited to what's needed to match `package.json`). `pnpm update` will also change the `package.json`, bumping versions to the newest matching versions (subject to minimum age from the workspace file). `pnpm up --latest -i` updates dependencies in `packages.json` to their latest major versions; do rarely, in interactive mode to avoid disruptive upgrades and aptknow what needs to be tested/changed.
+Run `pnpm install` to install dependencies, or update them based upon a changed `package.json` (changes to lockfile are limited to what's needed to match `package.json`). `pnpm update` will also change the `package.json`, bumping versions to the newest matching versions (subject to minimum age from the workspace file). `pnpm up --latest -i` updates dependencies in `packages.json` to their latest major versions, ignoring prior version constraints; do rarely, in interactive mode to avoid disruptive upgrades and aptknow what needs to be tested/changed.
 
 Before committing check typescript with `pnpm tsc` and run tests with `pnpm test`.
 
 ### Fixing OSV-flagged subdependencies
 
-Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version.
+Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Usually you can update just that package with `pnpm up [--latest] <pkg>` to fix it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version.
 
 ### Building
 

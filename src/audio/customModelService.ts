@@ -83,6 +83,10 @@ const modelCache = new Map<string, { models: ModelInfo[]; fetchedAt: number }>()
 // Ollama detection cache — probed once per baseUrl per session
 const ollamaCache = new Map<string, boolean>();
 
+// Whether the selected Ollama LLM needs its keep_alive pinned (see pinOllamaKeepAlive).
+// Decided once, then re-decided only when baseUrl, model or the keep_alive setting changes.
+let keepAliveDecision: { key: string; pinNeeded: boolean } | undefined;
+
 // Tracks whether the most recent custom LLM warm-up succeeded
 let llmWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
 
@@ -276,14 +280,82 @@ async function isOllama(baseUrl: string): Promise<boolean> {
   }
 }
 
+const BARE_SECONDS = /^-?\d+(\.\d+)?$/;
+const DURATION_UNIT_MS: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1000, ms: 1 };
+
 /**
- * Refreshes the Ollama model-unload timer after a dictation.
+ * Converts an Ollama keep_alive value to ms: a Go duration string ("2h", "1h30m") or bare
+ * seconds ("300"). Negative means "never unload" → Infinity. Undefined if unparseable.
+ */
+export function parseKeepAliveMs(value: string): number | undefined {
+  const v = value.trim();
+  if (BARE_SECONDS.test(v)) return Number(v) < 0 ? Infinity : Number(v) * 1000;
+  const match = /^(-?)((?:\d+(?:\.\d+)?(?:h|ms|m|s))+)$/.exec(v);
+  if (!match) return undefined;
+  if (match[1]) return Infinity;
+  let ms = 0;
+  for (const [, n, unit] of match[2].matchAll(/(\d+(?:\.\d+)?)(h|ms|m|s)/g)) ms += Number(n) * DURATION_UNIT_MS[unit];
+  return ms;
+}
+
+/** Ms until Ollama unloads `model`, per /api/ps. Undefined if it isn't loaded or the query fails. */
+async function ollamaMsUntilUnload(baseUrl: string, headers: Record<string, string>, model: string): Promise<number | undefined> {
+  try {
+    const response = await fetch(`${baseUrl}/api/ps`, { headers, signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return undefined;
+    const data = await response.json();
+    // Ollama reports tagged names ("mistral:latest"); the configured model may omit the tag
+    const entry = data?.models?.find((m: { name?: string; model?: string }) =>
+      [m.name, m.model].some((n) => n === model || n === `${model}:latest`));
+    const expiresAt = Date.parse(entry?.expires_at);
+    return Number.isNaN(expiresAt) ? undefined : expiresAt - Date.now();
+  } catch {
+    return undefined;
+  }
+}
+
+// Slack for clock skew between us and the Ollama host when comparing unload times
+const KEEP_ALIVE_MARGIN_MS = 60_000;
+
+/**
+ * Decides whether pinning `keepAlive` would extend the model's stay in memory. Called just
+ * after a /v1 request, when the timer has been re-armed with the loaded model's keep-alive
+ * duration — the server default (OLLAMA_KEEP_ALIVE) unless something pinned it since the
+ * model loaded. Pinning a shorter value than that default would cut it short. Returns
+ * undefined when it can't tell (model not listed, query failed).
+ */
+async function keepAlivePinNeeded(
+  baseUrl: string,
+  headers: Record<string, string>,
+  model: string,
+  keepAlive: string,
+  log: LogFn,
+): Promise<boolean | undefined> {
+  const requestedMs = parseKeepAliveMs(keepAlive);
+  if (requestedMs === undefined || requestedMs === Infinity) return true;
+  const remainingMs = await ollamaMsUntilUnload(baseUrl, headers, model);
+  if (remainingMs === undefined) return undefined;
+  // Strictly greater (plus margin): our own earlier pin leaves remaining ≈ requested, which
+  // must not be mistaken for a longer server default.
+  if (remainingMs > requestedMs + KEEP_ALIVE_MARGIN_MS) {
+    const remaining = remainingMs > 1 * 365 * 86_400_000 ? "indefinitely" : `${Math.round(remainingMs / 60_000)} min`;
+    log("info", `Ollama already keeps ${model} loaded ${remaining}, longer than llm_keep_alive ${keepAlive}; not pinning while this model is selected`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Extends the Ollama model-unload timer after a dictation.
  *
- * Ollama's /v1/chat/completions shim resets keep_alive to the server-level default
- * (~5 min if not overriden) on every real request. Calling this after each LLM
- * post-processing step sets a longer duration via the ollama-native /api/generate
- * endpoint (empty prompt = no generation, just a timer refresh). No-ops silently
- * for non-Ollama servers. Designed to be called fire-and-forget (void).
+ * A model loaded via /v1/chat/completions gets the server-level keep-alive
+ * (OLLAMA_KEEP_ALIVE, 5 min if unset); each later request re-arms the timer with the
+ * loaded model's current duration. Pinning via the ollama-native /api/generate endpoint
+ * (empty prompt = no generation) replaces that duration until the model unloads. We pin
+ * after every dictation because a reload (Ollama restart, VRAM eviction) reverts it.
+ * If the server default is already longer than `keepAlive`, pinning would shorten it, so
+ * that check is made once per baseUrl/model/keepAlive and pinning skipped while it holds.
+ * No-ops silently for non-Ollama servers. Designed to be called fire-and-forget (void).
  */
 export async function pinOllamaKeepAlive(
   baseUrl: string,
@@ -296,11 +368,20 @@ export async function pinOllamaKeepAlive(
   if (!(await isOllama(baseUrl))) return;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  const key = `${baseUrl}|${model}|${keepAlive}`;
+  if (keepAliveDecision?.key !== key) {
+    keepAliveDecision = undefined;
+    const pinNeeded = await keepAlivePinNeeded(baseUrl, headers, model, keepAlive, log);
+    // Inconclusive: pin anyway this time and re-check on the next dictation
+    if (pinNeeded !== undefined) keepAliveDecision = { key, pinNeeded };
+  }
+  if (keepAliveDecision?.pinNeeded === false) return;
   try {
     const response = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive }),
+      // Ollama parses a JSON string as a Go duration ("300" is rejected); bare seconds must be a number
+      body: JSON.stringify({ model, prompt: "", keep_alive: BARE_SECONDS.test(keepAlive.trim()) ? Number(keepAlive) : keepAlive }),
       signal: AbortSignal.timeout(90000),
     });
     if (response.ok) {

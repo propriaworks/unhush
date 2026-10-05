@@ -162,7 +162,7 @@ function RecordingBar() {
           // this recording — Phase 2 may have skipped re-trying if it isn't due yet.
           window.electronAPI?.log("info", `Custom LLM not ready, last warm-up status: ${getLLMWarmupStatus()} — using raw Whisper transcript`);
         }
-        if (finalTranscript && llmConfig && !transcript.startsWith("[Error") && !llmNotReady) {
+        if (finalTranscript && llmConfig && !llmNotReady) {
           let llmStatus = "error";
           let llmLatencyMs: number | undefined;
           const llmResult = await postProcessTranscript(transcript, llmConfig).catch((err) => {
@@ -184,7 +184,7 @@ function RecordingBar() {
             } else {
               llmStatus = "ok";
               finalTranscript = llmOutput!;
-              // Re-pin the Ollama model unload timer; /v1 requests reset it to the server default (~5 min)
+              // Extend the Ollama model unload timer beyond the server default (~5 min unless configured)
               void pinOllamaKeepAlive(
                 getBaseUrl(llmConfig.apiUrl), llmConfig.apiKey, llmConfig.model,
                 localStorage.getItem("unhush_llm_keep_alive") ?? "2h",
@@ -192,7 +192,6 @@ function RecordingBar() {
               );
             }
           }
-          finalTranscript = normalizePunctuation(finalTranscript)
           if (localStorage.getItem("unhush_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
@@ -219,7 +218,8 @@ function RecordingBar() {
         window.electronAPI.log("debug",
           `stop-recording: transcribe ${tTranscribed - tStop}ms, format ${Date.now() - tTranscribed}ms`);
         const outputMethod = (localStorage.getItem("unhush_output_method") || "paste") as OutputMethod;
-        window.electronAPI.outputText(finalTranscript, outputMethod);
+        // Every transcript, formatted or not, so output never depends on whether the LLM ran
+        window.electronAPI.outputText(normalizePunctuation(finalTranscript), outputMethod);
       } else if (window.electronAPI) {
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
