@@ -1,20 +1,43 @@
 // The Wayland half of the clipboard, for desktops whose XWayland is provided by xwayland-satellite
-// (Niri, chiefly). Only clipboardAccess.cjs uses this, and only when active() says so.
+// (Niri, chiefly). Only clipboardAccess.cjs uses this, and only when active() says so. Under
+// satellite it *replaces* Electron's X clipboard for writes, reads, saves and restores.
 //
-// Why it exists: Unhush runs under XWayland (see main.cjs), so its clipboard writes go to the X
-// selections, and something has to copy them to the Wayland clipboard that native Wayland apps
-// read. GNOME and KDE do that inside the compositor. xwayland-satellite is instead an ordinary
-// Wayland client standing in for every X window, so Wayland's rule that only the focused client may
-// set the clipboard applies to it -- and while the user dictates into a Wayland app, that app has
-// focus, not satellite. The compositor drops satellite's request without an error (Smithay:
-// "denying setting selection by a non-focused client"), satellite doesn't retry, and the Wayland
-// app pastes whatever its clipboard held before.
+// WORKAROUND for xwayland-satellite clipboard bugs (as of 0.8.3 / main b5690b5, 2026-10). Unhush
+// runs under XWayland (see main.cjs), so Electron's clipboard is the X one, and satellite must
+// copy it to the Wayland clipboard that native Wayland apps read. GNOME and KDE bridge the two
+// inside the compositor; satellite is instead an ordinary Wayland client standing in for every X
+// window, and that breaks in two ways:
 //
-// wl-copy and wl-paste (wl-clipboard) go through the data-control protocol, which exists for
-// clipboard tools and needs no focus; Niri offers it. They are deliberately used only where
-// satellite runs: elsewhere the compositor bridges the clipboard itself, and on one without
-// data-control (GNOME's Mutter) wl-copy falls back to briefly taking focus, which would send the
-// paste to the wrong window.
+// 1. X11 -> Wayland is refused while a Wayland app has focus. Satellite sets the Wayland clipboard
+//    with wl_data_device.set_selection, which the compositor accepts only from the focused client
+//    (Smithay, hence Niri: "denying setting selection by a non-focused client"). When the user
+//    dictates into a Wayland app, that app has focus, so the transcript never reaches it and the
+//    paste inserts whatever was there before. Nothing retries.
+// 2. Any X11 clipboard owner can stop Wayland -> X11. Satellite keeps the X-backed source in its
+//    clipboard slot and ignores Wayland copies until the compositor cancels that source -- which a
+//    refused source (case 1) never gets, so the slot stays stuck. Wayland copies then never reach
+//    X apps (https://github.com/Supreeeme/xwayland-satellite/issues/485, signature A). Even an
+//    accepted source blocks Wayland -> X11 while an X client still owns CLIPBOARD (dnlbtz's repro,
+//    #485 and PR #431), and Electron stays owner after every write.
+//
+// So under satellite, Unhush does not touch the X selections at all: wl-copy and wl-paste
+// (wl-clipboard) use the data-control protocol, which clipboard tools are given precisely because
+// it needs no focus, and Niri offers it. X apps still get the transcript, from satellite: they
+// have focus when pasted into, so satellite does too, receives the new Wayland clipboard and takes
+// X ownership itself.
+//
+// WHEN TO REMOVE: once the satellite versions we support (a) set the Wayland clipboard through
+// ext-data-control whenever the compositor offers it, not only before any X window has had focus,
+// and (b) follow Wayland copies through that device's events, so a stored X source can no longer
+// block them. https://github.com/Supreeeme/xwayland-satellite/pull/431 as of 2026-09 does neither:
+// it uses data-control only with no keyboard serial and discards the device's selection events.
+// We have asked for both there. With both, Electron's X clipboard would work under satellite as
+// it does everywhere else, and this module, its use in clipboardAccess.cjs, the setup card in
+// main.cjs and the wl-clipboard package dependency could all go.
+//
+// The tools are deliberately used only where satellite runs: elsewhere the compositor bridges the
+// clipboard itself, and on one without data-control (GNOME's Mutter) wl-copy falls back to briefly
+// taking focus, which would send the paste to the wrong window.
 
 const { spawn, execFile } = require("child_process");
 const { promisify } = require("util");
@@ -145,15 +168,16 @@ function wlCopy(args, data) {
 
 const selectionArgs = (primary) => (primary ? ["--primary"] : []);
 
-// Never throws: the X11 write has already happened (see clipboardAccess.cjs), and that alone
-// serves X apps, so a failure here must not stop the paste. A compositor without primary-selection
-// support fails only the --primary half.
+// Never throws, so that a failure cannot stop the paste. Returns whether the regular clipboard was
+// set; if not, clipboardAccess.cjs falls back to the X selections. A compositor without
+// primary-selection support fails only the --primary half, which is merely logged.
 async function writeTextBoth(text) {
-  const results = await Promise.allSettled([false, true].map((primary) =>
+  const [clipboard, primary] = await Promise.allSettled([false, true].map((primary) =>
     wlCopy([...selectionArgs(primary), "--type", TEXT_TYPE], text)));
-  for (const r of results) {
+  for (const r of [clipboard, primary]) {
     if (r.status === "rejected") log("warn", `clipboard: ${r.reason.message}`);
   }
+  return clipboard.status === "fulfilled";
 }
 
 // The clipboard as a Wayland app would paste it; null if it is empty or no longer text.

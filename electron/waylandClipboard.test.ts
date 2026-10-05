@@ -5,12 +5,12 @@
 // the parent exits once the selection is "set", leaving a child that still holds stderr -- which
 // is the case where waiting for the pipes to close would hang until the next copy.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
 // @ts-expect-error - plain CommonJS module, no type declarations
-import { _internal } from "./waylandClipboard.cjs";
+import { _internal, writeTextBoth } from "./waylandClipboard.cjs";
 const { isSatelliteCmdline, chooseType, wlCopy, setTools } = _internal;
 
 describe("isSatelliteCmdline", () => {
@@ -52,11 +52,13 @@ describe("wlCopy", () => {
     childPidFile = path.join(dir, "child.pid");
     const script = path.join(dir, "wl-copy");
     // Reads stdin into a file, as wl-copy spools it; "--fail" exits 1 with a message, like a
-    // missing compositor; otherwise a background child keeps stderr open and the parent exits 0.
+    // missing compositor, as does any call while FAKE_WLCOPY_FAIL matches its arguments;
+    // otherwise a background child keeps stderr open and the parent exits 0.
     fs.writeFileSync(script, `#!/bin/sh
 cat > "${dir}/stdin"
 echo "$@" > "${dir}/args"
 if [ "$1" = "--fail" ]; then echo "Failed to connect to a Wayland server" >&2; exit 1; fi
+case "$*" in $FAKE_WLCOPY_FAIL) echo "refused" >&2; exit 1;; esac
 sleep 30 < /dev/null > /dev/null &
 echo $! > "${childPidFile}"
 exit 0
@@ -79,5 +81,20 @@ exit 0
 
   it("rejects with wl-copy's own message when it fails", async () => {
     await expect(wlCopy(["--fail"], "x")).rejects.toThrow(/exit 1.*Failed to connect to a Wayland server/);
+  });
+
+  // clipboardAccess.cjs falls back to the X selections only when the regular clipboard failed.
+  describe("writeTextBoth", () => {
+    afterEach(() => { delete process.env.FAKE_WLCOPY_FAIL; });
+
+    it("reports success when only the primary selection is refused", async () => {
+      process.env.FAKE_WLCOPY_FAIL = "--primary*";
+      expect(await writeTextBoth("hello")).toBe(true);
+    });
+
+    it("reports failure, without throwing, when the clipboard itself is refused", async () => {
+      process.env.FAKE_WLCOPY_FAIL = "--type*";
+      expect(await writeTextBoth("hello")).toBe(false);
+    });
   });
 });

@@ -3,8 +3,8 @@
 // to this file -- and checked against a real X server by clipboardAccess.integration.cjs
 // (`pnpm test:clipboard`), since unit tests can only fake it.
 //
-// Under xwayland-satellite (Niri), writes also go to the Wayland clipboard, and reads, saves and
-// restores use it instead of the X one -- see waylandClipboard.cjs for why.
+// Under xwayland-satellite (Niri), all four use the Wayland clipboard instead of the X one. This
+// works around satellite bugs: see waylandClipboard.cjs, including for when it can be removed.
 //
 // The functions are async although Electron 43's clipboard is synchronous: Electron 44 made the
 // API promise-based, and keeping the async shape here lets that migration replace this file
@@ -19,16 +19,16 @@ const waylandClipboard = require("./waylandClipboard.cjs");
 // nothing in whichever half of the desktop doesn't match. The 'selection' type is a no-op off Linux.
 // (On X11, Electron also copies a CLIPBOARD write onto PRIMARY by itself -- observed under Xvfb --
 // but that is undocumented, so the explicit write stays.)
-// Under satellite, the X write still comes first: X apps read it directly, and wl-copy's then
-// replaces whatever satellite managed to forward, so the Wayland side ends up with ours.
+// Under satellite the X selections are left alone, since owning them can stop the user's Wayland
+// copies reaching X apps. Only if wl-copy fails are they written after all, so the transcript is
+// at least somewhere: on the X side, for X apps and a manual paste.
 async function writeTextBoth(text) {
+  if (waylandClipboard.active() && await waylandClipboard.writeTextBoth(text)) return;
   clipboard.writeText(text);
   clipboard.writeText(text, "selection");
-  if (waylandClipboard.active()) await waylandClipboard.writeTextBoth(text);
 }
 
-// Under satellite this must ask Wayland: Electron answers from its own X selection, which holds
-// our text whether or not it ever reached the Wayland clipboard.
+// Under satellite this must ask Wayland: that is where we wrote, and the X side can be stale.
 async function readText() {
   return waylandClipboard.active() ? waylandClipboard.readText() : clipboard.readText();
 }
@@ -46,8 +46,8 @@ function snapshot(type) {
 // Returns an opaque snapshot of both selections for restore().
 // Under satellite only the Wayland side is saved and restored. The X side can be stale (satellite
 // learns of a Wayland copy only once one of its windows gets focus), so restoring it could put
-// back something older than what the user last copied; satellite re-syncs the X side from Wayland
-// the next time an X window is focused.
+// back something older than what the user last copied; satellite brings the X side up to date
+// itself the next time an X window is focused.
 async function save() {
   if (waylandClipboard.active()) return { wayland: await waylandClipboard.save() };
   return { clipboard: snapshot("clipboard"), selection: snapshot("selection") };
