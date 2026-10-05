@@ -21,6 +21,7 @@ const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const clipboardAccess = require("./clipboardAccess.cjs");
+const waylandClipboard = require("./waylandClipboard.cjs");
 const textOutput = require("./textOutput.cjs");
 const fs = require("fs");
 const os = require("os");
@@ -224,6 +225,7 @@ ydotool.init(log, app.getPath("userData"));
 commandFifo.init(log);
 audioDucking.init(log, app.getName());
 activeWindow.init(log);
+waylandClipboard.init(log);
 textOutput.init({
   clipboard: clipboardAccess,
   ydotool,
@@ -802,9 +804,10 @@ function mutedProblems() {
   }
 }
 
-// The setup window shows one card per problem. Provider config, the ydotool paste path, and the
-// global shortcut are independent concerns, so they're gathered here rather than any module
-// knowing about the others; each card is tagged with `kind` by its gatherer below.
+// The setup window shows one card per problem. Provider config, the ydotool paste path, the
+// Wayland clipboard bridge and the global shortcut are independent concerns, so they're gathered
+// here rather than any module knowing about the others; each card is tagged with `kind` by its
+// gatherer below.
 let setupIncludesYdotool = true;
 
 async function setupPreflight() {
@@ -816,6 +819,9 @@ async function setupPreflight() {
   if (setupIncludesYdotool) {
     problems.push(...(await ydotool.preflight()).problems.map((p) => ({ kind: "ydotool", ...p })));
   }
+  // Needed whatever the output mode: every clipboard write is affected (see waylandClipboard.cjs).
+  const clipboard = waylandClipboard.setupProblem(ydotool.installCommand("wl-clipboard"));
+  if (clipboard) problems.push({ kind: "clipboard", ...clipboard });
   // Wait for the first portal bind to settle before deciding: on a Wayland first run that means
   // waiting out the desktop's consent dialog, and telling the user to bind a key by hand while
   // that dialog is on screen would be exactly wrong. Already resolved on X11.

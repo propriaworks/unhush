@@ -80,7 +80,9 @@
       ],
       "fpm": [
         "--deb-suggests",
-        "x11-utils"
+        "x11-utils",
+        "--deb-suggests",
+        "wl-clipboard"
       ]
     },
     "rpm": {
@@ -102,7 +104,9 @@
         "--rpm-tag",
         "Recommends: pulseaudio-utils",
         "--rpm-tag",
-        "Recommends: ydotool"
+        "Recommends: ydotool",
+        "--rpm-tag",
+        "Recommends: wl-clipboard"
       ]
     },
     "pacman": {
@@ -125,7 +129,8 @@
         "xdg-utils",
         "at-spi2-core",
         "util-linux-libs",
-        "ydotool"
+        "ydotool",
+        "wl-clipboard"
       ]
     },
     "directories": {

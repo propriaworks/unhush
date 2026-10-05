@@ -55,6 +55,8 @@ The `.deb`, `.rpm`, and `.pacman` packages automatically:
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
 
 Two more tools are optional: `pactl` (lowers other apps' audio while recording) is recommended; `xprop` is only suggested.
+
+`wl-clipboard` is a dependency of the `.pacman` package, recommended by the `.rpm` and suggested by the `.deb`. It is only used under Niri (or any other desktop whose XWayland is `xwayland-satellite`); see [Wayland Setup](#wayland-setup).
 </details>
 
 <details>
@@ -181,6 +183,8 @@ The change takes effect on the next recording — no restart needed.
 ### Wayland Setup
 
 On a Wayland session Unhush runs itself under **XWayland**. Using native Wayland would interfere with core features, such as being able to write seemlessly to the clipboard, put the recording indicator above other windows and place it at the bottom of the screen. But the use of XWayland should be transparent to users, with one exception: if your primary display uses fractional dpi scaling (like 125%), Unhush may appear slightly blurry.
+
+On **Niri**, or any desktop whose XWayland is provided by `xwayland-satellite`, Unhush also needs `wl-clipboard` (`wl-copy`/`wl-paste`). There, XWayland's clipboard reaches native Wayland apps only while an XWayland window has focus, so without wl-clipboard, **Paste** mode pastes whatever was copied before into Wayland apps. Unhush detects this setup and, if wl-clipboard is missing, says so in its setup window. AppImage users need to install it themselves.
 
 The global shortcut still works:  it through the **XDG GlobalShortcuts
 portal** over D-Bus, which is independent of XWayland. On first run Unhush asks the desktop to assign it the shortcut `Ctrl+Alt+Space`, with your permission (modifiable at that time or later, see below) so as to toggle dictation.

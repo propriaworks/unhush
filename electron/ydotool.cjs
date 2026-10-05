@@ -403,15 +403,16 @@ function distro() {
 const isRpmDistroFor = (d) => /fedora|rhel|centos/.test(d);
 const isRpmDistro = () => isRpmDistroFor(distro());
 
-// Distro-appropriate install command, for the "ydotool isn't installed" case (mostly AppImage).
+// Distro-appropriate install command, for the "ydotool isn't installed" case (mostly AppImage),
+// and for other packages whose name is the same on every distro (wl-clipboard).
 // Split from distro() so the mapping can be checked without an /etc/os-release to match.
-function installCommandFor(d) {
-  if (isRpmDistroFor(d)) return "sudo dnf install ydotool";
-  if (/arch/.test(d)) return "sudo pacman -S ydotool";
-  if (/suse/.test(d)) return "sudo zypper install ydotool";
-  return "sudo apt install ydotool"; // debian/ubuntu, and a reasonable default
+function installCommandFor(d, pkg = "ydotool") {
+  if (isRpmDistroFor(d)) return `sudo dnf install ${pkg}`;
+  if (/arch/.test(d)) return `sudo pacman -S ${pkg}`;
+  if (/suse/.test(d)) return `sudo zypper install ${pkg}`;
+  return `sudo apt install ${pkg}`; // debian/ubuntu, and a reasonable default
 }
-function installCommand() { return installCommandFor(distro()); }
+function installCommand(pkg) { return installCommandFor(distro(), pkg); }
 
 const UDEV_CMD =
   `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' ` +
@@ -478,7 +479,7 @@ async function preflight() {
 
 module.exports = {
   init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon,
-  clientPath, generation, pasteKeyArgs, typeStdinArgs,
+  clientPath, generation, pasteKeyArgs, typeStdinArgs, installCommand,
   // True when Type mode is layout-independent (see virtualKeyboard.cjs); false means US-QWERTY only.
   layoutPinned: virtualKeyboard.isPinned,
   _internal: {

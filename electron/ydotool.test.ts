@@ -110,6 +110,11 @@ describe("installCommandFor", () => {
     expect(installCommandFor("nobara fedora")).toBe("sudo dnf install ydotool");
     expect(installCommandFor("linuxmint ubuntu debian")).toBe("sudo apt install ydotool");
   });
+
+  it("installs another package when asked (wl-clipboard's setup card)", () => {
+    expect(installCommandFor("arch", "wl-clipboard")).toBe("sudo pacman -S wl-clipboard");
+    expect(installCommandFor("fedora", "wl-clipboard")).toBe("sudo dnf install wl-clipboard");
+  });
 });
 
 describe("isRpmDistroFor", () => {
