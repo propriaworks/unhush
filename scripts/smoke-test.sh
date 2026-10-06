@@ -8,7 +8,8 @@
 #   scripts/smoke-test.sh dev        `electron .` -- the unpacked mode -- serving dist/ through
 #                                    `vite preview` on the dev-server port (after `pnpm run build`)
 #
-# Needs xvfb-run and dbus-run-session. Safe to run alongside a real Unhush: the instance under
+# Needs xvfb-run and dbus-run-session; openbox (or metacity) and xprop are recommended (see below).
+# Safe to run alongside a real Unhush: the instance under
 # test gets its own HOME, config dir (single-instance lock, settings, log) and XDG_RUNTIME_DIR
 # (command fifo, ydotoold socket), a private D-Bus session, and an X server of its own.
 
@@ -54,11 +55,17 @@ fi
 
 tmp=$UNHUSH_SMOKE_TMP
 app_pid=""
+app_pgid=""
 preview_pid=""
+wm_pid=""
 cleanup() {
-  # Exact PIDs only; both are our own children
+  # Exact PIDs only; all are our own children. The app's whole process group too: if its main
+  # process dies, Chromium helpers (e.g. the network service) can outlive it briefly, and would
+  # otherwise keep writing into the temp dir as the outer run deletes it.
   [[ -n "$app_pid" ]] && kill -KILL "$app_pid" 2>/dev/null || true
+  [[ -n "$app_pgid" ]] && kill -KILL -- "-$app_pgid" 2>/dev/null || true
   [[ -n "$preview_pid" ]] && kill "$preview_pid" 2>/dev/null || true
+  [[ -n "$wm_pid" ]] && kill "$wm_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -68,6 +75,23 @@ fail() {
   echo "--- stdout/stderr (last 40 lines) ---" >&2; tail -n 40 "$tmp/output.log" >&2 2>/dev/null || true
   exit 1
 }
+
+# A window manager, as on a real desktop. Without one, the app's waitForWindowManager() waits 15s
+# before creating its windows. Any EWMH window manager will do: it sets the root-window property
+# that function polls for (with xprop, which is also how we check here).
+for wm in openbox metacity; do
+  command -v "$wm" >/dev/null || continue
+  "$wm" >"$tmp/wm.log" 2>&1 &
+  wm_pid=$!
+  for _ in $(seq 40); do
+    xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
+    sleep 0.25
+  done
+  break
+done
+if ! xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id"; then
+  echo "smoke ($MODE): no window manager running (install openbox); startup will wait 15s for one" >&2
+fi
 
 if [[ "$MODE" == dev ]]; then
   [[ -f dist/index.html ]] || fail "dist/ not built -- run 'pnpm run build' first"
@@ -84,8 +108,10 @@ else
   cmd=(release/linux-unpacked/unhush --no-sandbox)
 fi
 
-"${cmd[@]}" >"$tmp/output.log" 2>&1 &
+# setsid: its own process group (pgid = its pid), so cleanup can kill any helpers it leaves
+setsid "${cmd[@]}" >"$tmp/output.log" 2>&1 &
 app_pid=$!
+app_pgid=$app_pid
 
 log_file() { compgen -G "$tmp/config/*/logs/unhush.log" | head -n1 || true; }
 
@@ -101,7 +127,7 @@ wait_for_log() {
   fail "timed out after $2s waiting for '$pattern'"
 }
 
-# With no window manager on Xvfb, startup waits 15s for one before creating windows
+# Generous: without a window manager, startup alone waits 15s for one before creating windows
 wait_for_log "app ready after" 30
 wait_for_log "renderer mounted" 45
 echo "smoke ($MODE): started; checking it stays up for ${STAY_UP_S}s"
