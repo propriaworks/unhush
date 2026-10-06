@@ -329,6 +329,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | API URL | Transcription tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | Model name | Transcription tab (Custom) | Model identifier as the server expects |
 | Start Command | Transcription tab (Custom) | Shell command to launch the server if not running (e.g. `speaches serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
+| Warm up model before recording | Transcription tab (Custom) | `On` (default) or `Off`. While on, Unhush sends a short silent clip at the start of a recording (at most every `warmup_interval_sec`) so a server that unloads idle models has it re-loaded by the time you finish. Turn off for hosted APIs, which keep models loaded and bill each request |
 | Output | Usability tab | How text is delivered: `Paste` (default), `Type`, or `Clipboard` |
 | Shortcut | Usability tab | Global hotkey. On X11 pick it from the list; on Wayland the tab shows the key your desktop holds, with a button to change it |
 | Chimes | Usability tab | Play a short chime when recording starts and stops: `On` (default) or `Off` |
@@ -339,6 +340,7 @@ For the **Custom** provider, see [Using Local Models](docs/local-models.md) for 
 | API URL | Formatting tab (Custom) | Server base URL (no `/v1/...` path — Unhush appends it) |
 | API Key | Formatting tab (Custom) | Optional bearer token |
 | Start Command | Formatting tab (Custom) | Shell command to launch the LLM server (e.g. `ollama serve`). Re-run automatically the first time, every 2 minutes while the server stays unreachable, whenever it's gone unreached for a while after being up (see `provider_restart_stale_min` below), or right after you close Settings having changed a related field. Must be safe to run more than once |
+| Warm up model before recording | Formatting tab (Custom) | `On` (default) or `Off`. While on, Unhush sends a one-token request at the start of a recording (at most every `llm_warmup_interval_sec`), and uses the raw transcript until that has succeeded. This insures LLM formatting is available as soon as possible. Turn off for hosted APIs, which keep models loaded and bill each request |
 | System Prompt | Formatting tab | Instructions sent to the LLM; editable |
 
 **Resetting everything.** Settings (including your API keys) live in a Chromium LevelDB store, not
@@ -364,8 +366,8 @@ These settings are not exposed in the UI. Set them by adding keys to `~/.config/
 |-----|-------------|---------|
 | `debug_audio` | Save each recording's audio segments and transcripts to `~/.config/unhush/debug/` for inspection. Be aware these may build up over time if set to true. | `false` |
 | `debug_logging` | Include "debug"-level messages in `~/.config/unhush/logs/unhush.log` (normally suppressed, since nothing currently filters log levels otherwise — see [Troubleshooting](#troubleshooting)) | `false` |
-| `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server | `240` |
-| `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server | `240` |
+| `warmup_interval_sec` | Seconds between warm-up requests to the custom transcription server (when its warm-up is on) | `240` |
+| `llm_warmup_interval_sec` | Seconds between warm-up requests to the custom LLM server (when its warm-up is on) | `240` |
 | `provider_restart_stale_min` | Minutes since a custom server (transcription or LLM) was last successfully reached, after which Unhush will re-check it and, if unreachable, re-run its Start Command. Also triggers immediately after editing the Start Command, regardless of this interval | `60` |
 | `llm_keep_alive` | For Ollama LLM servers: how long to request the model be kept loaded in VRAM after each dictation. Accepts Ollama duration strings (`"2h"`, `"30m"`) or seconds as a number; `"-1"` pins forever; `""` disables this feature. Not applied if the server's own keep-alive (`OLLAMA_KEEP_ALIVE`) is already longer. Has no effect on non-Ollama servers. | `"2h"` |
 | `llm_length_multiplier` | Max LLM output length as a multiple of the input length; output exceeding this is discarded and the raw transcript used instead | `1.1` |

@@ -156,6 +156,8 @@ After a server starts (or after it hasn't been used for ~4 minutes), Unhush send
 
 The warm-up runs in the background while you speak. If it hasn't completed by the time transcription finishes (e.g. a very short dictation right after a cold start), Unhush falls back to the raw Whisper transcript and skips LLM formatting — so you still get your text immediately, just unformatted. If this happens on two dictations in a row for the Custom LLM Formatting provider, Unhush badges the system tray icon with a ⚠ warning until formatting succeeds again.
 
+Warm-up can be controlled per server with **Warm up model before recording** in Settings. The feature is intended to speed responsiveness of local servers where the model may not be pre-loaded. Disable it for a hosted API or any server that keeps its model always loaded: there the requests gain nothing and may be billed. With warm-up off, Unhush calls the LLM directly rather than waiting for a warm-up to succeed; this will delay response if the model has then to load.
+
 ### Keeping the Ollama model resident
 
 Ollama unloads models from VRAM after 5 minutes of inactivity by default. After each dictation, Unhush automatically calls Ollama's native API to extend this timer to `llm_keep_alive` (default `"2h"`), so the model stays loaded between dictations without holding the GPU indefinitely. This can be configured via `llm_keep_alive` in `settings.json` (see [Advanced Settings](../README.md#advanced-settings)).

@@ -145,8 +145,10 @@ function RecordingBar() {
 
       if (transcript && window.electronAPI) {
         let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
-        // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang
-        const llmNotReady = llmConfig?.provider === "custom" && getLLMWarmupStatus() !== "ready";
+        // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang.
+        // "skipped" means the user turned warm-up off for this server, so call it directly.
+        const llmWarmup = getLLMWarmupStatus();
+        const llmNotReady = llmConfig?.provider === "custom" && llmWarmup !== "ready" && llmWarmup !== "skipped";
         if (llmConfig?.provider === "custom") {
           // Only warm-up-not-ready counts toward the streak — live call errors and
           // over-length rejections further down are surfaced via logs, not this warning.
