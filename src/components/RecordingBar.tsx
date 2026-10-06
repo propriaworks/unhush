@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
-import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
+import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER, stripSplitMarkers } from "../audio/llmApi";
 import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 import { normalizePunctuation } from "../audio/textNormalization";
@@ -153,7 +153,7 @@ function RecordingBar() {
       window.electronAPI?.setTranscriptionWarning("runtime", false);
 
       if (transcript && window.electronAPI) {
-        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
+        let finalTranscript = stripSplitMarkers(transcript);  // fallback
         // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang.
         // "skipped" means the user turned warm-up off for this server, so call it directly.
         const llmWarmup = getLLMWarmupStatus();
@@ -194,7 +194,8 @@ function RecordingBar() {
               llmStatus = "rejected_over_length";
             } else {
               llmStatus = "ok";
-              finalTranscript = llmOutput!;
+              // The model is asked to drop the markers but may not (llm-pass.json keeps its raw output)
+              finalTranscript = stripSplitMarkers(llmOutput!);
               // Extend the Ollama model unload timer beyond the server default (~5 min unless configured)
               void pinOllamaKeepAlive(
                 getBaseUrl(llmConfig.apiUrl), llmConfig.apiKey, llmConfig.model,

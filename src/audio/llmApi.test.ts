@@ -6,6 +6,8 @@ import {
   LLM_FINAL_INSTRUCTIONS,
   getLLMConfig,
   postProcessTranscript,
+  SPLIT_POINT_MARKER,
+  stripSplitMarkers,
   validateLLMConfig,
   type LLMConfig,
 } from "./llmApi";
@@ -198,5 +200,25 @@ describe("postProcessTranscript", () => {
       { role: "system", content: "sys" },
       { role: "user", content: "<transcript>\nhello\n</transcript>\n\nfinal" },
     ]);
+  });
+});
+
+describe("stripSplitMarkers", () => {
+  it.each([
+    ["the raw transcript's markers", `first part${SPLIT_POINT_MARKER}second part`, "first part second part"],
+    ["text without markers (trimmed only)", "  nothing to strip ", "nothing to strip"],
+    // Spellings a model may echo back instead of removing
+    ["<split_point>", "a <split_point> b", "a b"],
+    ["<split_point />", "a <split_point /> b", "a b"],
+    ["</split_point>", "a </split_point> b", "a b"],
+    ["upper case", "a <SPLIT_POINT/> b", "a b"],
+    ["no surrounding spaces", "a<split_point/>b", "a b"],
+    ["consecutive markers", "a <split_point/> <split_point/> b", "a b"],
+    ["a marker before punctuation", "the end <split_point/>. Next", "the end. Next"],
+    ["markers at either end", "<split_point/> hello <split_point/>", "hello"],
+    ["a marker on its own line", "- one\n<split_point/>\n- two", "- one\n- two"],
+    ["an unrelated angle bracket", "if a < b then", "if a < b then"],
+  ])("%s", (_label, input, expected) => {
+    expect(stripSplitMarkers(input)).toBe(expected);
   });
 });
