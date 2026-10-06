@@ -1,24 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { callsTo, makeFetchMock } from "./testFetchMock";
 
 // This file targets the gating/dedup logic in ensureCustomServices() specifically — the
 // staleness-vs-failure-retry interval selection, the in-flight per-baseUrl lock, and Phase
 // 2 skipping warm-up when Phase 1 already knows the service is down. That logic is stateful
 // and timing-dependent, which is exactly the kind of thing that's easy to get subtly wrong
 // and hard to verify by hand (see TODO.md for a running list of what else is worth covering).
-
-type FetchResult = { ok: boolean; status?: number; json?: () => Promise<unknown> };
-type FetchRoute = (url: string, init?: RequestInit) => FetchResult;
-
-function makeFetchMock(route: FetchRoute) {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    const r = route(url, init);
-    return {
-      ok: r.ok,
-      status: r.status ?? (r.ok ? 200 : 500),
-      json: r.json ?? (async () => ({})),
-    };
-  });
-}
 
 function setupCustomTranscription(opts: {
   url: string;
@@ -565,8 +552,6 @@ describe("pinOllamaKeepAlive — skips pinning when the server default is longer
       return { ok: false };
     });
   }
-  const callsTo = (fetchMock: ReturnType<typeof makeFetchMock>, path: string) =>
-    fetchMock.mock.calls.filter(([url]) => url.endsWith(path)).length;
 
   it("doesn't pin, and doesn't re-check, while the server keeps the model longer than requested", async () => {
     const fetchMock = ollamaMock(4 * HOUR);
@@ -631,5 +616,71 @@ describe("pinOllamaKeepAlive — skips pinning when the server default is longer
     await mod.pinOllamaKeepAlive(BASE, "", "mistral", "7200", noopLog);
     const [, init] = fetchMock.mock.calls.find(([url]) => url.endsWith("/api/generate"))!;
     expect(JSON.parse(init!.body as string).keep_alive).toBe(7200);
+  });
+});
+
+describe("pinOllamaKeepAlive — Ollama detection", () => {
+  const BASE = "http://localhost:9050";
+
+  it("no-ops for a non-Ollama server, and probes /api/version only once per baseUrl", async () => {
+    const fetchMock = makeFetchMock(() => ({ ok: false, status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/version")).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no /api/ps or /api/generate
+  });
+
+  it("caches an unreachable server as non-Ollama too", async () => {
+    const fetchMock = makeFetchMock(() => { throw new TypeError("fetch failed"); });
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing at all when keep-alive pinning is disabled (empty string)", async () => {
+    const fetchMock = makeFetchMock(() => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "", noopLog);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBaseUrl", () => {
+  it.each([
+    ["http://localhost:11434", "http://localhost:11434"],
+    ["http://localhost:11434///", "http://localhost:11434"],
+    ["  http://localhost:11434  ", "http://localhost:11434"],
+    // Legacy values from when the field held the full endpoint
+    ["http://localhost:8000/v1", "http://localhost:8000"],
+    ["http://localhost:8000/v1/", "http://localhost:8000"],
+    ["http://localhost:8000/v1/chat/completions", "http://localhost:8000"],
+    ["http://localhost:8000/v1/audio/transcriptions", "http://localhost:8000"],
+    // A reverse-proxy path prefix is part of the server prefix and must survive
+    ["https://example.com/proxy/ollama/v1", "https://example.com/proxy/ollama"],
+    ["https://example.com/proxy/ollama", "https://example.com/proxy/ollama"],
+    // Only one suffix is stripped; /v1/models was never a legacy value
+    ["http://localhost:8000/v1/v1", "http://localhost:8000/v1"],
+    ["http://localhost:8000/v1/models", "http://localhost:8000/v1/models"],
+    // Not a URL: returned trimmed but otherwise as-is
+    ["", ""],
+    [" not a url/ ", "not a url"],
+  ])("%j → %j", (input, expected) => {
+    expect(mod.getBaseUrl(input)).toBe(expected);
+  });
+});
+
+describe("isValidHttpUrl", () => {
+  it.each([
+    ["http://localhost:8000", true],
+    ["https://api.example.com/v1", true],
+    ["", false],
+    ["localhost:8000", false], // parses, but with protocol "localhost:"
+    ["ftp://example.com", false],
+    ["file:///tmp/x", false],
+    ["not a url", false],
+  ])("%j → %s", (input, expected) => {
+    expect(mod.isValidHttpUrl(input)).toBe(expected);
   });
 });
