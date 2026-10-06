@@ -35,6 +35,15 @@ function RecordingBar() {
     if (fatalTranscriptionError && isRecording) handleStopRecording();
   }, [fatalTranscriptionError]);
 
+  // One line per launch showing the renderer mounted and its IPC reaches main: the startup
+  // marker scripts/smoke-test.sh waits for. Ref-guarded since StrictMode runs effects twice in dev.
+  const mountLoggedRef = useRef(false);
+  useEffect(() => {
+    if (mountLoggedRef.current) return;
+    mountLoggedRef.current = true;
+    window.electronAPI?.log("info", "renderer mounted");
+  }, []);
+
   // Surface a "loading model" hint once transcribing has run long enough that it's very
   // unlikely to just be normal processing — but only when a warm-up we actually know about
   // is still pending, so this can't misfire as a generic "it's just slow" message. A single
