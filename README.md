@@ -562,7 +562,7 @@ Before committing check typescript with `pnpm tsc` and run tests with `pnpm test
 
 ### Fixing OSV-flagged subdependencies
 
-Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Usually you can update just that package with `pnpm up [--latest] <pkg>` to fix it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version.
+Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Usually you can update just that package with `pnpm up [--latest] <pkg>` to fix it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version. Sometimes `pnpm dedupe`, which re-resolves shared transitive dependencies to the highest commonly acceptable version, is needed too.
 
 ### Building
 

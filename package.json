@@ -1,6 +1,6 @@
 {
   "name": "unhush",
-  "version": "3.3.2-alpha1",
+  "version": "3.3.2-alpha2",
   "description": "Voice input for Linux",
   "main": "electron/main.cjs",
   "homepage": "https://unhush.propriaworks.com",
@@ -40,9 +40,9 @@
     "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2",
-    "wait-on": "^9.1.0"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
+    "wait-on": "^9.5.1"
   },
   "desktopName": "com.propriaworks.unhush",
   "build": {
