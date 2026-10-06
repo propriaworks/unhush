@@ -100,7 +100,12 @@ if [[ "$MODE" == dev ]]; then
   preview_pid=$!
   for _ in $(seq 60); do curl -sf -o /dev/null http://localhost:5173 && break; sleep 0.5; done
   curl -sf -o /dev/null http://localhost:5173 || { cat "$tmp/preview.log" >&2; fail "vite preview did not start"; }
-  cmd=("$(node -p 'require("electron")')" . --no-sandbox)
+  # The electron package downloads its binary on first use if the install step didn't (as in a
+  # fresh checkout), printing progress on stdout -- so do that first, then capture only the path.
+  node -e 'require("electron")' >/dev/null
+  electron_bin=$(node -p 'require("electron")')
+  [[ -x "$electron_bin" ]] || fail "no Electron binary at '$electron_bin'"
+  cmd=("$electron_bin" . --no-sandbox)
 else
   [[ -x release/linux-unpacked/unhush ]] || fail "release/linux-unpacked/unhush not found -- run electron-builder first"
   # --no-sandbox: chrome-sandbox isn't setuid in the unpacked tree, and CI runners forbid the
