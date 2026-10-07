@@ -29,4 +29,9 @@ function isHyprland() {
   return !!process.env.HYPRLAND_INSTANCE_SIGNATURE;
 }
 
-module.exports = { isX11, isSway, isHyprland };
+/** True under Niri, which also makes NIRI_SOCKET its IPC socket (see niriWindowRule.cjs). */
+function isNiri() {
+  return !!process.env.NIRI_SOCKET;
+}
+
+module.exports = { isX11, isSway, isHyprland, isNiri };

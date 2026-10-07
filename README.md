@@ -55,6 +55,8 @@ The `.deb`, `.rpm`, and `.pacman` packages automatically:
 - Configure `/dev/uinput` access (required by ydotool) via a udev rule — no manual steps or re-login needed
 
 Two more tools are optional: `pactl` (lowers other apps' audio while recording) is recommended; `xprop` is only suggested.
+
+`wl-clipboard` is a dependency of the `.pacman` package, recommended by the `.rpm` and suggested by the `.deb`. It is only used under Niri (or any other desktop whose XWayland is `xwayland-satellite`); see [Wayland Setup](#wayland-setup).
 </details>
 
 <details>
@@ -182,8 +184,8 @@ The change takes effect on the next recording — no restart needed.
 
 On a Wayland session Unhush runs itself under **XWayland**. Using native Wayland would interfere with core features, such as being able to write seemlessly to the clipboard, put the recording indicator above other windows and place it at the bottom of the screen. But the use of XWayland should be transparent to users, with one exception: if your primary display uses fractional dpi scaling (like 125%), Unhush may appear slightly blurry.
 
-The global shortcut still works:  it through the **XDG GlobalShortcuts
-portal** over D-Bus, which is independent of XWayland. On first run Unhush asks the desktop to assign it the shortcut `Ctrl+Alt+Space`, with your permission (modifiable at that time or later, see below) so as to toggle dictation.
+
+The global shortcut key still works: on first run Unhush asks the desktop (through the **XDG GlobalShortcuts portal** over D-Bus) to assign it the shortcut `Ctrl+Alt+Space`, with your permission (modifiable at that time or later, see below) so as to toggle dictation.
 
 <details>
 <summary>Changing the shortcut on Wayland</summary>
@@ -211,6 +213,27 @@ in **Settings → Usability**, and in the setup window on first run.
 
 Where to add it: your compositor's config file (`~/.config/sway/config` and friends), or the "custom shortcuts" page of whatever settings app your desktop provides.
 
+</details>
+
+<details>
+<summary>Niri quirks</comment>
+On **Niri**, or any desktop whose XWayland is provided by `xwayland-satellite`, Unhush also needs `wl-clipboard` (`wl-copy`/`wl-paste`). There, XWayland's clipboard reaches native Wayland apps only while an XWayland window has focus, so without wl-clipboard, **Paste** mode pastes whatever was copied before into Wayland apps. Unhush detects this setup and, if wl-clipboard is missing, says so in its setup window. AppImage users need to install it themselves.
+
+**Niri** also needs a window rule for the recording bar. Niri manages the bar like any other window. The rule is needed to keep it floating at the bottom of the screen, and to stop it from taking keyboard focus from the app you're dictating into, which would make pasting unreliable. Add this to `~/.config/niri/config.kdl` (Niri will reload it automatically):
+
+```kdl
+window-rule {
+    match title="^Unhush - Voice Input$"
+    open-floating true
+    open-focused false
+    default-floating-position x=0 y=45 relative-to="bottom"
+    focus-ring { off; }
+    border { off; }
+    shadow { off; }
+}
+```
+
+Unhush checks for this at startup by briefly showing its (empty) recording bar, and shows the rule in its setup window if it's missing.
 </details>
 
 ### The command pipe
@@ -438,6 +461,16 @@ On Wayland the key binding is controlled by your desktop environment, not Unhush
 </details>
 
 <details>
+<summary>My clipboard wasn't put back after a paste</summary>
+
+In **Paste** mode, Unhush puts whatever you had copied back on the clipboard a few seconds after pasting. It deliberately leaves two kinds of copy alone, so the transcript stays on the clipboard instead:
+- passwords copied from a password manager, which Unhush doesn't read;
+- copied files, which can't be put back exactly (e.g. a cut could come back as a copy).
+
+It also skips the restore if you copy something else in the meantime. Also, due to a limitation of `wl-paste`, on Niri (`xwayland-satellite`), rich text such as formatted text from a browser will come back as plain text.
+</details>
+
+<details>
 <summary>Recording is slow to start (sometimes)</summary>
 
 The chime and red bar appear only once the microphone is actually delivering audio, so a slow start means the device itself is slow to wake. Most systems suspend an idle microphone a few seconds after its last use, and USB mics (especially webcams) may then also be put into USB power saving — waking one can take a second or more. You'd notice that starts are instant when recordings are very close together but slower after a pause.
@@ -529,7 +562,7 @@ Before committing check typescript with `pnpm tsc` and run tests with `pnpm test
 
 ### Fixing OSV-flagged subdependencies
 
-Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Usually you can update just that package with `pnpm up [--latest] <pkg>` to fix it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version.
+Updating after incorporating PRs to `packages.json` from dependabot will often will fix issues here. If the flagged package is transitive (e.g. `esbuild`, pulled in by `vite`), bumping the top-level package won't help. Instead: `pnpm why <package>` to find what requires it. Usually you can update just that package with `pnpm up [--latest] <pkg>` to fix it. Worst case, one can then `pnpm add -D <package>@<fixed-version>` to pin it directly, though this isn't ideal, as it will need to be maintained and will later not match. Then `pnpm why <package>` again to confirm it deduped to one version. Sometimes `pnpm dedupe`, which re-resolves shared transitive dependencies to the highest commonly acceptable version, is needed too.
 
 ### Building
 

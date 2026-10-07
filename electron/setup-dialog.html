@@ -66,12 +66,20 @@
       needs a one-time setup step on this system. Run the commands below in a terminal, then
       click <strong>Re-check</strong> — no restart needed.
     </p>
+    <p class="intro" id="intro-clipboard" hidden>
+      Unhush needs one more package on this desktop to deliver transcripts to Wayland apps. Run
+      the command below in a terminal, then click <strong>Re-check</strong> — no restart needed.
+    </p>
     <p class="intro" id="intro-shortcut" hidden>
       Unhush needs one setup step on this system before its keyboard shortcut will work.
     </p>
     <p class="intro" id="intro-provider" hidden>
       Unhush needs a transcription provider configured before it can turn your voice into text.
       This window can't set that up for you — open Settings from the card below.
+    </p>
+    <p class="intro" id="intro-niri" hidden>
+      Niri needs a window rule so that Unhush's recording bar appears at the bottom of the screen
+      without taking focus from the app you're dictating into.
     </p>
     <p class="alt" hidden>
       This is optional. <strong>Clipboard mode</strong> needs no setup at all: Unhush puts each
@@ -96,8 +104,10 @@
       const statusEl = document.getElementById("status");
 
       const introPasteEl = document.getElementById("intro-paste");
+      const introClipboardEl = document.getElementById("intro-clipboard");
       const introShortcutEl = document.getElementById("intro-shortcut");
       const introProviderEl = document.getElementById("intro-provider");
+      const introNiriEl = document.getElementById("intro-niri");
       const altEl = document.querySelector(".alt");
       const settingsBtn = document.getElementById("settings");
       const recheckBtn = document.getElementById("recheck");
@@ -106,24 +116,32 @@
         problemsEl.replaceChildren();
         statusEl.hidden = true;
         statusEl.className = "";
-        // Three problem kinds need different framing: ydotool ones are terminal commands that
-        // Re-check can verify, and that Clipboard mode genuinely avoids; the shortcut one is a
-        // command to paste into a desktop settings dialog, which Clipboard mode does nothing
+        // Five problem kinds need different framing: ydotool ones are terminal commands that
+        // Re-check can verify, and that Clipboard mode genuinely avoids; the clipboard one
+        // (wl-clipboard missing under xwayland-satellite) is also a command Re-check can verify,
+        // but Clipboard mode is affected too, so it must not offer that way out; the shortcut one
+        // is a command to paste into a desktop settings dialog, which Clipboard mode does nothing
         // about; provider ones are referred to Settings (see providerSetup.cjs) and, like ydotool,
-        // can change answer on Re-check once fixed there.
+        // can change answer on Re-check once fixed there; the niri one is a config snippet, which
+        // Re-check verifies by watching how Niri opens the bar (see niriWindowRule.cjs).
         const needsPasteSetup = result.problems.some((p) => p.kind === "ydotool");
+        const hasClipboard = result.problems.some((p) => p.kind === "clipboard");
         const hasShortcut = result.problems.some((p) => p.kind === "shortcut");
         const hasProvider = result.problems.some((p) => p.kind === "provider");
+        const hasNiri = result.problems.some((p) => p.kind === "niri");
         introPasteEl.hidden = result.ok || !needsPasteSetup;
-        introShortcutEl.hidden = result.ok || needsPasteSetup || !hasShortcut;
+        // The paste intro already says to run the commands and re-check, so only one is shown.
+        introClipboardEl.hidden = result.ok || needsPasteSetup || !hasClipboard;
+        introShortcutEl.hidden = result.ok || needsPasteSetup || hasClipboard || !hasShortcut;
         introProviderEl.hidden = result.ok || !hasProvider;
+        introNiriEl.hidden = result.ok || !hasNiri;
         altEl.hidden = result.ok || !needsPasteSetup;
         settingsBtn.hidden = result.ok || !needsPasteSetup;
-        // Re-check can change the answer for ydotool and provider problems (terminal commands run,
-        // or Settings fixed) but never for a shortcut-only result -- nothing here can detect a
-        // binding made in the desktop's own editor, so it would report the same thing forever,
-        // which reads as a broken button. Close is enough there.
-        recheckBtn.hidden = !result.ok && !needsPasteSetup && !hasProvider;
+        // Re-check can change the answer for ydotool, clipboard, provider and niri problems
+        // (terminal commands run, Settings or Niri's config fixed) but never for a shortcut-only
+        // result -- nothing here can detect a binding made in the desktop's own editor, so it would
+        // report the same thing forever, which reads as a broken button. Close is enough there.
+        recheckBtn.hidden = !result.ok && !needsPasteSetup && !hasClipboard && !hasProvider && !hasNiri;
 
         if (result.ok) {
           statusEl.hidden = false;

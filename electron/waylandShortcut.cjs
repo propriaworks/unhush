@@ -26,6 +26,7 @@
 
 const commandFifo = require("./commandFifo.cjs");
 const realPortal = require("./portalShortcuts.cjs");
+const session = require("./session.cjs");
 
 let log = () => {};
 // The portal client is injectable for the same reason userData used to be: vitest's vi.mock cannot
@@ -149,9 +150,12 @@ async function attemptBind() {
     // A cold failure is an answer about this desktop, not about timing: 'unavailable' means no
     // GlobalShortcuts backend here (sway and the rest of the wlroots family), and 'denied' means
     // the user declined the consent dialog -- retrying that would just raise it again. Either way
-    // the manual command is the honest fallback.
+    // the manual command is the honest fallback. Niri is expected to fail too: it has no
+    // GlobalShortcuts implementation, but xdg-desktop-portal-gnome (commonly installed alongside
+    // it) advertises the interface, and its CreateSession then fails. Still attempted in case
+    // Niri gains one.
     mode = 'manual';
-    log(result.reason === 'denied' ? 'info' : 'warn',
+    log(result.reason === 'denied' || session.isNiri() ? 'info' : 'warn',
       `portal shortcut not bound (${result.reason}${result.error ? `: ${result.error}` : ''}) — ` +
       `falling back to a desktop-bound ${toggleCommand()}`);
   } else if (retryIndex < RETRY_DELAYS_MS.length) {

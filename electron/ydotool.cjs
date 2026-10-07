@@ -284,8 +284,26 @@ async function waitForSocket(p, timeoutMs = 5000) {
   }
 }
 
-// Ensure a reachable ydotoold, adopting an existing one where possible. First match wins.
-async function ensureDaemon() {
+let daemonOk = false;   // the last ensureDaemon() found or started a reachable daemon
+let ensuring = null;    // the ensureDaemon() in progress, shared by overlapping callers
+
+// Ensure a reachable ydotoold. Overlapping calls (the setup check, a mode switch, a paste) share
+// one attempt, so they can't spawn two daemons.
+function ensureDaemon() {
+  return ensuring || (ensuring = findOrStartDaemon()
+    .then((r) => { daemonOk = r.ok; return r; })
+    .finally(() => { ensuring = null; }));
+}
+
+// For the output path: true once a daemon is reachable. The startup check normally gets there
+// first, but skips ydotool entirely in Clipboard mode, so a later switch to Paste or Type would
+// otherwise send keystrokes to a socket nobody is listening on.
+async function ready() {
+  return daemonOk || (await ensureDaemon()).ok;
+}
+
+// Adopt an existing ydotoold where possible, else start one. First match wins.
+async function findOrStartDaemon() {
   // 1. A 0.x client (Ubuntu/Mint) writes /dev/uinput itself: there is nothing to start, nothing
   //    to probe, and starting the 0.x ydotoold that ships beside it would be worse than useless
   //    -- it ignores --socket-path, binds its own default path, and so is unreachable.
@@ -403,15 +421,16 @@ function distro() {
 const isRpmDistroFor = (d) => /fedora|rhel|centos/.test(d);
 const isRpmDistro = () => isRpmDistroFor(distro());
 
-// Distro-appropriate install command, for the "ydotool isn't installed" case (mostly AppImage).
+// Distro-appropriate install command, for the "ydotool isn't installed" case (mostly AppImage),
+// and for other packages whose name is the same on every distro (wl-clipboard).
 // Split from distro() so the mapping can be checked without an /etc/os-release to match.
-function installCommandFor(d) {
-  if (isRpmDistroFor(d)) return "sudo dnf install ydotool";
-  if (/arch/.test(d)) return "sudo pacman -S ydotool";
-  if (/suse/.test(d)) return "sudo zypper install ydotool";
-  return "sudo apt install ydotool"; // debian/ubuntu, and a reasonable default
+function installCommandFor(d, pkg = "ydotool") {
+  if (isRpmDistroFor(d)) return `sudo dnf install ${pkg}`;
+  if (/arch/.test(d)) return `sudo pacman -S ${pkg}`;
+  if (/suse/.test(d)) return `sudo zypper install ${pkg}`;
+  return `sudo apt install ${pkg}`; // debian/ubuntu, and a reasonable default
 }
-function installCommand() { return installCommandFor(distro()); }
+function installCommand(pkg) { return installCommandFor(distro(), pkg); }
 
 const UDEV_CMD =
   `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' ` +
@@ -477,8 +496,8 @@ async function preflight() {
 }
 
 module.exports = {
-  init, preflight, ensureDaemon, checkUinput, env, socketPath, stopDaemon,
-  clientPath, generation, pasteKeyArgs, typeStdinArgs,
+  init, preflight, ensureDaemon, ready, checkUinput, env, socketPath, stopDaemon,
+  clientPath, generation, pasteKeyArgs, typeStdinArgs, installCommand,
   // True when Type mode is layout-independent (see virtualKeyboard.cjs); false means US-QWERTY only.
   layoutPinned: virtualKeyboard.isPinned,
   _internal: {

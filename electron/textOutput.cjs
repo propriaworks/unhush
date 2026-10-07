@@ -5,21 +5,28 @@
 
 // Set by init():
 //   clipboard            clipboardAccess.cjs: writeTextBoth / readText / save / restore
-//   ydotool              ydotool.cjs: clientPath / pasteKeyArgs / typeStdinArgs / env
+//   ydotool              ydotool.cjs: clientPath / ready / pasteKeyArgs / typeStdinArgs / env
 //   execFileAsync        promisified child_process.execFile
 //   getActiveWindowInfo  activeWindow.cjs's, resolving to { app, title } | null
 //   log                  (level, message)
 //   isDebug              () => whether debug logging is on
-//   isX11                () => whether this is an X11 (or XWayland) session
+//   canReadXSelections   () => whether the paste diagnostics can read the X selections with xclip
 //   msSinceHotkey        () => ms since the toggle hotkey last fired, or -1
 //   onOutput             (text) => called once per transcript, before delivery (tray: "Copy last")
 //   onDestination        (info) => called when the target window has been identified (tray)
-let clipboard, ydotool, execFileAsync, getActiveWindowInfo, log, isDebug, isX11, msSinceHotkey,
-  onOutput, onDestination;
+let clipboard, ydotool, execFileAsync, getActiveWindowInfo, log, isDebug, canReadXSelections,
+  msSinceHotkey, onOutput, onDestination;
 
 function init(deps) {
-  ({ clipboard, ydotool, execFileAsync, getActiveWindowInfo, log, isDebug, isX11, msSinceHotkey,
-    onOutput, onDestination } = deps);
+  ({ clipboard, ydotool, execFileAsync, getActiveWindowInfo, log, isDebug, canReadXSelections,
+    msSinceHotkey, onOutput, onDestination } = deps);
+}
+
+// execFile's error message carries only stderr, but ydotool 1.x prints why it failed (e.g. it
+// could not connect to ydotoold's socket) on stdout.
+function failureDetail(err) {
+  const stdout = err.stdout && String(err.stdout).trim();
+  return stdout ? `${err.message.trim()} (stdout: ${stdout})` : err.message.trim();
 }
 
 // Returns true in every case, as the IPC handler always has; failures are logged, not thrown.
@@ -33,6 +40,12 @@ async function outputText(text, method) {
   // Tell the user once, clearly.
   if ((method === "paste" || method === "type") && !ydotool.clientPath()) {
     log('error', `output-text: ydotool is not installed — leaving the text on the clipboard instead of using ${method}`);
+    method = "clipboard";
+  }
+  // Likewise when no ydotoold can be reached: a keystroke would go nowhere. ydotool.ready() is
+  // immediate once a daemon is known; otherwise it finds or starts one, logging why if it can't.
+  if ((method === "paste" || method === "type") && !(await ydotool.ready())) {
+    log('error', `output-text: no ydotool daemon is reachable — leaving the text on the clipboard instead of using ${method}`);
     method = "clipboard";
   }
 
@@ -49,7 +62,12 @@ async function outputText(text, method) {
   // until typing finishes (up to seconds later). Detection is fast enough (~10-20ms typically)
   // that awaiting it before typing starts is negligible next to typing's own baseline latency.
   function captureDestination() {
-    return getActiveWindowInfo().then(onDestination);
+    return getActiveWindowInfo().then((info) => {
+      // TEMPORARY DIAGNOSTICS (Niri paste-focus investigation): which app had focus as the paste
+      // key went out. The app only, never the title (see activeWindow.cjs for why).
+      log('debug', `paste-diag focus: ${info ? info.app : 'unknown'}`);
+      onDestination(info);
+    });
   }
 
   // How long to leave our transcript as clipboard/selection owner before handing back whatever
@@ -67,11 +85,12 @@ async function outputText(text, method) {
   // on: asks the X server what the selections actually serve, via xclip -- i.e. from *outside*
   // our process, exercising the same owner-request path a pasting app uses, so a successful
   // read also proves we are answering selection requests at that moment. Logs only
-  // lengths/match, never content.
+  // lengths/match, never content. Under xwayland-satellite we write only the Wayland clipboard,
+  // so there a match shows that satellite has copied it across for X apps.
   // Only possible because the ydotool call below is async: while awaiting xclip, our event
   // loop stays free to answer xclip's own selection request (execSync would deadlock here).
   async function xSelectionDiag(label) {
-    if (!isDebug() || !isX11()) return;
+    if (!isDebug() || !canReadXSelections()) return;
     const read = async (sel) => {
       try {
         const { stdout } = await execFileAsync('xclip', ['-o', '-selection', sel, '-t', 'UTF8_STRING'], { timeout: 500 });
@@ -109,7 +128,7 @@ async function outputText(text, method) {
       keySent = true;
       log('debug', `paste-diag key: ydotool ok in ${Date.now() - t0}ms, ${sinceHotkey}ms after hotkey${stderr && stderr.trim() ? `, stderr: ${stderr.trim()}` : ''}`);
     } catch (err) {
-      log('error', `output-text paste key simulation failed: ${err.message} — leaving the transcript on the clipboard`);
+      log('error', `output-text paste key simulation failed: ${failureDetail(err)} — leaving the transcript on the clipboard`);
     }
     // One more reading after the paste should have landed, to catch ownership being lost/replaced
     // in the window around the keystroke itself.
@@ -190,7 +209,7 @@ async function outputText(text, method) {
           // pasting the whole of it would duplicate what is there. Leave the text on the
           // clipboard instead, exactly as the "ydotool is not installed" path above does, and
           // let the user paste it themselves.
-          log('error', `output-text: ydotool type failed (${err.message}) — left on the clipboard`);
+          log('error', `output-text: ydotool type failed (${failureDetail(err)}) — left on the clipboard`);
           await clipboard.writeTextBoth(text);
         }
         break;

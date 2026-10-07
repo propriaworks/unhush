@@ -8,7 +8,7 @@
 // exists and behaves as clipboardAccess.cjs assumes (Electron 44 removed availableFormats() and
 // friends, which fails the save/restore test here).
 
-const { app } = require("electron");
+const { app, clipboard } = require("electron");
 const assert = require("assert/strict");
 const { execFile, spawn } = require("child_process");
 const { promisify } = require("util");
@@ -64,7 +64,37 @@ const tests = {
     assert.equal(await xRead("clipboard", "text/html"), html);
     assert.equal(await xRead("primary"), "selected words");
   },
+
+  // Detection of what save() must leave alone. availableFormats() lists only standard types, so
+  // restorable() asks for the marker types by name with readBuffer(); these check that Electron
+  // still returns them that way. xclip offers one target at a time, which is enough to test
+  // detection (a real app would offer text alongside).
+  async "restorable() accepts ordinary text (control)"() {
+    await xWrite("clipboard", "UTF8_STRING", "ordinary text");
+    assert.equal(isRestorable(), true);
+  },
+
+  async "restorable() rejects a password-manager copy"() {
+    await xWrite("clipboard", "x-kde-passwordManagerHint", "secret");
+    assert.equal(isRestorable(), false);
+  },
+
+  async "restorable() rejects a GTK file-manager copy"() {
+    await xWrite("clipboard", "x-special/gnome-copied-files", "cut\nfile:///tmp/a.txt");
+    assert.equal(isRestorable(), false);
+  },
+
+  async "restorable() rejects a file URI list but accepts a link"() {
+    await xWrite("clipboard", "text/uri-list", "file:///tmp/a.txt\r\n");
+    assert.equal(isRestorable(), false);
+    await xWrite("clipboard", "text/uri-list", "https://example.com/\r\n");
+    assert.equal(isRestorable(), true);
+  },
 };
+
+function isRestorable() {
+  return clipboardAccess._internal.restorable("clipboard", clipboard.availableFormats("clipboard"));
+}
 
 function withTimeout(promise, ms) {
   let timer;

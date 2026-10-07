@@ -21,6 +21,8 @@ const commandFifo = require("./commandFifo.cjs");
 const audioDucking = require("./audioDucking.cjs");
 const activeWindow = require("./activeWindow.cjs");
 const clipboardAccess = require("./clipboardAccess.cjs");
+const waylandClipboard = require("./waylandClipboard.cjs");
+const niriWindowRule = require("./niriWindowRule.cjs");
 const textOutput = require("./textOutput.cjs");
 const fs = require("fs");
 const os = require("os");
@@ -224,6 +226,7 @@ ydotool.init(log, app.getPath("userData"));
 commandFifo.init(log);
 audioDucking.init(log, app.getName());
 activeWindow.init(log);
+waylandClipboard.init(log);
 textOutput.init({
   clipboard: clipboardAccess,
   ydotool,
@@ -231,7 +234,8 @@ textOutput.init({
   getActiveWindowInfo: activeWindow.getActiveWindowInfo,
   log,
   isDebug: () => debugLogging,
-  isX11: session.isX11,
+  // Under xwayland-satellite xclip still reaches the X selections, through satellite's Xwayland.
+  canReadXSelections: () => session.isX11() || waylandClipboard.active(),
   msSinceHotkey: () => (lastHotkeyAt ? Date.now() - lastHotkeyAt : -1),
   onOutput: (text) => {
     lastTranscript = text;
@@ -386,6 +390,26 @@ function setRecordingActive(active) {
   else audioDucking.restore();
 }
 
+// The recording bar is shown once at startup and then stays mapped: "hidden" is transparent,
+// click-through and not on top, which avoids window-manager sounds on every recording toggle.
+// Niri can't do that (see niriWindowRule.cjs), so there it really is hidden and shown, without
+// taking focus.
+let barShown = false; // from a recording's start until the renderer asks to hide the bar
+
+function showBar() {
+  barShown = true;
+  if (session.isNiri()) mainWindow.showInactive();
+  mainWindow.setIgnoreMouseEvents(false);
+  mainWindow.setAlwaysOnTop(true);
+}
+
+function hideBar() {
+  barShown = false;
+  if (session.isNiri()) mainWindow.hide();
+  mainWindow.setIgnoreMouseEvents(true);
+  mainWindow.setAlwaysOnTop(false);
+}
+
 // Toggle recording: show+record or stop+hide
 function toggleRecording() {
   // The only way a delivered hotkey/fifo command can still do nothing: say so rather than no-op
@@ -393,8 +417,7 @@ function toggleRecording() {
   if (!mainWindow) log("warn", "toggleRecording: no main window, ignoring");
   if (mainWindow) {
     if (!isRecording) {
-      mainWindow.setIgnoreMouseEvents(false);
-      mainWindow.setAlwaysOnTop(true);
+      showBar();
       mainWindow.webContents.send("start-recording");
       setRecordingActive(true);
     } else {
@@ -452,18 +475,19 @@ function createWindow(offsetFromBottom) {
   mainWindow = new BrowserWindow({
     width: winWidth,
     height: winHeight,
-    minWidth: 200,
-    minHeight: 60,
     x,
     y,
     frame: false,
     transparent: true,
     hasShadow: false,
     alwaysOnTop: true,
-    resizable: true,
+    // Fixed size. Besides there being nothing to resize, tiling compositors (Niri among them)
+    // float fixed-size windows rather than tiling them.
+    resizable: false,
     movable: true,
     skipTaskbar: true,
     focusable: false,
+    show: !session.isNiri(), // see showBar()
     type: "notification",   // Linux: _NET_WM_WINDOW_TYPE_NOTIFICATION — excludes from Alt-Tab, atom is pre-cached by Chromium
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -476,6 +500,10 @@ function createWindow(offsetFromBottom) {
       // It is required because local AI servers (Speaches, Ollama, etc.) don't send CORS
       // headers — they're designed to be called from native apps, not browsers.
       webSecurity: false, // disable cors checks, same-origin policy, mixed content blocking, file:// isolation
+      // Under Niri the bar is hidden between recordings (see showBar), and Chromium throttles a
+      // hidden page's timers to once a second or less. Elsewhere it is never hidden, so this
+      // changes nothing there.
+      backgroundThrottling: false,
     },
     icon: appIcon,
   });
@@ -491,13 +519,9 @@ function createWindow(offsetFromBottom) {
   });
 
 
-  // Window is shown once at startup (transparent + click-through + not on top).
-  // All subsequent visibility changes use setIgnoreMouseEvents / setAlwaysOnTop
-  // to avoid OS window-manager sounds on every recording toggle.
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.setIgnoreMouseEvents(true);
-    mainWindow.setAlwaysOnTop(false);
-  });
+  // Starts hidden (see showBar for what that means). Unless a hotkey pressed during startup
+  // already started a recording: under Niri this would hide it.
+  mainWindow.once("ready-to-show", () => { if (!isRecording) hideBar(); });
 
   // Inject settings.json into localStorage on load
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
@@ -615,8 +639,7 @@ function createTray() {
 // IPC Handlers
 ipcMain.handle("hide-window", async () => {
   if (mainWindow) {
-    mainWindow.setIgnoreMouseEvents(true);
-    mainWindow.setAlwaysOnTop(false);
+    hideBar();
     setRecordingActive(false);
   }
 });
@@ -701,6 +724,12 @@ const outputMethodKnown = new Promise((resolve) => { reportOutputMethod = resolv
 // Also keeps the setup window's Re-check honest if the user switches mode while it is open.
 function noteOutputMethod(method) {
   reportOutputMethod(method);
+  // Leaving Clipboard mode: the startup check skipped ydotool, so get the daemon going now rather
+  // than on the first paste. Only on that transition, so at startup the setup check still runs the
+  // uinput check before any daemon is started.
+  if (!setupIncludesYdotool && method !== "clipboard") {
+    ydotool.ready().catch((err) => log("error", `ydotool: daemon setup failed: ${err.message}`));
+  }
   setupIncludesYdotool = method !== "clipboard";
 }
 ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));
@@ -802,12 +831,16 @@ function mutedProblems() {
   }
 }
 
-// The setup window shows one card per problem. Provider config, the ydotool paste path, and the
-// global shortcut are independent concerns, so they're gathered here rather than any module
-// knowing about the others; each card is tagged with `kind` by its gatherer below.
+// The setup window shows one card per problem. Provider config, the ydotool paste path, the
+// Wayland clipboard bridge, the global shortcut and Niri's window rule are independent concerns,
+// so they're gathered here rather than any module knowing about the others; each card is tagged
+// with `kind` by its gatherer below.
 let setupIncludesYdotool = true;
 
-async function setupPreflight() {
+// `startup` is the automatic check at launch. There a muted Niri card skips its check altogether:
+// the check briefly shows the bar, which without the rule means a column flashing up and taking
+// focus at every login.
+async function setupPreflight({ startup = false } = {}) {
   // The renderer owns provider config (localStorage) -- wait briefly to be told rather than
   // guess "unconfigured". Already resolved by the time Re-check can be clicked.
   await Promise.race([providerStatusKnown, new Promise((r) => setTimeout(r, 3000).unref?.())]);
@@ -816,6 +849,9 @@ async function setupPreflight() {
   if (setupIncludesYdotool) {
     problems.push(...(await ydotool.preflight()).problems.map((p) => ({ kind: "ydotool", ...p })));
   }
+  // Needed whatever the output mode: every clipboard write is affected (see waylandClipboard.cjs).
+  const clipboard = waylandClipboard.setupProblem(ydotool.installCommand("wl-clipboard"));
+  if (clipboard) problems.push({ kind: "clipboard", ...clipboard });
   // Wait for the first portal bind to settle before deciding: on a Wayland first run that means
   // waiting out the desktop's consent dialog, and telling the user to bind a key by hand while
   // that dialog is on screen would be exactly wrong. Already resolved on X11.
@@ -824,6 +860,15 @@ async function setupPreflight() {
   // really does have to bind the key themselves.
   const shortcut = waylandShortcut.shortcutProblem();
   if (shortcut) problems.push({ kind: "shortcut", ...shortcut });
+  if (session.isNiri() && mainWindow && !(startup && mutedProblems().has(niriWindowRule.CODE))) {
+    const niri = await niriWindowRule.probe({
+      show: () => mainWindow.showInactive(),
+      hide: () => mainWindow.hide(),
+      isBusy: () => barShown,
+      log,
+    });
+    if (niri) problems.push({ kind: "niri", ...niri });
+  }
 
   // Optional cards (e.g. "LLM formatting is off") are advice, not faults: they ride along when
   // the window is already going to be shown for a real problem, but must never open it alone.
@@ -850,7 +895,7 @@ async function checkOutputPath() {
   // Name the source as well as the answer for better clarity
   log("debug", `setup check: output method ${method} (${source}), ydotool checks ${setupIncludesYdotool ? "included" : "skipped"}`);
 
-  const result = await setupPreflight();
+  const result = await setupPreflight({ startup: true });
   lastSetupResult = result;
   if (result.ok) return;
 
@@ -878,7 +923,8 @@ function showSetupWindow(result) {
     // It's a dialog, not an app window. `parent` is what actually does the work on Linux: it
     // sets WM_TRANSIENT_FOR, and window managers then drop the minimise/maximise buttons.
     // The minimizable/maximizable flags alone are documented as inconsistent on Linux.
-    parent: mainWindow || undefined,
+    // Not under Niri, where the bar is unmapped between recordings and can't usefully parent anything.
+    parent: (!session.isNiri() && mainWindow) || undefined,
     minimizable: false,
     maximizable: false,
     autoHideMenuBar: true,
