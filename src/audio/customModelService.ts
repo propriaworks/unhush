@@ -87,13 +87,17 @@ const ollamaCache = new Map<string, boolean>();
 // Decided once, then re-decided only when baseUrl, model or the keep_alive setting changes.
 let keepAliveDecision: { key: string; pinNeeded: boolean } | undefined;
 
+// "skipped": the user turned warm-up off for this service (e.g. a hosted API that keeps its
+// models loaded and bills every request). Callers treat it like "ready" and call it directly.
+type WarmupStatus = "idle" | "pending" | "ready" | "failed" | "skipped";
+
 // Tracks whether the most recent custom LLM warm-up succeeded
-let llmWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
+let llmWarmupStatus: WarmupStatus = "idle";
 
 // Tracks whether the most recent custom transcription warm-up succeeded. Exposed so the UI
 // can tell "still transcribing, but this looks like a cold model load" apart from ordinary
 // per-utterance processing time.
-let transcriptionWarmupStatus: "idle" | "pending" | "ready" | "failed" = "idle";
+let transcriptionWarmupStatus: WarmupStatus = "idle";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -432,6 +436,7 @@ interface ServiceInfo {
   apiKey: string;
   model: string;
   startCommand: string;
+  warmup: boolean;
 }
 
 // The localStorage keys that affect what ensureCustomServices() below actually does —
@@ -443,11 +448,13 @@ const RELEVANT_CONFIG_KEYS = [
   "unhush_custom_key",
   "unhush_custom_model",
   "unhush_custom_start_cmd",
+  "unhush_custom_warmup",
   "unhush_llm_provider",
   "unhush_llm_custom_url",
   "unhush_llm_custom_key",
   "unhush_llm_model_custom",
   "unhush_llm_custom_start_cmd",
+  "unhush_llm_custom_warmup",
 ];
 
 /** Snapshot of the fields ensureCustomServices() cares about, for cheaply detecting
@@ -481,6 +488,7 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
         apiKey: localStorage.getItem("unhush_custom_key") || "",
         model: localStorage.getItem("unhush_custom_model") || "",
         startCommand: localStorage.getItem("unhush_custom_start_cmd") || "",
+        warmup: localStorage.getItem("unhush_custom_warmup") !== "false",
       });
     }
   }
@@ -494,11 +502,23 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
         apiKey: localStorage.getItem("unhush_llm_custom_key") || "",
         model: localStorage.getItem("unhush_llm_model_custom") || "",
         startCommand: localStorage.getItem("unhush_llm_custom_start_cmd") || "",
+        warmup: localStorage.getItem("unhush_llm_custom_warmup") !== "false",
       });
     }
   }
 
   if (services.length === 0) return;
+
+  // Settled now rather than in Phase 2, which can run long after this call returns (behind
+  // Phase 1 and the transcription warm-up): a recording that ends first must already see
+  // "skipped" rather than "idle", or RecordingBar would bypass the LLM as not ready.
+  // Switching warm-up back on returns to "idle" until Phase 2 gets to it.
+  for (const s of services) {
+    const status = s.kind === "transcription" ? transcriptionWarmupStatus : llmWarmupStatus;
+    const next = !s.warmup ? "skipped" : status === "skipped" ? "idle" : status;
+    if (s.kind === "transcription") transcriptionWarmupStatus = next;
+    else llmWarmupStatus = next;
+  }
 
   // ── Phase 1: Health check + auto-start (first time, stale, or command changed) ─
 
@@ -609,7 +629,7 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
   // Phase 1 already knows it's unreachable); otherwise fires the request and returns a
   // promise that resolves once it settles.
   const runWarmup = (service: ServiceInfo): Promise<void> | null => {
-    if (!service.model) return null;
+    if (!service.model || !service.warmup) return null;
 
     const intervalKey =
       service.kind === "transcription"
@@ -697,12 +717,12 @@ export function invalidateServiceContact(baseUrl: string): void {
 // ── LLM warmup status ──────────────────────────────────────────────────────────
 
 /** Returns the status of the most recent custom LLM warm-up request. */
-export function getLLMWarmupStatus(): "idle" | "pending" | "ready" | "failed" {
+export function getLLMWarmupStatus(): WarmupStatus {
   return llmWarmupStatus;
 }
 
 /** Returns the status of the most recent custom transcription warm-up request. */
-export function getTranscriptionWarmupStatus(): "idle" | "pending" | "ready" | "failed" {
+export function getTranscriptionWarmupStatus(): WarmupStatus {
   return transcriptionWarmupStatus;
 }
 
