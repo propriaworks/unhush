@@ -7,3 +7,7 @@ onlyBuiltDependencies:
   - esbuild
 
 minimumReleaseAge: 4320  # 3 days
+
+# concurrently 10.0.5 pins shell-quote@1.9.0 exactly; force the fix for GHSA-pqg4-j6r4-53mv
+overrides:
+  'concurrently>shell-quote': ^1.11.0
