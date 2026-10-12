@@ -83,7 +83,7 @@ export async function transcribeAudioBlob(
       headers,
       body: formData,
   }).catch(() => {
-    throw new Error(provider === "custom" ? "whisper server is unreachable" : "network error");
+    throw new Error(provider === "custom" ? "transcription server is unreachable" : "network error");
   });
 
   if (!response.ok) {
@@ -97,9 +97,9 @@ export async function transcribeAudioBlob(
     } else if (status === 429) {
       throw new Error("transcription was rate-limited");
     } else if (provider === "custom" && (status === 404 || status === 405)) {
-      throw new Error("bad whisper URL or model name");
+      throw new Error("bad transcription URL or model name");
     } else if (status >= 500) {
-      throw new Error(provider === "custom" ? "whisper server error" : "service-side transcription error");
+      throw new Error(provider === "custom" ? "transcription server error" : "service-side transcription error");
     } else {
       throw new Error(`transcription API error ${status}`);
     }

@@ -538,12 +538,17 @@ export async function ensureCustomServices(log: LogFn, force = false): Promise<v
     // Applied per service kind sharing this baseUrl — a single local server can serve
     // both transcription and LLM. Only touched for baseUrls we actually (re-)probe below;
     // baseUrls skipped as "still fresh" keep whatever warning state they already had.
+    // Warm-up on implies a local server, so the warning can say so; otherwise it may be a
+    // hosted API. The other variant is always cleared, in case the toggle just changed.
     const setUnreachable = (baseUrl: string, unreachable: boolean) => {
       lastHealthCheckOk.set(baseUrl, !unreachable);
       for (const s of services) {
         if (s.baseUrl !== baseUrl) continue;
-        if (s.kind === "transcription") window.electronAPI?.setTranscriptionWarning("unreachable", unreachable);
-        else window.electronAPI?.setFormatterWarning("unreachable", unreachable);
+        const setWarning = s.kind === "transcription"
+          ? window.electronAPI?.setTranscriptionWarning
+          : window.electronAPI?.setFormatterWarning;
+        setWarning?.("unreachable_local", unreachable && s.warmup);
+        setWarning?.("unreachable", unreachable && !s.warmup);
       }
     };
 

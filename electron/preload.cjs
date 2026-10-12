@@ -58,7 +58,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   spawnDetached: (command) => ipcRenderer.invoke("spawn-detached", command),
 
   // Custom-provider health signals — reasonKey is an independent cause (e.g. "config",
-  // "badurl", "runtime", "warmup", "unreachable"); each clears on its own without
+  // "badurl", "runtime", "warmup", "unreachable", "unreachable_local"); each clears on its own without
   // affecting other active reasons.
   setFormatterWarning: (reasonKey, on) => ipcRenderer.send("set-formatter-warning", reasonKey, on),
   setTranscriptionWarning: (reasonKey, on) => ipcRenderer.send("set-transcription-warning", reasonKey, on),

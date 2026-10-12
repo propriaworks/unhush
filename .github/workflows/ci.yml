@@ -62,7 +62,7 @@ jobs:
       - run: pnpm test
 
   build:
-    name: Build Linux Packages (deb / rpm)
+    name: Build Linux Packages (deb / rpm) & Smoke tests
     runs-on: ubuntu-latest
     needs: typecheck
     steps:

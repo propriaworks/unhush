@@ -136,7 +136,7 @@ describe("transcribeAudioBlob", () => {
 
   describe("error messages", () => {
     it.each([
-      ["custom", "whisper server is unreachable"],
+      ["custom", "transcription server is unreachable"],
       ["groq", "network error"],
     ])("%s: a failed connection → %j", async (provider, message) => {
       localStorage.setItem("unhush_provider", provider);
@@ -155,10 +155,10 @@ describe("transcribeAudioBlob", () => {
       ["openai", 403, "bad openai API key"],
       ["custom", 401, "bad custom API key"],
       ["groq", 429, "transcription was rate-limited"],
-      ["custom", 404, "bad whisper URL or model name"],
-      ["custom", 405, "bad whisper URL or model name"],
+      ["custom", 404, "bad transcription URL or model name"],
+      ["custom", 405, "bad transcription URL or model name"],
       ["groq", 404, "transcription API error 404"],
-      ["custom", 500, "whisper server error"],
+      ["custom", 500, "transcription server error"],
       ["openai", 503, "service-side transcription error"],
       ["custom", 400, "transcription API error 400"],
     ])("%s: HTTP %i → %j", async (provider, status, message) => {
