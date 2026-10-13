@@ -398,8 +398,8 @@ The checks it runs, if you'd rather do them by hand:
 - **`/dev/uinput` not accessible**: `.deb`/`.rpm`/`.pacman` installs configure this automatically via a udev rule. AppImage users need to do it themselves:
   ```bash
   echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
-    | sudo tee /etc/udev/rules.d/80-uinput.rules
-  sudo udevadm control --reload-rules && sudo udevadm trigger
+    | sudo tee /etc/udev/rules.d/70-unhush-uinput.rules
+  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput
   ```
   If `/dev/uinput` doesn't exist at all, the kernel module isn't loaded — `sudo modprobe uinput`, and `echo uinput | sudo tee /etc/modules-load.d/uinput.conf` to make it stick across reboots.
 
