@@ -14,6 +14,9 @@ export const VAD_CONFIG = {
   maxConcurrentRequests: 3,
   retryAttempts: 2,
   retryBaseDelayMs: 1000,
+  retryAfterTimeoutMs: 20_000,  // request timeout for retries once a segment has timed out; if the
+                                 // first (TRANSCRIPTION_TIMEOUT_MS) wait was a hung request, a
+                                 // fresh one answers quickly or not at all
   sampleRate: 16000,
   frameSizeSamples: 512,      // v5/v6 models: 32ms per frame
 } as const;

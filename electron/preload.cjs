@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Window control
   hideWindow: () => ipcRenderer.invoke("hide-window"),
+  // A transcript that wasn't output (formatting cancelled), offered by the tray's "Copy last"
+  setLastTranscript: (text) => ipcRenderer.send("set-last-transcript", text),
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
 

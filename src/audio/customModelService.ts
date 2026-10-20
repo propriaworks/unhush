@@ -457,6 +457,23 @@ const RELEVANT_CONFIG_KEYS = [
   "unhush_llm_custom_warmup",
 ];
 
+/**
+ * Whether the custom transcription or LLM server can be sent a request. Free while it is
+ * believed healthy; after a failed health check, probes again (and runs any Start Command)
+ * right away, ignoring the usual retry cooldown, so a server that has just come back is not
+ * refused. Always true for hosted providers.
+ */
+export async function customServerReachable(kind: ServiceInfo["kind"], log: LogFn): Promise<boolean> {
+  const [providerKey, urlKey] = kind === "transcription"
+    ? ["unhush_provider", "unhush_custom_url"]
+    : ["unhush_llm_provider", "unhush_llm_custom_url"];
+  if (localStorage.getItem(providerKey) !== "custom") return true;
+  const baseUrl = getBaseUrl(localStorage.getItem(urlKey) || "");
+  if (lastHealthCheckOk.get(baseUrl) ?? true) return true;
+  await ensureCustomServices(log, true);
+  return lastHealthCheckOk.get(baseUrl) ?? true;
+}
+
 /** Snapshot of the fields ensureCustomServices() cares about, for cheaply detecting
  * whether anything relevant changed (e.g. across a Settings window open/close) without
  * needing a live probe just to find out. */

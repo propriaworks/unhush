@@ -14,8 +14,10 @@ interface UseAudioRecorderReturn {
   audioLevel: number;
   transcriptionProgress: { completed: number; total: number } | null;
   fatalTranscriptionError: Error | null;
-  startRecording: (readyPromise?: Promise<void>) => Promise<void>;
-  stopRecording: (separator?: string) => Promise<string | null>;
+  transcriptionRetrying: boolean; // a segment is being retried after its request timed out
+  startRecording: (readyPromise?: Promise<void>, checkReachable?: () => Promise<boolean>) => Promise<void>;
+  // `signal` aborting (the user cancelling) abandons the transcription; the promise then rejects.
+  stopRecording: (separator?: string, signal?: AbortSignal) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
   playErrorSound: () => void;
   releaseMic: () => void;
@@ -29,6 +31,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     total: number;
   } | null>(null);
   const [fatalTranscriptionError, setFatalTranscriptionError] = useState<Error | null>(null);
+  const [transcriptionRetrying, setTranscriptionRetrying] = useState(false);
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
@@ -272,7 +275,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
-  const startRecording = useCallback(async (readyPromise?: Promise<void>) => {
+  const startRecording = useCallback(async (readyPromise?: Promise<void>, checkReachable?: () => Promise<boolean>) => {
     // check transcription Config and fail early for obvious errors
     const config = getTranscriptionConfig();
     const validationError = validateTranscriptionConfig(config);
@@ -350,11 +353,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       const config = getTranscriptionConfig();
       const whisperQueue = new WhisperQueue(config);
       if (readyPromise) whisperQueue.setReadyPromise(readyPromise);
+      if (checkReachable) whisperQueue.checkReachable = checkReachable;
       whisperQueue.onProgress = (completed, total) => {
         setTranscriptionProgress({ completed, total });
       };
       whisperQueue.onLog = wlog;
       whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
+      setTranscriptionRetrying(false); // in case an earlier queue was abandoned mid-retry
+      whisperQueue.onTimeoutRetrying = setTranscriptionRetrying;
       if (debugAudio) {
         debugSegmentTranscriptsRef.current = new Map();
         whisperQueue.onSegmentTranscribed = (idx, text, latencyMs) => {
@@ -507,7 +513,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog, createVad, releaseMic]);
 
-  const stopRecording = useCallback(async (separator = " "): Promise<string | null> => {
+  const stopRecording = useCallback(async (separator = " ", signal?: AbortSignal): Promise<string | null> => {
     if (!isRecording) {
       return null;
     }
@@ -551,6 +557,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
 
         const queue = whisperQueueRef.current!;
+        signal?.addEventListener("abort", () => queue.cancel(), { once: true });
         setTranscriptionProgress({ completed: 0, total: totalSegments });
         transcript = await queue.finalize(totalSegments, separator);
 
@@ -589,7 +596,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         saveDebugBlob(audioBlob, `full-recording.${ext}`);
 
         setTranscriptionProgress({ completed: 0, total: 1 });
-        transcript = await transcribeAudioBlob(audioBlob, config);
+        transcript = await transcribeAudioBlob(audioBlob, config, undefined, signal);
         setTranscriptionProgress({ completed: 1, total: 1 });
 
         if (debugSessionRef.current) {
@@ -602,6 +609,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       setTranscriptionProgress(null);
       return transcript || null;
     } catch (err) {
+      if (signal?.aborted) {
+        cleanupStream();
+        whisperQueueRef.current = null;
+        setTranscriptionProgress(null);
+        throw err;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       wlog("error", `Transcription failed: ${msg}`);
       console.error("Transcription failed:", err);
@@ -624,6 +637,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     audioLevel,
     transcriptionProgress,
     fatalTranscriptionError,
+    transcriptionRetrying,
     startRecording,
     stopRecording,
     saveDebugBlob,

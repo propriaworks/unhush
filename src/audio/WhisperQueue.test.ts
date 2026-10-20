@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WhisperQueue } from "./WhisperQueue";
-import { transcribeAudioBlob } from "./transcriptionApi";
+import { transcribeAudioBlob, TranscriptionTimeoutError, TRANSCRIPTION_UNREACHABLE_MSG } from "./transcriptionApi";
 import { VAD_CONFIG } from "./vadConfig";
 
-vi.mock("./transcriptionApi", () => ({ transcribeAudioBlob: vi.fn() }));
+vi.mock("./transcriptionApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./transcriptionApi")>()),
+  transcribeAudioBlob: vi.fn(),
+}));
 const transcribe = vi.mocked(transcribeAudioBlob);
 
 // Each transcription request stays pending until the test settles it, so completion order
@@ -114,6 +117,89 @@ describe("WhisperQueue", () => {
     ready();
     await flush();
     expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails at once, without sending or retrying, when the server is known to be unreachable", async () => {
+    const checkReachable = vi.fn(async () => false);
+    const queue = new WhisperQueue(config);
+    queue.checkReachable = checkReachable;
+    queue.enqueue(segments[0], 0);
+    const transcript = queue.finalize(1);
+
+    await expect(transcript).rejects.toThrow(TRANSCRIPTION_UNREACHABLE_MSG);
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(checkReachable).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks reachability again before each retry", async () => {
+    const checkReachable = vi.fn(async () => true);
+    const queue = new WhisperQueue(config);
+    queue.checkReachable = checkReachable;
+    queue.enqueue(segments[0], 0);
+    const transcript = queue.finalize(1);
+    const settled = expect(transcript).rejects.toThrow(TRANSCRIPTION_UNREACHABLE_MSG);
+    await flush();
+    expect(transcribe).toHaveBeenCalledTimes(1);
+
+    // The first attempt fails; by the retry, the health check has found the server down.
+    checkReachable.mockResolvedValue(false);
+    pending.pop()!.reject(new Error("transcription server error"));
+    await vi.advanceTimersByTimeAsync(VAD_CONFIG.retryBaseDelayMs);
+    await settled;
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(checkReachable).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a timed-out segment with the shorter timeout, reporting the retry while it runs", async () => {
+    const onTimeoutRetrying = vi.fn();
+    const queue = new WhisperQueue(config);
+    queue.onTimeoutRetrying = onTimeoutRetrying;
+    queue.enqueue(segments[0], 0);
+    const transcript = queue.finalize(1);
+    expect(transcribe.mock.calls[0][2]).toBeUndefined(); // the default (long) timeout
+
+    pending.pop()!.reject(new TranscriptionTimeoutError("timed out"));
+    await vi.advanceTimersByTimeAsync(VAD_CONFIG.retryBaseDelayMs);
+    expect(onTimeoutRetrying.mock.calls).toEqual([[true]]);
+    expect(transcribe.mock.calls[1][2]).toBe(VAD_CONFIG.retryAfterTimeoutMs);
+
+    // Later retries of that segment keep the short timeout, whatever they fail with
+    pending.pop()!.reject(new Error("transcription server error"));
+    await vi.advanceTimersByTimeAsync(VAD_CONFIG.retryBaseDelayMs * 2);
+    expect(transcribe.mock.calls[2][2]).toBe(VAD_CONFIG.retryAfterTimeoutMs);
+
+    pending.pop()!.resolve("done");
+    await expect(transcript).resolves.toBe("done");
+    expect(onTimeoutRetrying.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("does not shorten the timeout for retries after other failures", async () => {
+    const queue = new WhisperQueue(config);
+    queue.enqueue(segments[0], 0);
+    pending.pop()!.reject(new Error("transcription server error"));
+    await vi.advanceTimersByTimeAsync(VAD_CONFIG.retryBaseDelayMs);
+    expect(transcribe.mock.calls[1][2]).toBeUndefined();
+  });
+
+  it("cancel() rejects finalize at once, aborts requests in flight, and neither retries nor reports", async () => {
+    const onFatalError = vi.fn();
+    const onLog = vi.fn();
+    const queue = new WhisperQueue(config);
+    queue.onFatalError = onFatalError;
+    queue.onLog = onLog;
+    queue.enqueue(segments[0], 0);
+    const transcript = queue.finalize(1);
+    const signal = transcribe.mock.calls[0][3]!;
+
+    queue.cancel();
+    await expect(transcript).rejects.toThrow("transcription cancelled");
+    expect(signal.aborted).toBe(true);
+
+    pending.pop()!.reject(new DOMException("aborted", "AbortError")); // as the real fetch would
+    await vi.advanceTimersByTimeAsync(VAD_CONFIG.retryBaseDelayMs * 4);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(onFatalError).not.toHaveBeenCalled();
+    expect(onLog).not.toHaveBeenCalled();
   });
 
   it("reports progress as (completed, total) once the total is known", async () => {

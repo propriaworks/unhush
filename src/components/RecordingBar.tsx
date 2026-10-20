@@ -2,15 +2,27 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
 import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER, stripSplitMarkers } from "../audio/llmApi";
-import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
+import { ensureCustomServices, customServerReachable, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 import { normalizePunctuation } from "../audio/textNormalization";
+
+// Settles as `p` does, or rejects as soon as `signal` aborts: for awaits that can't
+// themselves be cancelled, so a cancel isn't left waiting on them.
+function abortable<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    p.then(resolve, reject);
+  });
+}
 
 function RecordingBar() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [slowLoadHint, setSlowLoadHint] = useState(false); // shown once transcribing runs long enough to look like a cold model load, not just normal processing
+  const [cancelVisible, setCancelVisible] = useState(false); // the × that abandons a slow transcription
   const [error, setError] = useState<string | null>(null);
+  const cancelRef = useRef<AbortController | null>(null); // aborts the transcription in progress
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
   // Mirrors isTranscribing for the start guard below. A ref, not the state value: a toggle
@@ -24,6 +36,7 @@ function RecordingBar() {
     isRecording,
     audioLevel,
     fatalTranscriptionError,
+    transcriptionRetrying,
     startRecording,
     stopRecording,
     saveDebugBlob,
@@ -44,17 +57,20 @@ function RecordingBar() {
     window.electronAPI?.log("info", "renderer mounted");
   }, []);
 
-  // Surface a "loading model" hint once transcribing has run long enough that it's very
-  // unlikely to just be normal processing — but only when a warm-up we actually know about
-  // is still pending, so this can't misfire as a generic "it's just slow" message. A single
-  // check at the threshold is enough: cold loads run 10s-90s+, so if one is in flight at 3s
-  // it'll still be in flight, and this only needs to flip on, not track progress after that.
+  // Once transcribing has run long enough that it's very unlikely to just be normal
+  // processing, offer to cancel, and surface a "loading model" hint — the latter only when a
+  // warm-up we actually know about is still pending, so this can't misfire as a generic "it's
+  // just slow" message. A single check at the threshold is enough: cold loads run 10s-90s+, so
+  // if one is in flight at 3s it'll still be in flight, and this only needs to flip on, not
+  // track progress after that.
   useEffect(() => {
     if (!isTranscribing) {
       setSlowLoadHint(false);
+      setCancelVisible(false);
       return;
     }
     const timer = setTimeout(() => {
+      setCancelVisible(true);
       if (getTranscriptionWarmupStatus() === "pending" || getLLMWarmupStatus() === "pending") {
         setSlowLoadHint(true);
       }
@@ -145,10 +161,14 @@ function RecordingBar() {
     // not their sum, since segments transcribe while recording continues.
     const tStop = Date.now();
     let tTranscribed = 0;
+    const cancel = new AbortController();
+    cancelRef.current = cancel;
+    const { signal } = cancel;
+    let transcript: string | null = null; // kept for "Copy last" if formatting is cancelled
 
     try {
       const llmConfig = getLLMConfig();
-      const transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined);
+      transcript = await stopRecording(llmConfig ? SPLIT_POINT_MARKER : undefined, signal);
       tTranscribed = Date.now();
       window.electronAPI?.setTranscriptionWarning("runtime", false);
 
@@ -173,10 +193,19 @@ function RecordingBar() {
           // this recording — Phase 2 may have skipped re-trying if it isn't due yet.
           window.electronAPI?.log("info", `Custom LLM not ready, last warm-up status: ${getLLMWarmupStatus()} — using raw Whisper transcript`);
         }
-        if (finalTranscript && llmConfig && !llmNotReady) {
+        // Matters mainly with warm-up off, since a failed warm-up already sets llmNotReady: a
+        // server the health check found down would otherwise be waited on until the request
+        // times out. Free while the server is believed healthy.
+        const llmUnreachable = !!finalTranscript && llmConfig?.provider === "custom" && !llmNotReady &&
+          !(await abortable(customServerReachable("llm", (level, msg) => window.electronAPI?.log(level, msg)), signal));
+        if (llmUnreachable) {
+          window.electronAPI.log("warn", "Custom LLM server unreachable — using raw transcript");
+        }
+        if (finalTranscript && llmConfig && !llmNotReady && !llmUnreachable) {
           let llmStatus = "error";
           let llmLatencyMs: number | undefined;
-          const llmResult = await postProcessTranscript(transcript, llmConfig).catch((err) => {
+          const llmResult = await postProcessTranscript(transcript, llmConfig, signal).catch((err) => {
+            if (signal.aborted) return;
             console.error("LLM post-processing failed, using raw transcript:", err);
             window.electronAPI.log(
               "error",
@@ -204,6 +233,7 @@ function RecordingBar() {
               );
             }
           }
+          signal.throwIfAborted(); // to the catch below, without saving a cancelled pass
           if (localStorage.getItem("unhush_debug_audio") === "true") {
             const payload = JSON.stringify(
               {
@@ -225,6 +255,7 @@ function RecordingBar() {
             );
           }
         }
+        signal.throwIfAborted();
         setOverlayVisible(false);
         window.electronAPI.hideWindow();
         window.electronAPI.log("debug",
@@ -237,6 +268,12 @@ function RecordingBar() {
         window.electronAPI.hideWindow();
       }
     } catch (err) {
+      if (signal.aborted) {
+        // handleCancel() already hid the bar. Nothing is output, but a finished transcript is
+        // still offered by the tray's "Copy last" rather than lost.
+        if (transcript) window.electronAPI?.setLastTranscript(normalizePunctuation(stripSplitMarkers(transcript)));
+        return;
+      }
       console.error("Transcription failed:", err);
       playErrorSound();
       setError(err instanceof Error ? err.message : "Transcription failed");
@@ -248,10 +285,22 @@ function RecordingBar() {
         }
       }, 4000);
     } finally {
+      cancelRef.current = null;
       isTranscribingRef.current = false;
       setIsTranscribing(false);
     }
   }, [stopRecording]);
+
+  // The bar's ×: abandons the transcription in progress. Requests are aborted, and anything
+  // that can't be is no longer waited on, so handleStopRecording() finishes at once.
+  const handleCancel = useCallback(() => {
+    const cancel = cancelRef.current;
+    if (!cancel || cancel.signal.aborted) return;
+    window.electronAPI?.log("info", "transcription cancelled by user");
+    cancel.abort();
+    setOverlayVisible(false);
+    window.electronAPI?.hideWindow();
+  }, []);
 
   const handleStartRecording = useCallback(async () => {
     // A toggle landing while the previous transcript is still being produced must not open a
@@ -280,8 +329,9 @@ function RecordingBar() {
       setError(null);
       checkConfigWarnings();
 
-      const readyPromise = ensureCustomServices((level, msg) => window.electronAPI?.log(level, msg));
-      await startRecording(readyPromise);
+      const log = (level: "info" | "warn" | "error", msg: string) => window.electronAPI?.log(level, msg);
+      const readyPromise = ensureCustomServices(log);
+      await startRecording(readyPromise, () => customServerReachable("transcription", log));
       isStartingRef.current = false; // must be before handleStopRecording guard check
       if (deferredStopRef.current) {
         // Stop was requested while we were starting up — honour it now
@@ -358,18 +408,35 @@ function RecordingBar() {
     if (isTranscribing) {
       const metalPill = { background: "linear-gradient(to bottom, #1a3dbe, #a0b4ff 50%, #1a3dbe)" };
       return (
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center gap-1.5 h-8">
-            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
-            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
-            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
-            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
-            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-1.5 h-8">
+              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
+              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
+              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
+              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
+              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
+            </div>
+            {transcriptionRetrying ? (
+              <span className="text-white/60 text-[13px] whitespace-nowrap">
+                Transcription timed out — retrying
+              </span>
+            ) : slowLoadHint && (
+              <span className="text-white/60 text-[13px] whitespace-nowrap">
+                Loading model after being idle — this can take a bit
+              </span>
+            )}
           </div>
-          {slowLoadHint && (
-            <span className="text-white/60 text-[13px] whitespace-nowrap">
-              Loading model after being idle — this can take a bit
-            </span>
+          {cancelVisible && (
+            <button
+              type="button"
+              onClick={handleCancel}
+              title="Cancel"
+              aria-label="Cancel transcription"
+              className="w-6 h-6 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/15 text-lg leading-none"
+            >
+              ×
+            </button>
           )}
         </div>
       );

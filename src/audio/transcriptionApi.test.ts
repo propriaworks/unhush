@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TRANSCRIPTION_DEFAULT_CUSTOM_URL,
   getTranscriptionConfig,
+  TranscriptionTimeoutError,
   transcribeAudioBlob,
   validateTranscriptionConfig,
 } from "./transcriptionApi";
@@ -142,6 +143,25 @@ describe("transcribeAudioBlob", () => {
       localStorage.setItem("unhush_provider", provider);
       vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
       await expect(transcribeAudioBlob(audio, config)).rejects.toThrow(message);
+    });
+
+    it("reports a request that hit its timeout as such, not as unreachable", async () => {
+      localStorage.setItem("unhush_provider", "custom");
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }));
+      const result = transcribeAudioBlob(audio, config);
+      await expect(result).rejects.toThrow("transcription request timed out");
+      await expect(result).rejects.toBeInstanceOf(TranscriptionTimeoutError);
+    });
+
+    it("passes a cancellation through instead of reporting the server as unreachable", async () => {
+      localStorage.setItem("unhush_provider", "custom");
+      vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+        init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason));
+      })));
+      const cancel = new AbortController();
+      const result = transcribeAudioBlob(audio, config, undefined, cancel.signal);
+      cancel.abort();
+      await expect(result).rejects.toHaveProperty("name", "AbortError");
     });
 
     it("passes the API's own error message through, whatever the status", async () => {

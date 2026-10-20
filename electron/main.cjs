@@ -106,6 +106,14 @@ let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
 let lastHotkeyAt = 0; // when the toggle hotkey last fired — for paste-failure diagnostics timing
+
+// What the tray's "Copy last" offers: every transcript output, and one whose formatting the
+// user cancelled (see "set-last-transcript").
+function setLastTranscript(text) {
+  lastTranscript = text;
+  lastPasteDestination = null; // reset every call so it can't show a stale destination from a prior paste
+  updateTrayMenu();
+}
 // Reason-keyed warning registries. Each entry is one independent cause the renderer has
 // reported (bad settings, a runtime failure, a warm-up streak, etc.) — the tray badges
 // whenever either set is non-empty, and clears only once every reason in it has cleared,
@@ -248,11 +256,7 @@ textOutput.init({
   // Under xwayland-satellite xclip still reaches the X selections, through satellite's Xwayland.
   canReadXSelections: () => session.isX11() || waylandClipboard.active(),
   msSinceHotkey: () => (lastHotkeyAt ? Date.now() - lastHotkeyAt : -1),
-  onOutput: (text) => {
-    lastTranscript = text;
-    lastPasteDestination = null; // reset every call so it can't show a stale destination from a prior paste
-    updateTrayMenu();
-  },
+  onOutput: setLastTranscript,
   onDestination: (info) => {
     lastPasteDestination = info;
     updateTrayMenu();
@@ -676,6 +680,8 @@ ipcMain.on("set-formatter-warning", (_event, reasonKey, on) => {
   updateTrayIcon();
   updateTrayMenu();
 });
+
+ipcMain.on("set-last-transcript", (_event, text) => setLastTranscript(text));
 
 ipcMain.on("set-transcription-warning", (_event, reasonKey, on) => {
   const had = transcriptionWarnings.has(reasonKey);

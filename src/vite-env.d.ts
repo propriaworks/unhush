@@ -22,6 +22,7 @@ declare global {
       copyToClipboard: (text: string) => Promise<boolean>;
       outputText: (text: string, method: OutputMethod) => Promise<boolean>;
       hideWindow: () => Promise<void>;
+      setLastTranscript: (text: string) => void;
       resizeWindow: (width: number, height: number) => void;
       onOpenSettings: (callback: () => void) => void;
       onNavigateTab: (callback: (event: unknown, tab: string) => void) => void;

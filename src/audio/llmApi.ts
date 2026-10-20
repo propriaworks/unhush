@@ -135,6 +135,7 @@ export function makeUserPrompt(transcript: string, config: LLMConfig): string {
 export async function postProcessTranscript(
   transcript: string,
   config: LLMConfig,
+  signal?: AbortSignal, // the user cancelling
 ): Promise<{ content: string; latencyMs: number }> {
   if (!config.model) {
     throw new Error(`LLM model is not set (URL: ${config.apiUrl})`);
@@ -164,8 +165,11 @@ export async function postProcessTranscript(
         { role: "user", content: makeUserPrompt(transcript, config) },
       ],
     }),
-    signal: AbortSignal.timeout(90000),
-  }).catch(() => { throw new Error(config.provider === "custom" ? "server unreachable" : "network error"); });
+    signal: signal ? AbortSignal.any([AbortSignal.timeout(90000), signal]) : AbortSignal.timeout(90000),
+  }).catch((err) => {
+    if (signal?.aborted) throw err;
+    throw new Error(config.provider === "custom" ? "server unreachable" : "network error");
+  });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

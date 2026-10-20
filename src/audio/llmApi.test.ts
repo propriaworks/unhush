@@ -162,6 +162,16 @@ describe("postProcessTranscript", () => {
     await expect(postProcessTranscript("hi", { ...config, provider })).rejects.toThrow(message);
   });
 
+  it("passes a cancellation through instead of reporting the server as unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason));
+    })));
+    const cancel = new AbortController();
+    const result = postProcessTranscript("hi", { ...config, provider: "custom" }, cancel.signal);
+    cancel.abort();
+    await expect(result).rejects.toHaveProperty("name", "AbortError");
+  });
+
   it("reports the API's error message with the endpoint and model", async () => {
     respondWith({ ok: false, status: 404, json: async () => ({ error: { message: "model 'qwen3:8b' not found" } }) });
     await expect(postProcessTranscript("hi", config)).rejects.toThrow(

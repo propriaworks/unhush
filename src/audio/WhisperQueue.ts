@@ -1,5 +1,7 @@
 import { VAD_CONFIG } from "./vadConfig";
-import { transcribeAudioBlob, TranscriptionConfig } from "./transcriptionApi";
+import {
+  transcribeAudioBlob, TranscriptionConfig, TranscriptionTimeoutError, TRANSCRIPTION_UNREACHABLE_MSG,
+} from "./transcriptionApi";
 
 interface QueueEntry {
   wavBlob: Blob;
@@ -21,6 +23,15 @@ export class WhisperQueue {
   onSegmentTranscribed: ((segmentIndex: number, text: string, latencyMs: number) => void) | null = null;
   onLog: ((level: "info" | "warn" | "error", message: string) => void) | null = null;
   onFatalError: ((err: Error) => void) | null = null;
+  // Consulted before every attempt. False fails the segment at once, without sending it or
+  // retrying: a server the health check has just found down would only make each attempt
+  // wait out a timeout.
+  checkReachable: (() => Promise<boolean>) | null = null;
+  // Called with true when some segment starts retrying after a timeout, and false once no
+  // segment is any longer, so the bar can say why the wait is long.
+  onTimeoutRetrying: ((retrying: boolean) => void) | null = null;
+  private timeoutRetries = 0; // segments currently retrying after a timeout
+  private abort = new AbortController(); // aborts requests in flight on cancel()
   private readyPromise: Promise<void> | null = null;
 
   setReadyPromise(p: Promise<void>): void {
@@ -29,6 +40,18 @@ export class WhisperQueue {
 
   constructor(config: TranscriptionConfig) {
     this.config = config;
+  }
+
+  /** The user gave up on this transcript: abort requests in flight, send no more, and reject
+   * finalize(). Not reported through onFatalError, since nothing went wrong. */
+  cancel(): void {
+    if (this.failed) return;
+    this.failed = true;
+    this.firstError = "transcription cancelled";
+    this.abort.abort();
+    this.rejectFinalize?.(new Error(this.firstError));
+    this.resolveFinalize = null;
+    this.rejectFinalize = null;
   }
 
   enqueue(wavBlob: Blob, segmentIndex: number): void {
@@ -69,12 +92,19 @@ export class WhisperQueue {
     wavBlob: Blob,
     segmentIndex: number,
     attempt: number,
+    afterTimeout = false, // an earlier attempt on this segment timed out
   ): Promise<void> {
     if (this.failed) { this.inFlight--; return; }
     if (this.readyPromise) await this.readyPromise;
+    let unreachable = false;
     try {
+      if (this.checkReachable && !(await this.checkReachable())) {
+        unreachable = true;
+        throw new Error(TRANSCRIPTION_UNREACHABLE_MSG);
+      }
       const t0 = Date.now();
-      const text = await transcribeAudioBlob(wavBlob, this.config);
+      const text = await transcribeAudioBlob(wavBlob, this.config,
+        afterTimeout ? VAD_CONFIG.retryAfterTimeoutMs : undefined, this.abort.signal);
       const latencyMs = Date.now() - t0;
       if (!this.failed) {
         this.results.set(segmentIndex, text);
@@ -82,25 +112,31 @@ export class WhisperQueue {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (attempt < VAD_CONFIG.retryAttempts) {
+      // Once cancelled, or failed by another segment, there is nothing left to retry for or report.
+      if (!this.failed && !unreachable && attempt < VAD_CONFIG.retryAttempts) {
         const delay = VAD_CONFIG.retryBaseDelayMs * Math.pow(2, attempt);
         this.onLog?.("warn", `Segment ${segmentIndex} transcription failed (attempt ${attempt + 1}), retrying in ${delay}ms: ${msg}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         this.inFlight--; // will be re-incremented via recursive call path
         this.inFlight++;
-        await this.transcribeWithRetry(wavBlob, segmentIndex, attempt + 1);
+        // The recursive call runs this segment's remaining attempts to the end, so the count
+        // drops once it has either succeeded or failed for good.
+        const firstTimeout = !afterTimeout && err instanceof TranscriptionTimeoutError;
+        if (firstTimeout && this.timeoutRetries++ === 0) this.onTimeoutRetrying?.(true);
+        await this.transcribeWithRetry(wavBlob, segmentIndex, attempt + 1, afterTimeout || firstTimeout);
+        if (firstTimeout && --this.timeoutRetries === 0) this.onTimeoutRetrying?.(false);
         return;
       }
-      this.onLog?.("error", `Segment ${segmentIndex} transcription failed permanently after ${attempt + 1} attempts: ${msg}`);
-      console.error(`Segment ${segmentIndex} transcription failed after ${attempt + 1} attempts:`, err);
       if (!this.failed) {
+        this.onLog?.("error", `Segment ${segmentIndex} transcription failed permanently after ${attempt + 1} attempts: ${msg}`);
+        console.error(`Segment ${segmentIndex} transcription failed after ${attempt + 1} attempts:`, err);
         this.failed = true;
         this.firstError = msg;
-        const err = new Error(msg);
-        this.rejectFinalize?.(err);
+        const fatal = new Error(msg);
+        this.rejectFinalize?.(fatal);
         this.resolveFinalize = null;
         this.rejectFinalize = null;
-        this.onFatalError?.(err);
+        this.onFatalError?.(fatal);
       }
     }
 
