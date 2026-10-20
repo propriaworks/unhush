@@ -216,7 +216,7 @@ Where to add it: your compositor's config file (`~/.config/sway/config` and frie
 </details>
 
 <details>
-<summary>Niri quirks</comment>
+<summary>Niri quirks</summary>
 On **Niri**, or any desktop whose XWayland is provided by `xwayland-satellite`, Unhush also needs `wl-clipboard` (`wl-copy`/`wl-paste`). There, XWayland's clipboard reaches native Wayland apps only while an XWayland window has focus, so without wl-clipboard, **Paste** mode pastes whatever was copied before into Wayland apps. Unhush detects this setup and, if wl-clipboard is missing, says so in its setup window. AppImage users need to install it themselves.
 
 **Niri** also needs a window rule for the recording bar. Niri manages the bar like any other window. The rule is needed to keep it floating at the bottom of the screen, and to stop it from taking keyboard focus from the app you're dictating into, which would make pasting unreliable. Add this to `~/.config/niri/config.kdl` (Niri will reload it automatically):
@@ -448,7 +448,6 @@ On Wayland the key binding is controlled by your desktop environment, not Unhush
 </details>
 
 <details>
-
 <summary>No output or bogus output</summary>
 
 - In your system sound settings, ensure that the correct microphone is selected, working, and sensitive enough.
@@ -456,7 +455,6 @@ On Wayland the key binding is controlled by your desktop environment, not Unhush
 </details>
 
 <details>
-
 <summary>Sometimes text doesn't appear</summary>
 
 - If the cursor is not in an active text box, terminal, or other place that can accept text input, the pasted / typed text may be dropped by the target app. In case this happens, you can right click on the system try icon to find out to which window it was sent (where possible -- not all Wayland compositors support this), and copy the transcription text to clipboard yourself so you can paste again where you need it.
@@ -470,6 +468,27 @@ In **Paste** mode, Unhush puts whatever you had copied back on the clipboard a f
 - copied files, which can't be put back exactly (e.g. a cut could come back as a copy).
 
 It also skips the restore if you copy something else in the meantime. Also, due to a limitation of `wl-paste`, on Niri (`xwayland-satellite`), rich text such as formatted text from a browser will come back as plain text.
+</details>
+
+<details>
+<summary>Pasting into a remote desktop or virtual machine pastes old text</summary>
+
+If the window you dictate into is a remote-desktop client or a virtual-machine viewer, **Paste** mode may paste whatever was on the *other* machine's clipboard before, not your transcript.
+
+**Why:** the other machine has its own clipboard, which the viewer keeps in step with yours.
+- Unhush puts the transcript on your clipboard and presses the paste key a moment later.
+- The key reaches the other machine straight away, but the clipboard may not have been copied across yet.
+- Some viewers copy your clipboard across only when their window *gains* focus or takes the keyboard back, however long you wait. NoMachine is one example: a transcript copied while you are already working in its window isn't sent until you switch away and back.
+
+**Workaround:** use **Clipboard** mode. Once the transcript is on your clipboard, click out of the viewer window and back in, then paste by hand.
+
+**Type mode** avoids the clipboard, so might also work. But many viewers (NoMachine, for one) send key *positions*, which the other machine reads through its own keyboard layout. In that case, typed text is right only if the other machine uses a US layout.
+- Unhush's own layout correction (see [Type mode produces the wrong characters](#troubleshooting)) applies to your machine only.
+- Text with accents or non-Latin scripts is pasted even in Type mode, so it runs into the clipboard problem above.
+
+**Keyboard grab:** if the viewer grabs the keyboard (a remote-desktop client's keyboard-grab option, a virtual machine's keyboard capture), every key goes to it while it has focus, so Unhush's shortcut doesn't fire. Either:
+- start and stop recording from the tray icon, or
+- release the keyboard with the viewer's release key, then use Unhush's shortcut.
 </details>
 
 <details>
