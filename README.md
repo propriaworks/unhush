@@ -497,7 +497,7 @@ When transcription fails, Unhush plays a buzzer sound, displays the error messag
 
 | Message | Likely cause |
 |---------|-------------|
-| `Transcription server unreachable` | Custom (Whisper) TTS server is down, its URL is wrong, or there's no network connection. For a local server, set a **Start Command** in Settings, or start it manually |
+| `Transcription server unreachable` | Custom (Whisper) STT server is down, its URL is wrong, or there's no network connection. For a local server, set a **Start Command** in Settings, or start it manually |
 | `Network error` | No internet connection (Groq/OpenAI), or blocked by IP address |
 | `Bad API key` | API key is missing or invalid — check Settings |
 | `Rate limited` | Hit the provider's rate limit — wait a moment and retry |
