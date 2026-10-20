@@ -1,24 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { callsTo, makeFetchMock } from "./testFetchMock";
 
 // This file targets the gating/dedup logic in ensureCustomServices() specifically — the
 // staleness-vs-failure-retry interval selection, the in-flight per-baseUrl lock, and Phase
 // 2 skipping warm-up when Phase 1 already knows the service is down. That logic is stateful
 // and timing-dependent, which is exactly the kind of thing that's easy to get subtly wrong
 // and hard to verify by hand (see TODO.md for a running list of what else is worth covering).
-
-type FetchResult = { ok: boolean; status?: number; json?: () => Promise<unknown> };
-type FetchRoute = (url: string, init?: RequestInit) => FetchResult;
-
-function makeFetchMock(route: FetchRoute) {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    const r = route(url, init);
-    return {
-      ok: r.ok,
-      status: r.status ?? (r.ok ? 200 : 500),
-      json: r.json ?? (async () => ({})),
-    };
-  });
-}
 
 function setupCustomTranscription(opts: {
   url: string;
@@ -316,6 +303,220 @@ describe("ensureCustomServices — Phase 2 warm-up gating", () => {
   });
 });
 
+describe("ensureCustomServices — warm-up switched off", () => {
+  const healthyServer = () =>
+    makeFetchMock((url) => {
+      if (url.endsWith(mod.MODELS_PATH)) return { ok: true, json: async () => ({ object: "list", data: [] }) };
+      return { ok: true };
+    });
+
+  it("health-checks but sends no warm-up request", async () => {
+    setupCustomTranscription({ url: "http://localhost:9020", model: "test-model" });
+    localStorage.setItem("unhush_custom_warmup", "false");
+    const fetchMock = healthyServer();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mod.ensureCustomServices(noopLog);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls.some((u) => u.endsWith(mod.MODELS_PATH))).toBe(true);
+    expect(urls.some((u) => u.endsWith(mod.TRANSCRIPTIONS_PATH))).toBe(false);
+  });
+
+  it("reports the LLM as skipped before Phase 1 has finished", async () => {
+    localStorage.setItem("unhush_llm_provider", "custom");
+    localStorage.setItem("unhush_llm_custom_url", "http://localhost:9021");
+    localStorage.setItem("unhush_llm_model_custom", "test-llm");
+    localStorage.setItem("unhush_llm_custom_warmup", "false");
+    // A health check that never answers: a recording ending now must not see "idle".
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
+    void mod.ensureCustomServices(noopLog);
+    expect(mod.getLLMWarmupStatus()).toBe("skipped");
+  });
+
+  it("warms up again once switched back on", async () => {
+    setupCustomTranscription({ url: "http://localhost:9022", model: "test-model" });
+    localStorage.setItem("unhush_custom_warmup", "false");
+    const fetchMock = healthyServer();
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.ensureCustomServices(noopLog);
+
+    localStorage.setItem("unhush_custom_warmup", "true");
+    await mod.ensureCustomServices(noopLog);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith(mod.TRANSCRIPTIONS_PATH))).toBe(true);
+    expect(mod.getTranscriptionWarmupStatus()).toBe("ready");
+  });
+});
+
+function setupCustomLLM(opts: { url: string; model?: string; startCommand?: string }) {
+  localStorage.setItem("unhush_llm_provider", "custom");
+  localStorage.setItem("unhush_llm_custom_url", opts.url);
+  localStorage.setItem("unhush_llm_model_custom", opts.model ?? "");
+  localStorage.setItem("unhush_llm_custom_start_cmd", opts.startCommand ?? "");
+}
+
+const modelsList = async () => ({ object: "list", data: [] });
+const llmReply = async () => ({ choices: [{ message: { content: "h" } }] });
+
+// Runs one ensureCustomServices() call and lets its background Phase 2 warm-ups settle
+async function ensureAndFlush(force = false) {
+  await mod.ensureCustomServices(noopLog, force);
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+describe("ensureCustomServices — Phase 1 service selection", () => {
+  it("health-checks a baseUrl shared by transcription and LLM only once", async () => {
+    setupCustomTranscription({ url: "http://localhost:9040", model: "test-model" });
+    setupCustomLLM({ url: "http://localhost:9040/", model: "test-llm" }); // same server, trailing slash
+    const fetchMock = makeFetchMock((url) => (url.endsWith(mod.MODELS_PATH) ? { ok: true, json: modelsList } : { ok: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mod.ensureCustomServices(noopLog);
+    expect(callsTo(fetchMock, mod.MODELS_PATH)).toBe(1);
+  });
+
+  it("uses the Start Command from whichever service sharing the baseUrl has one", async () => {
+    setupCustomTranscription({ url: "http://localhost:9041", model: "test-model" }); // no Start Command
+    setupCustomLLM({ url: "http://localhost:9041", model: "test-llm", startCommand: "llm-start" });
+    let modelsCallCount = 0;
+    vi.stubGlobal("fetch", makeFetchMock((url) => {
+      if (!url.endsWith(mod.MODELS_PATH)) return { ok: false };
+      modelsCallCount++;
+      return { ok: modelsCallCount > 1, json: modelsList }; // down until the Start Command runs
+    }));
+    const spawnDetached = vi.fn(async () => ({ ok: true, pid: 1 }));
+    (window as unknown as { electronAPI: Record<string, unknown> }).electronAPI.spawnDetached = spawnDetached;
+
+    const p = mod.ensureCustomServices(noopLog);
+    await vi.advanceTimersByTimeAsync(1000);
+    await p;
+    expect(spawnDetached).toHaveBeenCalledExactlyOnceWith("llm-start");
+  });
+
+  it("re-probes inside the staleness window after invalidateServiceContact()", async () => {
+    setupCustomTranscription({ url: "http://localhost:9042/v1" }); // no model: keeps Phase 2 out of it
+    const fetchMock = makeFetchMock(() => ({ ok: true, json: modelsList }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mod.ensureCustomServices(noopLog);
+    await mod.ensureCustomServices(noopLog);
+    expect(callsTo(fetchMock, mod.MODELS_PATH)).toBe(1); // control: second call not due
+
+    mod.invalidateServiceContact("http://localhost:9042");
+    await mod.ensureCustomServices(noopLog);
+    expect(callsTo(fetchMock, mod.MODELS_PATH)).toBe(2);
+  });
+
+  it("never probes a custom URL that isn't a valid http(s) URL", async () => {
+    setupCustomTranscription({ url: "localhost:9043", model: "test-model" }); // missing scheme
+    setupCustomLLM({ url: "not a url", model: "test-llm" });
+    const fetchMock = makeFetchMock(() => ({ ok: true, json: modelsList }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensureAndFlush();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ensureCustomServices — Phase 2 warm-up behaviour", () => {
+  it("re-warms immediately when the configured model changes, even inside the interval", async () => {
+    setupCustomTranscription({ url: "http://localhost:9044", model: "model-a" });
+    const fetchMock = makeFetchMock((url) => (url.endsWith(mod.MODELS_PATH) ? { ok: true, json: modelsList } : { ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensureAndFlush();
+    expect(callsTo(fetchMock, mod.TRANSCRIPTIONS_PATH)).toBe(1);
+
+    await ensureAndFlush(); // control: same model, interval not elapsed
+    expect(callsTo(fetchMock, mod.TRANSCRIPTIONS_PATH)).toBe(1);
+
+    localStorage.setItem("unhush_custom_model", "model-b");
+    await ensureAndFlush();
+    const warmups = fetchMock.mock.calls.filter(([url]) => url.endsWith(mod.TRANSCRIPTIONS_PATH));
+    expect(warmups.length).toBe(2);
+    expect((warmups[1][1]!.body as FormData).get("model")).toBe("model-b");
+  });
+
+  it.each([
+    ["empty content", "failed", async () => ({ choices: [{ message: { content: "" } }] })],
+    ["no choices", "failed", async () => ({})],
+    ["a body that isn't JSON", "failed", async () => { throw new SyntaxError("Unexpected token"); }],
+    ["generated content", "ready", llmReply],
+  ])("reports an LLM warm-up whose 200 response has %s as %s", async (_label, expected, json) => {
+    setupCustomLLM({ url: "http://localhost:9045", model: "test-llm" });
+    vi.stubGlobal("fetch", makeFetchMock((url) => {
+      if (url.endsWith(mod.MODELS_PATH)) return { ok: true, json: modelsList };
+      if (url.endsWith(mod.CHAT_COMPLETIONS_PATH)) return { ok: true, json };
+      return { ok: false };
+    }));
+
+    await ensureAndFlush();
+    expect(mod.getLLMWarmupStatus()).toBe(expected);
+  });
+
+  it("doesn't start the LLM warm-up until the transcription warm-up has settled", async () => {
+    // Deliberate serialization: cold transcription and LLM loads on one GPU slow each other down
+    setupCustomTranscription({ url: "http://localhost:9046", model: "test-model" });
+    setupCustomLLM({ url: "http://localhost:9047", model: "test-llm" });
+    let releaseTranscription!: () => void;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith(mod.TRANSCRIPTIONS_PATH)) await new Promise<void>((r) => (releaseTranscription = r));
+      return { ok: true, status: 200, json: url.endsWith(mod.CHAT_COMPLETIONS_PATH) ? llmReply : modelsList };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensureAndFlush();
+    expect(callsTo(fetchMock, mod.TRANSCRIPTIONS_PATH)).toBe(1);
+    expect(callsTo(fetchMock, mod.CHAT_COMPLETIONS_PATH)).toBe(0);
+
+    releaseTranscription();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callsTo(fetchMock, mod.CHAT_COMPLETIONS_PATH)).toBe(1);
+  });
+});
+
+describe("getRelevantConfigSnapshot — covers what ensureCustomServices() reads", () => {
+  // RecordingBar re-probes on Settings close only when this snapshot changed, so a setting
+  // ensureCustomServices() reads but RELEVANT_CONFIG_KEYS omits would silently not take
+  // effect until the next staleness window. Timing-only settings are exempt: changing them
+  // alters when we probe, not what, so they needn't trigger an immediate re-probe.
+  const TIMING_ONLY_KEYS = [
+    "unhush_provider_restart_stale_min",
+    "unhush_warmup_interval_sec",
+    "unhush_llm_warmup_interval_sec",
+  ];
+
+  it("changes whenever any non-timing setting ensureCustomServices() reads changes", async () => {
+    // Both providers custom and healthy, with models, so every branch (incl. Phase 2) runs
+    setupCustomTranscription({ url: "http://localhost:9048", model: "test-model", startCommand: "t-start", apiKey: "k" });
+    setupCustomLLM({ url: "http://localhost:9049", model: "test-llm", startCommand: "l-start" });
+    vi.stubGlobal("fetch", makeFetchMock((url) => ({
+      ok: true,
+      json: url.endsWith(mod.CHAT_COMPLETIONS_PATH) ? llmReply : modelsList,
+    })));
+
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    await ensureAndFlush();
+    const readKeys = new Set(getItem.mock.calls.map(([key]) => key));
+    getItem.mockRestore();
+    // Guards against the spy silently seeing nothing (which would make the check below vacuous)
+    expect(readKeys).toContain("unhush_custom_url");
+    expect(readKeys).toContain("unhush_llm_warmup_interval_sec");
+
+    const missing = [...readKeys].filter((key) => {
+      if (TIMING_ONLY_KEYS.includes(key)) return false;
+      const before = mod.getRelevantConfigSnapshot();
+      localStorage.setItem(key, `${localStorage.getItem(key) ?? ""}-changed`);
+      return mod.getRelevantConfigSnapshot() === before;
+    });
+    expect(missing).toEqual([]);
+  });
+});
+
 describe("parseKeepAliveMs", () => {
   it.each([
     ["2h", 7_200_000],
@@ -351,8 +552,6 @@ describe("pinOllamaKeepAlive — skips pinning when the server default is longer
       return { ok: false };
     });
   }
-  const callsTo = (fetchMock: ReturnType<typeof makeFetchMock>, path: string) =>
-    fetchMock.mock.calls.filter(([url]) => url.endsWith(path)).length;
 
   it("doesn't pin, and doesn't re-check, while the server keeps the model longer than requested", async () => {
     const fetchMock = ollamaMock(4 * HOUR);
@@ -417,5 +616,71 @@ describe("pinOllamaKeepAlive — skips pinning when the server default is longer
     await mod.pinOllamaKeepAlive(BASE, "", "mistral", "7200", noopLog);
     const [, init] = fetchMock.mock.calls.find(([url]) => url.endsWith("/api/generate"))!;
     expect(JSON.parse(init!.body as string).keep_alive).toBe(7200);
+  });
+});
+
+describe("pinOllamaKeepAlive — Ollama detection", () => {
+  const BASE = "http://localhost:9050";
+
+  it("no-ops for a non-Ollama server, and probes /api/version only once per baseUrl", async () => {
+    const fetchMock = makeFetchMock(() => ({ ok: false, status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(callsTo(fetchMock, "/api/version")).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no /api/ps or /api/generate
+  });
+
+  it("caches an unreachable server as non-Ollama too", async () => {
+    const fetchMock = makeFetchMock(() => { throw new TypeError("fetch failed"); });
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "2h", noopLog);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing at all when keep-alive pinning is disabled (empty string)", async () => {
+    const fetchMock = makeFetchMock(() => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await mod.pinOllamaKeepAlive(BASE, "", "mistral", "", noopLog);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBaseUrl", () => {
+  it.each([
+    ["http://localhost:11434", "http://localhost:11434"],
+    ["http://localhost:11434///", "http://localhost:11434"],
+    ["  http://localhost:11434  ", "http://localhost:11434"],
+    // Legacy values from when the field held the full endpoint
+    ["http://localhost:8000/v1", "http://localhost:8000"],
+    ["http://localhost:8000/v1/", "http://localhost:8000"],
+    ["http://localhost:8000/v1/chat/completions", "http://localhost:8000"],
+    ["http://localhost:8000/v1/audio/transcriptions", "http://localhost:8000"],
+    // A reverse-proxy path prefix is part of the server prefix and must survive
+    ["https://example.com/proxy/ollama/v1", "https://example.com/proxy/ollama"],
+    ["https://example.com/proxy/ollama", "https://example.com/proxy/ollama"],
+    // Only one suffix is stripped; /v1/models was never a legacy value
+    ["http://localhost:8000/v1/v1", "http://localhost:8000/v1"],
+    ["http://localhost:8000/v1/models", "http://localhost:8000/v1/models"],
+    // Not a URL: returned trimmed but otherwise as-is
+    ["", ""],
+    [" not a url/ ", "not a url"],
+  ])("%j → %j", (input, expected) => {
+    expect(mod.getBaseUrl(input)).toBe(expected);
+  });
+});
+
+describe("isValidHttpUrl", () => {
+  it.each([
+    ["http://localhost:8000", true],
+    ["https://api.example.com/v1", true],
+    ["", false],
+    ["localhost:8000", false], // parses, but with protocol "localhost:"
+    ["ftp://example.com", false],
+    ["file:///tmp/x", false],
+    ["not a url", false],
+  ])("%j → %s", (input, expected) => {
+    expect(mod.isValidHttpUrl(input)).toBe(expected);
   });
 });

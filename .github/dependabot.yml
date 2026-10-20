@@ -14,7 +14,22 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Dependabot doesn't read pnpm's minimumReleaseAge (pnpm-workspace.yaml, 3 days), so match it
+    # here: a PR for a younger release would fail `pnpm install` in CI anyway. (A young transitive
+    # dependency can still trip it.)
+    cooldown:
+      default-days: 3
     groups:
       # Batch minor/patch bumps into one PR to reduce noise
       dependencies:
         update-types: [minor, patch]
+        # Electron always gets its own PR: even its patch releases have regressed for us (42.4.0
+        # segfaulted when run unpacked), so it's reviewed and tested on its own -- and the version
+        # is pinned exactly in package.json for the same reason.
+        exclude-patterns: [electron]
+    ignore:
+      # Electron 44 made the clipboard API promise-based and removed availableFormats(), which
+      # clipboardAccess.cjs relies on to save and restore the user's clipboard around a paste.
+      # Remove this once that file is migrated (`pnpm test:clipboard` checks it).
+      - dependency-name: electron
+        versions: [">=44"]

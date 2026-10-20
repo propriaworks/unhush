@@ -25,6 +25,24 @@ export { PROVIDER_BASE_URLS };
 
 export const SPLIT_POINT_MARKER = " <split_point/> ";
 
+// Any spelling of the marker a model might echo back: <split_point/>, <split_point>,
+// <split_point />, </split_point>, any case -- with the whitespace around it, and a run of
+// consecutive markers as one.
+const SPLIT_POINT_PATTERN = /\s*(?:<\s*\/?\s*split_point\s*\/?\s*>\s*)+/gi;
+
+/** Removes split-point markers from a transcript -- the raw one, or the LLM's output, since the
+ * system prompt asking the model to remove them is not a guarantee. A marker becomes a space, a
+ * line break if one surrounded it, or nothing before punctuation or at either end. */
+export function stripSplitMarkers(text: string): string {
+  return text
+    .replace(SPLIT_POINT_PATTERN, (match, offset: number, whole: string) => {
+      const next = whole[offset + match.length];
+      if (offset === 0 || next === undefined || /[,.;:!?)]/.test(next)) return "";
+      return match.includes("\n") ? "\n" : " ";
+    })
+    .trim();
+}
+
 export const LLM_DEFAULT_SYSTEM_PROMPT =
   `You are a dictation transcript formatter. Output ONLY the cleaned transcript, nothing else.
 The goal is to accurately convey what the speaker actually said, not to improve it.

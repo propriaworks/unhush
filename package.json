@@ -15,7 +15,8 @@
     "package": "pnpm run build && electron-builder --linux AppImage deb rpm",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:clipboard": "xvfb-run -a electron --no-sandbox electron/clipboardAccess.integration.cjs"
+    "test:clipboard": "xvfb-run -a electron --no-sandbox electron/clipboardAccess.integration.cjs",
+    "test:smoke": "bash scripts/smoke-test.sh"
   },
   "keywords": [
     "voice",
@@ -33,7 +34,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
-    "electron": "~43.5.1",
+    "electron": "43.5.1",
     "electron-builder": "^26.15.3",
     "jsdom": "^30.1.2",
     "react": "^19.3.0",

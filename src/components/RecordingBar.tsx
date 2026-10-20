@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { Waveform } from "./Waveform";
-import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER } from "../audio/llmApi";
+import { getLLMConfig, makeUserPrompt, postProcessTranscript, validateLLMConfig, SPLIT_POINT_MARKER, stripSplitMarkers } from "../audio/llmApi";
 import { ensureCustomServices, getLLMWarmupStatus, getTranscriptionWarmupStatus, pinOllamaKeepAlive, getBaseUrl, getRelevantConfigSnapshot } from "../audio/customModelService";
 import { getTranscriptionConfig, validateTranscriptionConfig } from "../audio/transcriptionApi";
 import { normalizePunctuation } from "../audio/textNormalization";
@@ -34,6 +34,15 @@ function RecordingBar() {
   useEffect(() => {
     if (fatalTranscriptionError && isRecording) handleStopRecording();
   }, [fatalTranscriptionError]);
+
+  // One line per launch showing the renderer mounted and its IPC reaches main: the startup
+  // marker scripts/smoke-test.sh waits for. Ref-guarded since StrictMode runs effects twice in dev.
+  const mountLoggedRef = useRef(false);
+  useEffect(() => {
+    if (mountLoggedRef.current) return;
+    mountLoggedRef.current = true;
+    window.electronAPI?.log("info", "renderer mounted");
+  }, []);
 
   // Surface a "loading model" hint once transcribing has run long enough that it's very
   // unlikely to just be normal processing — but only when a warm-up we actually know about
@@ -144,9 +153,11 @@ function RecordingBar() {
       window.electronAPI?.setTranscriptionWarning("runtime", false);
 
       if (transcript && window.electronAPI) {
-        let finalTranscript = transcript.split(SPLIT_POINT_MARKER).join(" ").trim();  // fallback
-        // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang
-        const llmNotReady = llmConfig?.provider === "custom" && getLLMWarmupStatus() !== "ready";
+        let finalTranscript = stripSplitMarkers(transcript);  // fallback
+        // Skip LLM phase if custom server warm-up hasn't completed yet — avoids a long cold-load hang.
+        // "skipped" means the user turned warm-up off for this server, so call it directly.
+        const llmWarmup = getLLMWarmupStatus();
+        const llmNotReady = llmConfig?.provider === "custom" && llmWarmup !== "ready" && llmWarmup !== "skipped";
         if (llmConfig?.provider === "custom") {
           // Only warm-up-not-ready counts toward the streak — live call errors and
           // over-length rejections further down are surfaced via logs, not this warning.
@@ -183,7 +194,8 @@ function RecordingBar() {
               llmStatus = "rejected_over_length";
             } else {
               llmStatus = "ok";
-              finalTranscript = llmOutput!;
+              // The model is asked to drop the markers but may not (llm-pass.json keeps its raw output)
+              finalTranscript = stripSplitMarkers(llmOutput!);
               // Extend the Ollama model unload timer beyond the server default (~5 min unless configured)
               void pinOllamaKeepAlive(
                 getBaseUrl(llmConfig.apiUrl), llmConfig.apiKey, llmConfig.model,

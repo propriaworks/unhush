@@ -68,6 +68,42 @@ function ProviderHelpLink({ provider }: { provider: Provider }) {
   );
 }
 
+// Per-server switch for the warm-up requests ensureCustomServices() sends (see its Phase 2).
+// On by default; stored as "false" only when switched off.
+function WarmupToggle({ storageKey, examples }: { storageKey: string; examples: string }) {
+  const [enabled, setEnabled] = useState(() => localStorage.getItem(storageKey) !== "false");
+  const choose = (on: boolean) => {
+    setEnabled(on);
+    localStorage.setItem(storageKey, String(on));
+  };
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <label className="text-white/70 text-xs font-medium">Warm up model before recording</label>
+        <div className="flex gap-2">
+          {([true, false] as const).map((on) => (
+            <button
+              key={String(on)}
+              type="button"
+              onClick={() => choose(on)}
+              className={`py-1 px-3 rounded-lg text-xs font-medium transition-all ${
+                enabled === on
+                  ? "bg-primary-500 text-white"
+                  : "bg-white/5 text-white/60 hover:bg-white/10"
+              }`}
+            >
+              {on ? "On" : "Off"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-white/40 text-xs mt-1">
+        For local servers that unload idle models ({examples}). Turn off for hosted APIs, which bill each warm-up request.
+      </p>
+    </div>
+  );
+}
+
 function Settings() {
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
@@ -485,6 +521,7 @@ function Settings() {
                     />
                     <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running; may re-run every couple of minutes while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                   </div>
+                  <WarmupToggle storageKey="unhush_custom_warmup" examples="e.g. Speaches" />
                 </>
               )}
             </div>
@@ -808,6 +845,7 @@ function Settings() {
                         />
                         <p className="text-white/40 text-xs mt-1">Shell command to start this service if it&apos;s not running; may re-run every couple of minutes while it&apos;s down, so avoid one that launches a duplicate (e.g. &quot;docker compose up&quot;, not &quot;docker run&quot;).</p>
                       </div>
+                      <WarmupToggle storageKey="unhush_llm_custom_warmup" examples="e.g. Ollama, llama.cpp" />
                     </>
                   )}
                 </>

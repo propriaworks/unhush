@@ -196,6 +196,13 @@ function logStartup() {
 
 initLogging();
 
+// An uncaught exception in this process otherwise leaves no trace in the log: Electron only shows
+// its error dialog. The monitor event observes without changing that (unlike an
+// "uncaughtException" listener, which would suppress Electron's default handling).
+process.on("uncaughtExceptionMonitor", (err) => {
+  log("error", `uncaught exception in main process: ${err?.stack || err}`);
+});
+
 // No X11 display server yet? Exit now, cleanly, and let whoever started us try again.
 //
 // At login the systemd --user unit is started the moment logind opens the PAM session, which can

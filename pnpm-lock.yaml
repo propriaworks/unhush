@@ -33,7 +33,7 @@ importers:
         specifier: ^10.0.5
         version: 10.0.5
       electron:
-        specifier: ~43.5.1
+        specifier: 43.5.1
         version: 43.5.1
       electron-builder:
         specifier: ^26.15.3
