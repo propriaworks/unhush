@@ -118,13 +118,17 @@ const WARNING_MESSAGES = {
     config: "Missing transcription API key or model — check Settings",
     badurl: "Transcription API URL is invalid — check Settings",
     runtime: "Transcription failing — check your provider/server",
-    unreachable: "Local transcription server unreachable — check it's running",
+    // "unreachable_local" when warm-up is on (a local server that unloads idle models), else
+    // "unreachable" — a custom endpoint may just as well be a hosted API.
+    unreachable: "Custom transcription server unreachable — check the URL and your connection",
+    unreachable_local: "Local transcription server unreachable — check it's running",
   },
   formatter: {
     config: "Missing LLM API key or model — check Settings",
     badurl: "LLM API URL is invalid — check Settings",
     warmup: "LLM formatting unavailable — using raw transcript",
-    unreachable: "Local LLM server unreachable — check it's running",
+    unreachable: "Custom LLM server unreachable — check the URL and your connection",
+    unreachable_local: "Local LLM server unreachable — check it's running",
   },
 };
 
@@ -279,9 +283,8 @@ async function registerShortcut(shortcut) {
     await waylandShortcut.startPortal(
       shortcut,
       () => {
-        log("info", "portal shortcut fired");
         lastHotkeyAt = Date.now();
-        toggleRecording();
+        toggleRecording("portal shortcut");
       },
       // The tray menu names the key, so it has to follow the desktop's editor too.
       () => updateTrayMenu(),
@@ -298,9 +301,8 @@ async function registerShortcut(shortcut) {
 
   try {
     const ok = await globalShortcut.register(shortcut, () => {
-      log("debug", `global shortcut fired: ${shortcut}`);
       lastHotkeyAt = Date.now();
-      toggleRecording();
+      toggleRecording(`global shortcut ${shortcut}`);
     });
     shortcutRegistered = ok !== false;
   } catch (e) {
@@ -355,7 +357,7 @@ function updateTrayMenu() {
       // On the portal path the live key is whatever the desktop says it is -- the user may have
       // added their own trigger and unchecked ours, and an empty description means there is no trigger.
       label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
-      click: () => { toggleRecording(); },
+      click: () => { toggleRecording("tray menu"); },
     },
     { type: "separator" },
     ...warningLines.map((label) => ({ label, enabled: false })),
@@ -417,12 +419,14 @@ function hideBar() {
   mainWindow.setAlwaysOnTop(false);
 }
 
-// Toggle recording: show+record or stop+hide
-function toggleRecording() {
+// Toggle recording: show+record or stop+hide. `source` names the trigger, for the log: every
+// start/stop gets one info line, so the rest of a recording's log lines can be placed in time.
+function toggleRecording(source) {
   // The only way a delivered hotkey/fifo command can still do nothing: say so rather than no-op
   // silently, since from outside that is indistinguishable from the trigger never arriving.
-  if (!mainWindow) log("warn", "toggleRecording: no main window, ignoring");
+  if (!mainWindow) log("warn", `toggleRecording (${source}): no main window, ignoring`);
   if (mainWindow) {
+    log("info", `toggle recording (${source}): ${isRecording ? "stop" : "start"}`);
     if (!isRecording) {
       showBar();
       mainWindow.webContents.send("start-recording");
@@ -639,7 +643,7 @@ function createTray() {
   updateTrayMenu();
 
   tray.on("click", () => {
-    toggleRecording();
+    toggleRecording("tray click");
   });
 }
 
@@ -1013,7 +1017,7 @@ if (!gotTheLock) {
   app.on("second-instance", () => {
     log("info", "Received second-instance signal: toggling recording");
     if (mainWindow) {
-      toggleRecording();
+      toggleRecording("second instance");
     }
   });
 
@@ -1033,7 +1037,7 @@ if (!gotTheLock) {
       process.stderr.write(`Unhush ${app.getVersion()} started — look for the tray icon.\n`);
     }
     checkOutputPath();
-    commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording(); } });
+    commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording("fifo"); } });
 
     // The renderer normally supplies the accelerator (it holds the stored setting) by calling
     // update-shortcut as it mounts, and that first call is what binds the portal shortcut. If the

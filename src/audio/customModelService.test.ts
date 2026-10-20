@@ -198,6 +198,33 @@ describe("ensureCustomServices — Phase 1 in-flight dedup", () => {
   });
 });
 
+describe("ensureCustomServices — unreachable warning wording", () => {
+  const warn = () =>
+    (window as unknown as { electronAPI: { setTranscriptionWarning: ReturnType<typeof vi.fn> } })
+      .electronAPI.setTranscriptionWarning;
+
+  it("raises the local-server variant when warm-up is on", async () => {
+    setupCustomTranscription({ url: "http://localhost:9030", model: "test-model" });
+    vi.stubGlobal("fetch", makeFetchMock(() => ({ ok: false })));
+
+    await mod.ensureCustomServices(noopLog);
+
+    expect(warn()).toHaveBeenCalledWith("unreachable_local", true);
+    expect(warn()).toHaveBeenCalledWith("unreachable", false);
+  });
+
+  it("raises the generic variant when warm-up is off, and clears the local one", async () => {
+    setupCustomTranscription({ url: "https://api.example.com", model: "test-model" });
+    localStorage.setItem("unhush_custom_warmup", "false");
+    vi.stubGlobal("fetch", makeFetchMock(() => ({ ok: false })));
+
+    await mod.ensureCustomServices(noopLog);
+
+    expect(warn()).toHaveBeenCalledWith("unreachable", true);
+    expect(warn()).toHaveBeenCalledWith("unreachable_local", false);
+  });
+});
+
 describe("ensureCustomServices — Phase 2 warm-up gating", () => {
   it("skips warm-up when the last health check found the baseUrl unreachable", async () => {
     setupCustomTranscription({ url: "http://localhost:9005", model: "test-model" }); // no Start Command

@@ -497,12 +497,12 @@ When transcription fails, Unhush plays a buzzer sound, displays the error messag
 
 | Message | Likely cause |
 |---------|-------------|
-| `Whisper server unreachable` | Custom server isn't running. Set a **Start Command** in Settings, or start it manually |
+| `Transcription server unreachable` | Custom (Whisper) TTS server is down, its URL is wrong, or there's no network connection. For a local server, set a **Start Command** in Settings, or start it manually |
 | `Network error` | No internet connection (Groq/OpenAI), or blocked by IP address |
 | `Bad API key` | API key is missing or invalid — check Settings |
 | `Rate limited` | Hit the provider's rate limit — wait a moment and retry |
 | `Bad endpoint URL` | Custom URL is wrong — it should be just the server's base URL, e.g. `http://localhost:8000` (no `/v1/...` path) |
-| `Whisper server error` | Server returned 5xx — check the server's own logs |
+| `Transcription server error` | Server returned 5xx — check the server's own logs |
 </details>
 
 <details>
