@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc  # v2.6.0
+      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36  # v2.7.0
         with:
           scan-args: --lockfile=pnpm-lock.yaml
 
@@ -40,7 +40,7 @@ jobs:
         with:
           version: 10  # pnpm 9 predates minimumReleaseAge (pnpm-workspace.yaml); 10.x still uses lockfileVersion 9.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: '22'
 
@@ -72,7 +72,7 @@ jobs:
         with:
           version: 10  # pnpm 9 predates minimumReleaseAge (pnpm-workspace.yaml); 10.x still uses lockfileVersion 9.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: '22'
 
@@ -120,7 +120,7 @@ jobs:
         run: scripts/smoke-test.sh dev
 
       - name: Upload packages
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: linux-packages
           path: |
@@ -162,7 +162,7 @@ jobs:
         run: pnpm run build && pnpm exec electron-builder --linux AppImage pacman --publish never
 
       - name: Upload Arch packages
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v4
         with:
           name: arch-packages
           path: |
@@ -185,7 +185,7 @@ jobs:
           # Use a token with push rights so the commit can trigger Pages deployment
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: '22'
           # No pnpm needed — script only uses built-in Node modules
@@ -213,13 +213,13 @@ jobs:
       contents: write
     steps:
       - name: Download Linux packages
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v4
         with:
           name: linux-packages
           path: release/
 
       - name: Download Arch packages
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v4
         with:
           name: arch-packages
           path: release/
