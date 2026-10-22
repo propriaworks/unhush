@@ -154,6 +154,23 @@ On X11, `xprop` is usually already installed (it's a base X11 utility). The pack
 3. Press your *hotkey* or the icon again to stop — a second chime plays and a thinking indicator appears while your speech is transcribed
 4. Text is delivered to your cursor — pasted instantly by default (see Output mode in Settings)
 
+### Cancelling a Dictation (local customization)
+
+Press **Escape** while starting, recording, transcribing, or formatting to cancel the
+current dictation without inserting its text. You can also select **Cancel Dictation
+(Esc)** from the system tray menu. Escape is released when dictation finishes or is
+cancelled, so it works normally in other applications while Unhush is idle.
+
+Cancellation replaces the recording window's document, releasing its microphone and
+aborting its pending requests and retry timers. Late output from the old document is
+rejected. The next recording starts with a fresh audio pipeline; settings and the last
+successfully delivered transcript are preserved. Requests already received by a provider
+may still be processed and billed. Text already inserted cannot be recalled.
+
+This patch uses Electron's global Escape shortcut, verified on X11. If registration
+fails (including on unsupported Wayland configurations), use the tray menu instead.
+Upstream updates can overwrite this local customization.
+
 ### Choosing a Microphone
 
 Unhush records from your **system default input device**. To use a different microphone, change the default in your desktop's sound settings (GNOME: Settings → Sound → Input; KDE: System Settings → Sound), with `pavucontrol` (Input Devices → set fallback), or from a terminal:

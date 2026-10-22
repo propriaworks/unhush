@@ -24,6 +24,7 @@ const clipboardAccess = require("./clipboardAccess.cjs");
 const waylandClipboard = require("./waylandClipboard.cjs");
 const niriWindowRule = require("./niriWindowRule.cjs");
 const textOutput = require("./textOutput.cjs");
+const { createDictationCancellation } = require("./dictationCancellation.cjs");
 const fs = require("fs");
 const os = require("os");
 
@@ -297,6 +298,7 @@ async function registerShortcut(shortcut) {
   if (shortcut === currentShortcut && shortcutRegistered) return;
 
   globalShortcut.unregisterAll();
+  dictationCancellation.refreshShortcut();
   shortcutRegistered = false;
 
   try {
@@ -359,6 +361,11 @@ function updateTrayMenu() {
       label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
       click: () => { toggleRecording("tray menu"); },
     },
+    {
+      label: "Cancel Dictation (Esc)",
+      enabled: barShown,
+      click: () => dictationCancellation.cancel(),
+    },
     { type: "separator" },
     ...warningLines.map((label) => ({ label, enabled: false })),
     ...(warningLines.length ? [{ type: "separator" }] : []),
@@ -404,9 +411,31 @@ function setRecordingActive(active) {
 // Niri can't do that (see niriWindowRule.cjs), so there it really is hidden and shown, without
 // taking focus.
 let barShown = false; // from a recording's start until the renderer asks to hide the bar
+let recordingBarOffset = 45;
+let cancellationRecovering = false;
+const dictationCancellation = createDictationCancellation({
+  shortcuts: globalShortcut,
+  getWindow: () => mainWindow,
+  onCancel: () => {
+    setRecordingActive(false);
+    hideBar();
+  },
+  replaceWindow: () => {
+    cancellationRecovering = true;
+    const previous = mainWindow;
+    mainWindow = null; // reject queued IPC from the cancelled document immediately
+    previous?.destroy();
+    // Keep localStorage as-is; settings.json is only an initial-launch import.
+    createWindow(recordingBarOffset, false);
+    mainWindow.webContents.once("did-finish-load", () => { cancellationRecovering = false; });
+  },
+  log,
+});
 
 function showBar() {
   barShown = true;
+  dictationCancellation.setActive(true);
+  updateTrayMenu();
   if (session.isNiri()) mainWindow.showInactive();
   mainWindow.setIgnoreMouseEvents(false);
   mainWindow.setAlwaysOnTop(true);
@@ -414,6 +443,8 @@ function showBar() {
 
 function hideBar() {
   barShown = false;
+  dictationCancellation.setActive(false);
+  updateTrayMenu();
   if (session.isNiri()) mainWindow.hide();
   mainWindow.setIgnoreMouseEvents(true);
   mainWindow.setAlwaysOnTop(false);
@@ -422,6 +453,10 @@ function hideBar() {
 // Toggle recording: show+record or stop+hide. `source` names the trigger, for the log: every
 // start/stop gets one info line, so the rest of a recording's log lines can be placed in time.
 function toggleRecording(source) {
+  if (cancellationRecovering) {
+    log("info", "toggle recording ignored: recovering after cancellation");
+    return;
+  }
   // The only way a delivered hotkey/fifo command can still do nothing: say so rather than no-op
   // silently, since from outside that is indistinguishable from the trigger never arriving.
   if (!mainWindow) log("warn", `toggleRecording (${source}): no main window, ignoring`);
@@ -475,7 +510,8 @@ async function waitForWindowManager(timeoutMs = 15000) {
   }
 }
 
-function createWindow(offsetFromBottom) {
+function createWindow(offsetFromBottom = recordingBarOffset, importSettings = true) {
+  recordingBarOffset = offsetFromBottom;
   const { screen } = require("electron");
   const { x: areaX, y: areaY, width, height } = screen.getPrimaryDisplay().workArea;
   const winWidth = 340;
@@ -538,6 +574,7 @@ function createWindow(offsetFromBottom) {
   const settingsFilePath = path.join(app.getPath("userData"), "settings.json");
   mainWindow.webContents.once("did-finish-load", () => {
     try {
+      if (!importSettings) return;
       const cfg = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
       for (const [key, value] of Object.entries(cfg)) {
         const lsKey = `unhush_${key}`;
@@ -648,8 +685,8 @@ function createTray() {
 }
 
 // IPC Handlers
-ipcMain.handle("hide-window", async () => {
-  if (mainWindow) {
+ipcMain.handle("hide-window", async (event) => {
+  if (dictationCancellation.acceptsSender(event.sender)) {
     hideBar();
     setRecordingActive(false);
   }
@@ -660,7 +697,10 @@ ipcMain.handle("copy-to-clipboard", async (event, text) => {
   return true;
 });
 
-ipcMain.handle("output-text", (event, text, method) => textOutput.outputText(text, method));
+ipcMain.handle("output-text", (event, text, method) => {
+  if (!dictationCancellation.acceptsSender(event.sender)) return false;
+  return textOutput.outputText(text, method);
+});
 
 ipcMain.on("log", (_event, level, message) => {
   log(level, message);
@@ -720,6 +760,7 @@ ipcMain.handle("get-default-mic-source", () => {
 });
 
 ipcMain.on("set-recording-state", (event, state) => {
+  if (!dictationCancellation.acceptsSender(event.sender)) return;
   setRecordingActive(state);
 });
 
