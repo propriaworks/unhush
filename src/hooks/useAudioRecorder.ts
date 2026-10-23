@@ -20,6 +20,7 @@ interface UseAudioRecorderReturn {
   stopRecording: (separator?: string, signal?: AbortSignal) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
   playErrorSound: () => void;
+  playCancelSound: () => void;
   releaseMic: () => void;
 }
 
@@ -149,7 +150,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.stop(now + 0.2);
   }, []);
 
-  const playChime = useCallback((frequency: number): Promise<void> => {
+  // A glide when endFrequency differs (the cancel sound); a steady tone otherwise.
+  const playChime = useCallback((frequency: number, endFrequency = frequency): Promise<void> => {
     if (localStorage.getItem("unhush_chimes_enabled") === "false") return Promise.resolve();
     const ctx = audioContextRef.current;
     if (!ctx) return Promise.resolve();
@@ -158,8 +160,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.type = "sine";
-    osc.frequency.value = frequency;
     const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(frequency, now);
+    osc.frequency.exponentialRampToValueAtTime(endFrequency, now + 0.18);
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
@@ -167,6 +170,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.stop(now + 0.18);
     return new Promise<void>((resolve) => { osc.onended = () => resolve(); });
   }, []);
+
+  // A falling one-octave glide: distinct from the start/stop chimes, and unlike the error buzz, not a failure
+  const playCancelSound = useCallback(() => { void playChime(880, 440); }, [playChime]);
 
   const startAudioLevelMonitoring = useCallback(() => {
     const analyser = analyserRef.current;
@@ -541,11 +547,18 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       return null;
     }
 
-    playChime(660);
+    // Cancelling abandons the queue: requests in flight are aborted and nothing more is sent. A
+    // signal aborted already is a discard of the recording itself, so the queue is cancelled
+    // here, before the flush below would send the recording's unsent tail.
+    const queue = whisperQueueRef.current;
+    if (signal?.aborted) queue?.cancel();
+    else signal?.addEventListener("abort", () => queue?.cancel(), { once: true });
+
+    if (!signal?.aborted) playChime(660); // a discard has its own sound (see RecordingBar's handleCancel)
     stopAudioLevelMonitoring();
     setIsRecording(false);
     // Disable auto-stop callback — from here, rejectFinalize surfaces errors instead
-    if (whisperQueueRef.current) whisperQueueRef.current.onFatalError = null;
+    if (queue) queue.onFatalError = null;
 
     // config was validated at recording start
     const config = getTranscriptionConfig();
@@ -579,10 +592,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           return null;
         }
 
-        const queue = whisperQueueRef.current!;
-        signal?.addEventListener("abort", () => queue.cancel(), { once: true });
         setTranscriptionProgress({ completed: 0, total: totalSegments });
-        transcript = await queue.finalize(totalSegments, separator);
+        transcript = await queue!.finalize(totalSegments, separator);
 
         if (debugSessionRef.current) {
           const lines: string[] = [];
@@ -618,6 +629,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
         saveDebugBlob(audioBlob, `full-recording.${ext}`);
 
+        signal?.throwIfAborted(); // a discarded recording is never sent
         setTranscriptionProgress({ completed: 0, total: 1 });
         transcript = await transcribeAudioBlob(audioBlob, config, undefined, signal);
         setTranscriptionProgress({ completed: 1, total: 1 });
@@ -665,6 +677,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     stopRecording,
     saveDebugBlob,
     playErrorSound,
+    playCancelSound,
     releaseMic,
   };
 }

@@ -15,6 +15,7 @@ declare global {
     electronAPI: {
       onStartRecording: (callback: () => void) => void;
       onStopRecording: (callback: () => void) => void;
+      onCancelRecording: (callback: () => void) => void;
       setRecordingState: (state: boolean) => void;
       getRecordingState: () => Promise<boolean>;
       // Name of the source the system "default" mic resolves to ("" if unknown/not Linux)

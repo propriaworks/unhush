@@ -25,6 +25,7 @@ function RecordingBar() {
   const cancelRef = useRef<AbortController | null>(null); // aborts the transcription in progress
   const isStartingRef = useRef(false);   // true while startRecording() is in flight
   const deferredStopRef = useRef(false); // stop requested before startup finished
+  const discardRef = useRef(false);      // the pending stop is a cancel: output and keep nothing
   // Mirrors isTranscribing for the start guard below. A ref, not the state value: a toggle
   // arriving microseconds after the stop that set it must see it, and state isn't readable
   // by an already-created callback until React has re-rendered.
@@ -41,6 +42,7 @@ function RecordingBar() {
     stopRecording,
     saveDebugBlob,
     playErrorSound,
+    playCancelSound,
     releaseMic,
   } = useAudioRecorder();
 
@@ -141,6 +143,19 @@ function RecordingBar() {
     return () => window.electronAPI?.removeAllListeners("recheck-config");
   }, [checkConfigWarnings, recheckAfterSettingsClose]);
 
+  // The bar's ×: abandons the transcription in progress. Requests are aborted, and anything
+  // that can't be is no longer waited on, so handleStopRecording() finishes at once.
+  // `what` is for the log: also used to discard a recording (see handleCancelRequest).
+  const handleCancel = useCallback((what: "transcription" | "recording") => {
+    const cancel = cancelRef.current;
+    if (!cancel || cancel.signal.aborted) return;
+    window.electronAPI?.log("info", `${what} cancelled by user`);
+    cancel.abort();
+    playCancelSound();
+    setOverlayVisible(false);
+    window.electronAPI?.hideWindow();
+  }, [playCancelSound]);
+
   const handleStopRecording = useCallback(async () => {
     if (isStartingRef.current) {
       // Startup still in progress — defer; handleStartRecording will call us when ready
@@ -164,6 +179,12 @@ function RecordingBar() {
     const cancel = new AbortController();
     cancelRef.current = cancel;
     const { signal } = cancel;
+    if (discardRef.current) {
+      // Cancelled while recording: aborted before stopRecording() starts, so nothing more is sent,
+      // and unlike a cancel during processing, nothing is kept for "Copy last" either
+      discardRef.current = false;
+      handleCancel("recording");
+    }
     let transcript: string | null = null; // kept for "Copy last" if formatting is cancelled
 
     try {
@@ -289,18 +310,7 @@ function RecordingBar() {
       isTranscribingRef.current = false;
       setIsTranscribing(false);
     }
-  }, [stopRecording]);
-
-  // The bar's ×: abandons the transcription in progress. Requests are aborted, and anything
-  // that can't be is no longer waited on, so handleStopRecording() finishes at once.
-  const handleCancel = useCallback(() => {
-    const cancel = cancelRef.current;
-    if (!cancel || cancel.signal.aborted) return;
-    window.electronAPI?.log("info", "transcription cancelled by user");
-    cancel.abort();
-    setOverlayVisible(false);
-    window.electronAPI?.hideWindow();
-  }, []);
+  }, [stopRecording, handleCancel]);
 
   const handleStartRecording = useCallback(async () => {
     // A toggle landing while the previous transcript is still being produced must not open a
@@ -321,9 +331,11 @@ function RecordingBar() {
       // mic could open. The in-flight startRecording() will deliver the recording the user ended
       // up asking for, so cancel the stop it deferred rather than opening a second one on top.
       deferredStopRef.current = false;
+      discardRef.current = false;
       return;
     }
     deferredStopRef.current = false;
+    discardRef.current = false;
     isStartingRef.current = true;
     try {
       setError(null);
@@ -355,6 +367,24 @@ function RecordingBar() {
     }
   }, [startRecording, playErrorSound, handleStopRecording, checkConfigWarnings]);
 
+  // A cancel from outside the bar (the command fifo's "cancel"). Once recording has stopped it is
+  // the ×. Before that, the recording is discarded: transcription requests in flight are aborted,
+  // the audio not yet sent never is, and no text is output or kept.
+  const handleCancelRequest = useCallback(() => {
+    if (isTranscribingRef.current) {
+      handleCancel("transcription");
+    } else if (isStartingRef.current) {
+      // handleStartRecording() runs the deferred stop as soon as the mic is open
+      discardRef.current = true;
+      deferredStopRef.current = true;
+    } else if (isRecording) {
+      discardRef.current = true;
+      handleStopRecording();
+    } else {
+      window.electronAPI?.log("info", "cancel: no recording or transcription in progress, ignoring");
+    }
+  }, [isRecording, handleCancel, handleStopRecording]);
+
   // Listen for Electron events
   useEffect(() => {
     if (window.electronAPI) {
@@ -367,12 +397,15 @@ function RecordingBar() {
         handleStopRecording();
       });
 
+      window.electronAPI.onCancelRecording(handleCancelRequest);
+
       return () => {
         window.electronAPI.removeAllListeners("start-recording");
         window.electronAPI.removeAllListeners("stop-recording");
+        window.electronAPI.removeAllListeners("cancel-recording");
       };
     }
-  }, [handleStartRecording, handleStopRecording]);
+  }, [handleStartRecording, handleStopRecording, handleCancelRequest]);
 
   // One-shot startup handoff to the main process. Deliberately kept out of the effect above, whose
   // dependencies chain back to isRecording (handleStartRecording -> startRecording), so it re-ran
@@ -430,7 +463,7 @@ function RecordingBar() {
           {cancelVisible && (
             <button
               type="button"
-              onClick={handleCancel}
+              onClick={() => handleCancel("transcription")}
               title="Cancel"
               aria-label="Cancel transcription"
               className="w-6 h-6 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/15 text-lg leading-none"

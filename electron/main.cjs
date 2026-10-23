@@ -451,6 +451,16 @@ function toggleRecording(source) {
   }
 }
 
+// Cancel the dictation in progress, whatever its phase: the renderer knows which one it is in
+// (see handleCancelRequest in RecordingBar.tsx). With no bar up there is nothing to cancel.
+function cancelDictation(source) {
+  if (!mainWindow || !barShown) {
+    log("info", `cancel (${source}): no dictation in progress, ignoring`);
+    return;
+  }
+  mainWindow.webContents.send("cancel-recording");
+}
+
 // If a transparent window is created before the desktop's compositor exists, it is painted opaque
 // black and stays that way for the life of the process. At login that is easy to hit: our unit
 // starts when logind opens the PAM session, several seconds before the session's window manager.
@@ -1093,7 +1103,10 @@ if (!gotTheLock) {
       process.stderr.write(`Unhush ${app.getVersion()} started — look for the tray icon.\n`);
     }
     checkOutputPath();
-    commandFifo.start({ toggle: () => { lastHotkeyAt = Date.now(); toggleRecording("fifo"); } });
+    commandFifo.start({
+      toggle: () => { lastHotkeyAt = Date.now(); toggleRecording("fifo"); },
+      cancel: () => cancelDictation("fifo"),
+    });
 
     // The renderer normally supplies the accelerator (it holds the stored setting) by calling
     // update-shortcut as it mounts, and that first call is what binds the portal shortcut. If the
