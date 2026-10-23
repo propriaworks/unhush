@@ -9,7 +9,7 @@ export const TRANSCRIPTION_TIMEOUT_MS = 90_000;
 
 export class TranscriptionTimeoutError extends Error {}
 
-import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidCustomEndpoint, customEndpointUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -40,10 +40,10 @@ export function getTranscriptionConfig(): TranscriptionConfig {
       model: "whisper-1",
     };
   } else {
-    const base = getBaseUrl(localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL);
     return {
       apiKey: localStorage.getItem("unhush_custom_key") || "",
-      apiUrl: `${base}${TRANSCRIPTIONS_PATH}`,
+      apiUrl: customEndpointUrl(localStorage.getItem("unhush_custom_url") || "",
+        TRANSCRIPTION_DEFAULT_CUSTOM_URL, TRANSCRIPTIONS_PATH),
       model: localStorage.getItem("unhush_custom_model") || "",
     };
   }
@@ -56,7 +56,7 @@ export function validateTranscriptionConfig(config: TranscriptionConfig): Config
     if (!(config.apiUrl && config.model)) {
       return { reasonKey: "config", message: "API URL or model is unset.\nOpen Settings from tray." };
     }
-    if (!isValidHttpUrl(config.apiUrl)) {
+    if (!isValidCustomEndpoint(config.apiUrl, TRANSCRIPTIONS_PATH)) {
       return { reasonKey: "badurl", message: "API URL is invalid.\nOpen Settings from tray." };
     }
   } else if (!config.apiKey) {

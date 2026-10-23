@@ -19,7 +19,7 @@ export const LLM_DEFAULT_MODELS: Record<"groq" | "openai", string> = {
 // Server prefix — Settings stores just this; the /v1/... path is appended below.
 export const LLM_DEFAULT_CUSTOM_URL = "http://localhost:11434";
 
-import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, CHAT_COMPLETIONS_PATH } from "./customModelService";
+import { PROVIDER_BASE_URLS, isValidCustomEndpoint, customEndpointUrl, CHAT_COMPLETIONS_PATH } from "./customModelService";
 import type { ConfigValidationError } from "./transcriptionApi";
 export { PROVIDER_BASE_URLS };
 
@@ -82,8 +82,8 @@ export function getLLMConfig(): LLMConfig | null {
   const getApiUrl = () => {
     if (provider === "groq") return `${PROVIDER_BASE_URLS.groq}${CHAT_COMPLETIONS_PATH}`;
     if (provider === "openai") return `${PROVIDER_BASE_URLS.openai}${CHAT_COMPLETIONS_PATH}`;
-    const base = getBaseUrl(localStorage.getItem("unhush_llm_custom_url") || LLM_DEFAULT_CUSTOM_URL);
-    return `${base}${CHAT_COMPLETIONS_PATH}`;
+    return customEndpointUrl(localStorage.getItem("unhush_llm_custom_url") || "",
+      LLM_DEFAULT_CUSTOM_URL, CHAT_COMPLETIONS_PATH);
   };
 
   const getModel = () => {
@@ -119,7 +119,7 @@ export function validateLLMConfig(config: LLMConfig): ConfigValidationError | nu
     if (!(config.apiUrl && config.model)) {
       return { reasonKey: "config", message: "Custom LLM API URL or model is unset." };
     }
-    if (!isValidHttpUrl(config.apiUrl)) {
+    if (!isValidCustomEndpoint(config.apiUrl, CHAT_COMPLETIONS_PATH)) {
       return { reasonKey: "badurl", message: "Custom LLM API URL is invalid." };
     }
   } else if (!config.apiKey) {

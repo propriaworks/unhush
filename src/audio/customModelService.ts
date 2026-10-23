@@ -133,6 +133,20 @@ export function getBaseUrl(url: string): string {
 
 /** True if `url` parses as an absolute http/https URL (e.g. rejects blank, malformed,
  * or non-http(s) values like a bare hostname or a "file:" URL). */
+/** The endpoint a custom server's "Server URL" setting resolves to: the value as typed (the
+ * default if blank), reduced to its server prefix, plus `path`. Shared by the request configs
+ * and Settings, so Settings flags exactly what the "badurl" config check rejects. */
+export function customEndpointUrl(setting: string, fallback: string, path: string): string {
+  return `${getBaseUrl(setting || fallback)}${path}`;
+}
+
+/** Whether a URL from customEndpointUrl() is usable: its server prefix must be a valid http(s)
+ * URL on its own. Checking the whole URL would let the appended path rescue a broken prefix:
+ * "http://" becomes "http:///v1/audio/transcriptions", which parses with host "v1". */
+export function isValidCustomEndpoint(url: string, path: string): boolean {
+  return url.endsWith(path) && isValidHttpUrl(url.slice(0, -path.length));
+}
+
 export function isValidHttpUrl(url: string): boolean {
   try {
     const parsed = new URL(url);

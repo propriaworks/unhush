@@ -106,7 +106,7 @@ describe("validateLLMConfig", () => {
     expect(validate()?.reasonKey).toBe("config");
   });
 
-  it.each(["localhost:11434", "not a url", "ftp://localhost:11434"])("custom: URL %j → badurl", (url) => {
+  it.each(["localhost:11434", "not a url", "ftp://localhost:11434", "http://", "https:"])("custom: URL %j → badurl", (url) => {
     localStorage.setItem("unhush_llm_provider", "custom");
     localStorage.setItem("unhush_llm_custom_url", url);
     localStorage.setItem("unhush_llm_model_custom", "qwen3:8b");

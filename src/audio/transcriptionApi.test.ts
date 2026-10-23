@@ -6,7 +6,7 @@ import {
   transcribeAudioBlob,
   validateTranscriptionConfig,
 } from "./transcriptionApi";
-import { PROVIDER_BASE_URLS, TRANSCRIPTIONS_PATH } from "./customModelService";
+import { PROVIDER_BASE_URLS, TRANSCRIPTIONS_PATH, customEndpointUrl, isValidCustomEndpoint } from "./customModelService";
 import { makeFetchMock, type FetchResult } from "./testFetchMock";
 
 beforeEach(() => {
@@ -83,12 +83,23 @@ describe("validateTranscriptionConfig", () => {
     expect(validate()?.reasonKey).toBe("config");
   });
 
-  it.each(["localhost:8000", "not a url", "ftp://localhost:8000"])("custom: URL %j → badurl", (url) => {
+  it.each(["localhost:8000", "not a url", "ftp://localhost:8000", "http://", "https:"])("custom: URL %j → badurl", (url) => {
     localStorage.setItem("unhush_provider", "custom");
     localStorage.setItem("unhush_custom_url", url);
     localStorage.setItem("unhush_custom_model", "whisper-small");
     expect(validate()?.reasonKey).toBe("badurl");
   });
+
+  // Settings' Server URL field (ServerUrlInput) turns red by the same computation
+  it.each(["localhost:8000", "not a url", "ftp://localhost:8000", "http://", "http://localhost:8000", ""])(
+    "custom: Settings' field check agrees with badurl for %j", (url) => {
+      localStorage.setItem("unhush_provider", "custom");
+      localStorage.setItem("unhush_custom_url", url);
+      localStorage.setItem("unhush_custom_model", "whisper-small");
+      const fieldInvalid =
+        !isValidCustomEndpoint(customEndpointUrl(url, TRANSCRIPTION_DEFAULT_CUSTOM_URL, TRANSCRIPTIONS_PATH), TRANSCRIPTIONS_PATH);
+      expect(fieldInvalid).toBe(validate()?.reasonKey === "badurl");
+    });
 
   it("custom: valid URL and model, no key needed → valid", () => {
     localStorage.setItem("unhush_provider", "custom");

@@ -4,6 +4,10 @@ import { TRANSCRIPTION_DEFAULT_CUSTOM_URL } from "../audio/transcriptionApi";
 import {
   PROVIDER_BASE_URLS,
   getBaseUrl,
+  customEndpointUrl,
+  isValidCustomEndpoint,
+  TRANSCRIPTIONS_PATH,
+  CHAT_COMPLETIONS_PATH,
   getCachedModels,
   refreshModels,
   formatTranscriptionHint,
@@ -101,6 +105,39 @@ function WarmupToggle({ storageKey, examples }: { storageKey: string; examples: 
         For local servers that unload idle models ({examples}). Turn off for hosted APIs, which bill each warm-up request.
       </p>
     </div>
+  );
+}
+
+// A custom server's "Server URL" field, red while its value is one the "badurl" config check
+// rejects (the same check). A saved bad value shows red as soon as Settings opens; a new one is
+// left alone while it's being typed, until the user first leaves the field, and is live from
+// then on, so fixing it clears the red as it's typed.
+function ServerUrlInput({ value, onChange, placeholder, fallback, path }: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder: string;
+  fallback: string; // the URL used when the field is blank
+  path: string;     // the endpoint appended to it
+}) {
+  const [typed, setTyped] = useState(false); // the user has edited it, so it's not the saved value
+  const [left, setLeft] = useState(false);   // ...and has left the field since
+  const invalid = (left || !typed) && !isValidCustomEndpoint(customEndpointUrl(value, fallback, path), path);
+  return (
+    <>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { setTyped(true); onChange(e); }}
+        onBlur={() => setLeft(true)}
+        spellCheck={false}
+        placeholder={placeholder}
+        aria-invalid={invalid}
+        className={`w-full bg-white/5 border rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none ${
+          invalid ? "border-red-400/70 focus:border-red-400" : "border-white/10 focus:border-primary-500"
+        }`}
+      />
+      {invalid && <p className="text-red-400 text-xs mt-1">Not a valid http:// or https:// URL</p>}
+    </>
   );
 }
 
@@ -460,6 +497,7 @@ function Settings() {
                     type={showPassword ? "text" : "password"}
                     value={currentKey}
                     onChange={persist(setCurrentKey, currentKeyStorageKey)}
+                    spellCheck={false}
                     placeholder={provider === "groq" ? "gsk_..." : provider === "openai" ? "sk-..." : "Bearer token (if required)"}
                     className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                   />
@@ -486,12 +524,12 @@ function Settings() {
                 <>
                   <div>
                     <label className="block text-white/70 text-xs font-medium mb-1">Server URL</label>
-                    <input
-                      type="text"
+                    <ServerUrlInput
                       value={customUrl}
                       onChange={persist(setCustomUrl, "unhush_custom_url")}
                       placeholder="http://localhost:8000"
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                      fallback={TRANSCRIPTION_DEFAULT_CUSTOM_URL}
+                      path={TRANSCRIPTIONS_PATH}
                     />
                   </div>
                   <div>
@@ -516,6 +554,7 @@ function Settings() {
                       type="text"
                       value={customStartCmd}
                       onChange={persist(setCustomStartCmd, "unhush_custom_start_cmd")}
+                      spellCheck={false}
                       placeholder="docker compose -f speaches-compose.yaml up --detach"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                     />
@@ -814,12 +853,12 @@ function Settings() {
                     <>
                       <div>
                         <label className="block text-white/70 text-xs font-medium mb-1">Server URL</label>
-                        <input
-                          type="text"
+                        <ServerUrlInput
                           value={llmCustomUrl}
                           onChange={persist(setLlmCustomUrl, "unhush_llm_custom_url")}
                           placeholder="http://localhost:11434"
-                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
+                          fallback={LLM_DEFAULT_CUSTOM_URL}
+                          path={CHAT_COMPLETIONS_PATH}
                         />
                       </div>
                       <div>
@@ -840,6 +879,7 @@ function Settings() {
                           type="text"
                           value={llmCustomStartCmd}
                           onChange={persist(setLlmCustomStartCmd, "unhush_llm_custom_start_cmd")}
+                          spellCheck={false}
                           placeholder="ollama serve"
                           className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
                         />
