@@ -106,6 +106,7 @@ let currentShortcut = "Ctrl+Alt+Space";
 let lastTranscript = null;
 let lastPasteDestination = null; // { app, title } | null — in-memory only, NEVER passed to log()
 let lastHotkeyAt = 0; // when the toggle hotkey last fired — for paste-failure diagnostics timing
+let outputMethod = null; // the renderer's, as last reported (see noteOutputMethod); null until then
 
 // What the tray's "Copy last" offers: every transcript output, and one whose formatting the
 // user cancelled (see "set-last-transcript").
@@ -358,11 +359,17 @@ function updateTrayMenu() {
   const warningLines = activeWarningLines();
   const contextMenu = Menu.buildFromTemplate([
     {
-      // On the portal path the live key is whatever the desktop says it is -- the user may have
-      // added their own trigger and unchecked ours, and an empty description means there is no trigger.
-      label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
-      click: () => { toggleRecording("tray menu"); },
+      label: "Settings",
+      click: () => { createSettingsWindow(); },
     },
+    { type: "separator" },
+    // Top-level rather than a submenu: Cinnamon's panel drew the submenu at the wrong size and place.
+    ...["paste", "type", "clipboard"].map((m) => ({
+      label: m.charAt(0).toUpperCase() + m.slice(1),
+      type: "radio",
+      checked: m === outputMethod,
+      click: () => { setOutputMethodFromTray(m); },
+    })),
     { type: "separator" },
     ...warningLines.map((label) => ({ label, enabled: false })),
     ...(warningLines.length ? [{ type: "separator" }] : []),
@@ -377,8 +384,10 @@ function updateTrayMenu() {
       { type: "separator" },
     ] : []),
     {
-      label: "Settings",
-      click: () => { createSettingsWindow(); },
+      // On the portal path the live key is whatever the desktop says it is -- the user may have
+      // added their own trigger and unchecked ours, and an empty description means there is no trigger.
+      label: `Toggle Recording${shortcutLabel() ? ` (${shortcutLabel()})` : ""}`,
+      click: () => { toggleRecording("tray menu"); },
     },
     { type: "separator" },
     {
@@ -741,6 +750,8 @@ const outputMethodKnown = new Promise((resolve) => { reportOutputMethod = resolv
 // Also keeps the setup window's Re-check honest if the user switches mode while it is open.
 function noteOutputMethod(method) {
   reportOutputMethod(method);
+  outputMethod = method;
+  updateTrayMenu();
   // Leaving Clipboard mode: the startup check skipped ydotool, so get the daemon going now rather
   // than on the first paste. Only on that transition, so at startup the setup check still runs the
   // uinput check before any daemon is started.
@@ -750,6 +761,19 @@ function noteOutputMethod(method) {
   setupIncludesYdotool = method !== "clipboard";
 }
 ipcMain.on("set-output-method", (event, method) => noteOutputMethod(method));
+
+// The tray's Output submenu. The renderer owns the setting, in localStorage, which every window
+// shares, so write it there as the settings.json loader does. An open Settings window is told too,
+// so its buttons follow (it reports back through set-output-method; noteOutputMethod is idempotent).
+function setOutputMethodFromTray(method) {
+  if (mainWindow) {
+    mainWindow.webContents.executeJavaScript(
+      `localStorage.setItem("unhush_output_method", ${JSON.stringify(method)})`
+    ).catch((err) => log("error", `tray: could not set output method: ${err.message}`));
+  }
+  if (settingsWindow) settingsWindow.webContents.send("set-output-method-ui-setting", method);
+  noteOutputMethod(method);
+}
 
 // The renderer's transcription/formatter provider status (see RecordingBar.checkConfigWarnings),
 // reported alongside the existing tray-warning IPC. Only the setup window needs it -- never an
