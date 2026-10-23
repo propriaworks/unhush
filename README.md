@@ -246,6 +246,19 @@ printf 'toggle\n' > "$XDG_RUNTIME_DIR/unhush.fifo"
 
 This is useful beyond Wayland — it lets you bind a key the Settings dropdown doesn't offer, or start and stop dictation from a script. The pipe is created mode 0600 inside your own runtime directory, and is removed when Unhush exits.
 
+Commands, one per line:
+
+| Command | Effect |
+|---|---|
+| `toggle` | Start recording, or stop it and output the transcript |
+| `cancel` | Cancel the dictation in progress. While recording, it is discarded: nothing more is sent for transcription and nothing is output. After recording has stopped, transcription and formatting are abandoned; a transcript that had already finished is still offered by the tray's **Copy last** |
+
+Unhush has no **cancel** keyboard shortcut of its own but you can add one by binding a key in your desktop's shortcut settings to:
+
+```sh
+sh -c 'printf "cancel\n" > "$XDG_RUNTIME_DIR/unhush.fifo"'
+```
+
 ## Auto-starting Unhush
 
 <details>
@@ -580,6 +593,8 @@ Most Wayland testing has been on KDE. Your experience with GNOME and Hyprland on
 Run `pnpm install` to install dependencies, or update them based upon a changed `package.json` (changes to lockfile are limited to what's needed to match `package.json`). `pnpm update` will also change the `package.json`, bumping versions to the newest matching versions (subject to minimum age from the workspace file). `pnpm up --latest -i` updates dependencies in `packages.json` to their latest major versions, ignoring prior version constraints; do rarely, in interactive mode to avoid disruptive upgrades and aptknow what needs to be tested/changed.
 
 Before committing check typescript with `pnpm tsc` and run tests with `pnpm test`.
+
+To try the app against a slow custom server (cancelling, the "loading model" hint, timeout retries), put `scripts/slow-proxy.py` between Unhush and the server: it holds real transcription and formatting requests for a set time, passes health checks and warm-ups straight through, and reports when the app aborts a held request. Usage is in its header.
 
 ### Fixing OSV-flagged subdependencies
 

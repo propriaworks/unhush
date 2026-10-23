@@ -63,7 +63,7 @@ function RecordingBar() {
   // processing, offer to cancel, and surface a "loading model" hint — the latter only when a
   // warm-up we actually know about is still pending, so this can't misfire as a generic "it's
   // just slow" message. A single check at the threshold is enough: cold loads run 10s-90s+, so
-  // if one is in flight at 3s it'll still be in flight, and this only needs to flip on, not
+  // if one is in flight at 2.5s it'll still be in flight, and this only needs to flip on, not
   // track progress after that.
   useEffect(() => {
     if (!isTranscribing) {
@@ -76,7 +76,7 @@ function RecordingBar() {
       if (getTranscriptionWarmupStatus() === "pending" || getLLMWarmupStatus() === "pending") {
         setSlowLoadHint(true);
       }
-    }, 3000);
+    }, 2500);
     return () => clearTimeout(timer);
   }, [isTranscribing]);
 
@@ -143,9 +143,9 @@ function RecordingBar() {
     return () => window.electronAPI?.removeAllListeners("recheck-config");
   }, [checkConfigWarnings, recheckAfterSettingsClose]);
 
-  // The bar's ×: abandons the transcription in progress. Requests are aborted, and anything
-  // that can't be is no longer waited on, so handleStopRecording() finishes at once.
-  // `what` is for the log: also used to discard a recording (see handleCancelRequest).
+  // Abandons the transcription in progress: requests are aborted, and anything that can't be is
+  // no longer waited on, so handleStopRecording() finishes at once. Reached through
+  // handleCancelRequest(), which also uses it to discard a recording; `what` is for the log.
   const handleCancel = useCallback((what: "transcription" | "recording") => {
     const cancel = cancelRef.current;
     if (!cancel || cancel.signal.aborted) return;
@@ -367,8 +367,8 @@ function RecordingBar() {
     }
   }, [startRecording, playErrorSound, handleStopRecording, checkConfigWarnings]);
 
-  // A cancel from outside the bar (the command fifo's "cancel"). Once recording has stopped it is
-  // the ×. Before that, the recording is discarded: transcription requests in flight are aborted,
+  // A cancel from the bar's × or the command fifo's "cancel". Once recording has stopped it
+  // abandons processing. Before that, the recording is discarded: transcription requests in flight are aborted,
   // the audio not yet sent never is, and no text is output or kept.
   const handleCancelRequest = useCallback(() => {
     if (isTranscribingRef.current) {
@@ -441,35 +441,22 @@ function RecordingBar() {
     if (isTranscribing) {
       const metalPill = { background: "linear-gradient(to bottom, #1a3dbe, #a0b4ff 50%, #1a3dbe)" };
       return (
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col items-center gap-1">
-            <div className="flex items-center gap-1.5 h-8">
-              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
-              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
-              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
-              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
-              <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
-            </div>
-            {transcriptionRetrying ? (
-              <span className="text-white/60 text-[13px] whitespace-nowrap">
-                Transcription timed out — retrying
-              </span>
-            ) : slowLoadHint && (
-              <span className="text-white/60 text-[13px] whitespace-nowrap">
-                Loading model after being idle — this can take a bit
-              </span>
-            )}
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1.5 h-8">
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite]" style={{ ...metalPill, height: '40%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.1s]" style={{ ...metalPill, height: '80%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ ...metalPill, height: '60%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.3s]" style={{ ...metalPill, height: '100%' }} />
+            <span className="w-1.5 rounded-full animate-[bounce_0.6s_infinite_0.4s]" style={{ ...metalPill, height: '50%' }} />
           </div>
-          {cancelVisible && (
-            <button
-              type="button"
-              onClick={() => handleCancel("transcription")}
-              title="Cancel"
-              aria-label="Cancel transcription"
-              className="w-6 h-6 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/15 text-lg leading-none"
-            >
-              ×
-            </button>
+          {transcriptionRetrying ? (
+            <span className="text-white/60 text-[13px] whitespace-nowrap">
+              Transcription timed out — retrying
+            </span>
+          ) : slowLoadHint && (
+            <span className="text-white/60 text-[13px] whitespace-nowrap">
+              Loading model after being idle — this can take a bit
+            </span>
           )}
         </div>
       );
@@ -482,14 +469,32 @@ function RecordingBar() {
     return <Waveform audioLevel={0} isRecording={false} />;
   };
 
+  // The ×: throughout recording, and once processing has run long enough to look stuck
+  const showCancel = !error && (isTranscribing ? cancelVisible : isRecording);
+
   return (
     <div className="w-full h-full flex items-center justify-center">
       {overlayVisible && (
         <div
-          className="flex items-center justify-center px-6 h-20 min-w-[198px] rounded-full ring-1 ring-white/10 shadow-xl"
+          className="relative flex items-center justify-center px-6 h-20 min-w-[198px] rounded-full ring-1 ring-white/10 shadow-xl"
           style={{ background: "rgba(14, 14, 22, 0.60)" }}
         >
           {renderContent()}
+          {showCancel && (
+            // A badge centred on the outline where the rounded end meets the top edge: with the
+            // pill's 40px radius that point is ~12px in from the top and right, so a 22px badge
+            // sits 1px in. The fill is near-opaque so the pill's ring doesn't show through it.
+            <button
+              type="button"
+              onClick={() => handleCancelRequest()}
+              title="Cancel"
+              aria-label={isTranscribing ? "Cancel transcription" : "Cancel recording"}
+              className="absolute top-px right-px w-[22px] h-[22px] rounded-full flex items-center justify-center ring-1 ring-white/10 text-orange-300/85 hover:ring-white/25 hover:text-orange-200 text-[15px] leading-none"
+              style={{ background: "rgba(24, 16, 20, 0.92)" }}
+            >
+              ×
+            </button>
+          )}
         </div>
       )}
     </div>
