@@ -23,6 +23,36 @@ interface UseAudioRecorderReturn {
   releaseMic: () => void;
 }
 
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: false,
+    // noiseSuppression: false,  // Keep noise suppression (on by default)
+    autoGainControl: false,
+  },
+};
+
+// getUserMedia rejects with DOMExceptions whose name (NotReadableError, NotFoundError...) says
+// more than the message
+function describeError(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+}
+
+// Open the default mic. On failure, restart Chromium's audio service and try once more: it
+// never reconnects to a sound server that restarted under it (see restart-audio-service in
+// electron/main.cjs), and a failed mic open is where that state first becomes visible.
+async function openMic(
+  wlog: (level: "warn", message: string) => void,
+): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+  } catch (err) {
+    if (!window.electronAPI?.restartAudioService) throw err;
+    wlog("warn", `Opening the microphone failed (${describeError(err)}) — restarting the audio service and retrying`);
+    if (!(await window.electronAPI.restartAudioService())) throw err;
+    return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+  }
+}
+
 export function useAudioRecorder(): UseAudioRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -306,15 +336,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           warm = false;
         }
       }
-      const stream = warm
-        ? streamRef.current!
-        : await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: false,
-              // noiseSuppression: false,  // Keep noise suppression (on by default)
-              autoGainControl: false,
-            },
-          });
+      const stream = warm ? streamRef.current! : await openMic(wlog);
       const tMic = Date.now();
       streamRef.current = stream;
       if (!warm) {
@@ -509,6 +531,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
     } catch (err) {
       console.error("Failed to start recording:", err);
+      wlog("error", `Failed to start recording: ${describeError(err)}`);
       throw err;
     }
   }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog, createVad, releaseMic]);

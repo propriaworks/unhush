@@ -734,6 +734,32 @@ ipcMain.handle("get-default-mic-source", () => {
   });
 });
 
+// Chromium's audio service opens its PulseAudio connection once and never reconnects. If the
+// sound server restarts underneath it (seen when a USB hub dropped the mic mid-stream and
+// PipeWire was killed), every later device query fails ("pa_operation is nullptr" on stderr)
+// and getUserMedia can't open a mic again. Killing the service is enough: Chromium relaunches
+// it, with a fresh connection, on the next audio request. Resolves true once the old one is gone.
+ipcMain.handle("restart-audio-service", async () => {
+  const service = app.getAppMetrics().find((m) => m.serviceName === "audio.mojom.AudioService");
+  if (!service) {
+    log("warn", "restart-audio-service: no out-of-process audio service found");
+    return false;
+  }
+  try {
+    process.kill(service.pid);
+  } catch (err) {
+    log("warn", `restart-audio-service: kill ${service.pid} failed: ${err.message}`);
+    return false;
+  }
+  // Wait until Chromium has registered the exit, so the caller's retry launches a fresh
+  // service instead of reaching the dying one (up to 1s; normally a few ms)
+  for (let i = 0; i < 20 && app.getAppMetrics().some((m) => m.pid === service.pid); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  log("info", `restart-audio-service: killed audio service (pid ${service.pid})`);
+  return true;
+});
+
 ipcMain.on("set-recording-state", (event, state) => {
   setRecordingActive(state);
 });
