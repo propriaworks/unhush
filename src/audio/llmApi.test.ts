@@ -106,7 +106,7 @@ describe("validateLLMConfig", () => {
     expect(validate()?.reasonKey).toBe("config");
   });
 
-  it.each(["localhost:11434", "not a url", "ftp://localhost:11434"])("custom: URL %j → badurl", (url) => {
+  it.each(["localhost:11434", "not a url", "ftp://localhost:11434", "http://", "https:"])("custom: URL %j → badurl", (url) => {
     localStorage.setItem("unhush_llm_provider", "custom");
     localStorage.setItem("unhush_llm_custom_url", url);
     localStorage.setItem("unhush_llm_model_custom", "qwen3:8b");
@@ -160,6 +160,16 @@ describe("postProcessTranscript", () => {
   ] as const)("%s: a failed connection → %j", async (provider, message) => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
     await expect(postProcessTranscript("hi", { ...config, provider })).rejects.toThrow(message);
+  });
+
+  it("passes a cancellation through instead of reporting the server as unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason));
+    })));
+    const cancel = new AbortController();
+    const result = postProcessTranscript("hi", { ...config, provider: "custom" }, cancel.signal);
+    cancel.abort();
+    await expect(result).rejects.toHaveProperty("name", "AbortError");
   });
 
   it("reports the API's error message with the endpoint and model", async () => {

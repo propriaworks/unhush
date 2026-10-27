@@ -57,13 +57,23 @@ chmod 755 /usr/local/bin/unhush-toggle
 # TAG+="uaccess" is the modern systemd/logind approach: no group membership or re-login needed.
 # GROUP/MODE provide a fallback for elogind-based non-systemd desktops.
 #
-# Fedora/Arch/Debian's own ydotool package ships /usr/lib/udev/rules.d/80-uinput.rules. Ours has
-# the same basename in /etc, which takes precedence, so this deliberately masks theirs.
-echo -e '## DO NOT EDIT -- managed by unhush app\n## enables writing to uinput for ydotool\nKERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
-  > /etc/udev/rules.d/80-uinput.rules
+# The number must sort before 73: 73-seat-late.rules is where udev runs the "uaccess" builtin that
+# actually grants the ACL, and only for devices already tagged by then. Up to systemd 257 logind
+# also applied ACLs itself at each login, so a later-numbered rule only took effect after a
+# re-login; since 258 logind leaves this to udev, so such a rule never takes effect at all.
+#
+# The unhush- name is ours alone, so we never overwrite or delete a uinput rule someone else
+# installed. Earlier versions wrote 80-uinput.rules instead (numbered too late, see above); remove
+# that only if it carries our marker. (remove after end-2026)
+UINPUT_RULE_MARKER='## DO NOT EDIT -- managed by unhush app'
+if grep -qxF "$UINPUT_RULE_MARKER" /etc/udev/rules.d/80-uinput.rules 2>/dev/null; then
+  rm -f /etc/udev/rules.d/80-uinput.rules
+fi
+echo -e "$UINPUT_RULE_MARKER"'\n## enables writing to uinput for ydotool\nKERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+  > /etc/udev/rules.d/70-unhush-uinput.rules
 udevadm control --reload-rules
 udevadm trigger --name-match=uinput 2>/dev/null || udevadm trigger --subsystem-match=misc
-# `udevadm trigger` only queues the uevents; logind applies the uaccess ACL asynchronously.
+# `udevadm trigger` only queues the uevents; udevd applies the uaccess ACL when it processes them.
 # Settle before returning, or Unhush might start before /dev/uinput is writable, tripping
 # its setup warning unnecessarily.
 udevadm settle --timeout=10 || true

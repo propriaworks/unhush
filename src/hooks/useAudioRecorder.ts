@@ -14,11 +14,44 @@ interface UseAudioRecorderReturn {
   audioLevel: number;
   transcriptionProgress: { completed: number; total: number } | null;
   fatalTranscriptionError: Error | null;
-  startRecording: (readyPromise?: Promise<void>) => Promise<void>;
-  stopRecording: (separator?: string) => Promise<string | null>;
+  transcriptionRetrying: boolean; // a segment is being retried after its request timed out
+  startRecording: (readyPromise?: Promise<void>, checkReachable?: () => Promise<boolean>) => Promise<void>;
+  // `signal` aborting (the user cancelling) abandons the transcription; the promise then rejects.
+  stopRecording: (separator?: string, signal?: AbortSignal) => Promise<string | null>;
   saveDebugBlob: (blob: Blob, filename: string) => Promise<void>;
   playErrorSound: () => void;
+  playCancelSound: () => void;
   releaseMic: () => void;
+}
+
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: false,
+    // noiseSuppression: false,  // Keep noise suppression (on by default)
+    autoGainControl: false,
+  },
+};
+
+// getUserMedia rejects with DOMExceptions whose name (NotReadableError, NotFoundError...) says
+// more than the message
+function describeError(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+}
+
+// Open the default mic. On failure, restart Chromium's audio service and try once more: it
+// never reconnects to a sound server that restarted under it (see restart-audio-service in
+// electron/main.cjs), and a failed mic open is where that state first becomes visible.
+async function openMic(
+  wlog: (level: "warn", message: string) => void,
+): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+  } catch (err) {
+    if (!window.electronAPI?.restartAudioService) throw err;
+    wlog("warn", `Opening the microphone failed (${describeError(err)}) — restarting the audio service and retrying`);
+    if (!(await window.electronAPI.restartAudioService())) throw err;
+    return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+  }
 }
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
@@ -29,6 +62,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     total: number;
   } | null>(null);
   const [fatalTranscriptionError, setFatalTranscriptionError] = useState<Error | null>(null);
+  const [transcriptionRetrying, setTranscriptionRetrying] = useState(false);
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
@@ -116,7 +150,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.stop(now + 0.2);
   }, []);
 
-  const playChime = useCallback((frequency: number): Promise<void> => {
+  // A glide when endFrequency differs (the cancel sound); a steady tone otherwise.
+  const playChime = useCallback((frequency: number, endFrequency = frequency): Promise<void> => {
     if (localStorage.getItem("unhush_chimes_enabled") === "false") return Promise.resolve();
     const ctx = audioContextRef.current;
     if (!ctx) return Promise.resolve();
@@ -125,8 +160,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.type = "sine";
-    osc.frequency.value = frequency;
     const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(frequency, now);
+    osc.frequency.exponentialRampToValueAtTime(endFrequency, now + 0.18);
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
@@ -134,6 +170,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     osc.stop(now + 0.18);
     return new Promise<void>((resolve) => { osc.onended = () => resolve(); });
   }, []);
+
+  // A falling one-octave glide: distinct from the start/stop chimes, and unlike the error buzz, not a failure
+  const playCancelSound = useCallback(() => { void playChime(880, 440); }, [playChime]);
 
   const startAudioLevelMonitoring = useCallback(() => {
     const analyser = analyserRef.current;
@@ -272,7 +311,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
-  const startRecording = useCallback(async (readyPromise?: Promise<void>) => {
+  const startRecording = useCallback(async (readyPromise?: Promise<void>, checkReachable?: () => Promise<boolean>) => {
     // check transcription Config and fail early for obvious errors
     const config = getTranscriptionConfig();
     const validationError = validateTranscriptionConfig(config);
@@ -303,15 +342,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           warm = false;
         }
       }
-      const stream = warm
-        ? streamRef.current!
-        : await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: false,
-              // noiseSuppression: false,  // Keep noise suppression (on by default)
-              autoGainControl: false,
-            },
-          });
+      const stream = warm ? streamRef.current! : await openMic(wlog);
       const tMic = Date.now();
       streamRef.current = stream;
       if (!warm) {
@@ -350,11 +381,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       const config = getTranscriptionConfig();
       const whisperQueue = new WhisperQueue(config);
       if (readyPromise) whisperQueue.setReadyPromise(readyPromise);
+      if (checkReachable) whisperQueue.checkReachable = checkReachable;
       whisperQueue.onProgress = (completed, total) => {
         setTranscriptionProgress({ completed, total });
       };
       whisperQueue.onLog = wlog;
       whisperQueue.onFatalError = (err) => setFatalTranscriptionError(err);
+      setTranscriptionRetrying(false); // in case an earlier queue was abandoned mid-retry
+      whisperQueue.onTimeoutRetrying = setTranscriptionRetrying;
       if (debugAudio) {
         debugSegmentTranscriptsRef.current = new Map();
         whisperQueue.onSegmentTranscribed = (idx, text, latencyMs) => {
@@ -503,20 +537,28 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
     } catch (err) {
       console.error("Failed to start recording:", err);
+      wlog("error", `Failed to start recording: ${describeError(err)}`);
       throw err;
     }
   }, [playChime, startAudioLevelMonitoring, saveDebugBlob, wlog, createVad, releaseMic]);
 
-  const stopRecording = useCallback(async (separator = " "): Promise<string | null> => {
+  const stopRecording = useCallback(async (separator = " ", signal?: AbortSignal): Promise<string | null> => {
     if (!isRecording) {
       return null;
     }
 
-    playChime(660);
+    // Cancelling abandons the queue: requests in flight are aborted and nothing more is sent. A
+    // signal aborted already is a discard of the recording itself, so the queue is cancelled
+    // here, before the flush below would send the recording's unsent tail.
+    const queue = whisperQueueRef.current;
+    if (signal?.aborted) queue?.cancel();
+    else signal?.addEventListener("abort", () => queue?.cancel(), { once: true });
+
+    if (!signal?.aborted) playChime(660); // a discard has its own sound (see RecordingBar's handleCancel)
     stopAudioLevelMonitoring();
     setIsRecording(false);
     // Disable auto-stop callback — from here, rejectFinalize surfaces errors instead
-    if (whisperQueueRef.current) whisperQueueRef.current.onFatalError = null;
+    if (queue) queue.onFatalError = null;
 
     // config was validated at recording start
     const config = getTranscriptionConfig();
@@ -550,9 +592,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           return null;
         }
 
-        const queue = whisperQueueRef.current!;
         setTranscriptionProgress({ completed: 0, total: totalSegments });
-        transcript = await queue.finalize(totalSegments, separator);
+        transcript = await queue!.finalize(totalSegments, separator);
 
         if (debugSessionRef.current) {
           const lines: string[] = [];
@@ -588,8 +629,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
         saveDebugBlob(audioBlob, `full-recording.${ext}`);
 
+        signal?.throwIfAborted(); // a discarded recording is never sent
         setTranscriptionProgress({ completed: 0, total: 1 });
-        transcript = await transcribeAudioBlob(audioBlob, config);
+        transcript = await transcribeAudioBlob(audioBlob, config, undefined, signal);
         setTranscriptionProgress({ completed: 1, total: 1 });
 
         if (debugSessionRef.current) {
@@ -602,6 +644,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       setTranscriptionProgress(null);
       return transcript || null;
     } catch (err) {
+      if (signal?.aborted) {
+        cleanupStream();
+        whisperQueueRef.current = null;
+        setTranscriptionProgress(null);
+        throw err;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       wlog("error", `Transcription failed: ${msg}`);
       console.error("Transcription failed:", err);
@@ -624,10 +672,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     audioLevel,
     transcriptionProgress,
     fatalTranscriptionError,
+    transcriptionRetrying,
     startRecording,
     stopRecording,
     saveDebugBlob,
     playErrorSound,
+    playCancelSound,
     releaseMic,
   };
 }

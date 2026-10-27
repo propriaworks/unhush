@@ -1,7 +1,15 @@
 // Server prefix — Settings stores just this; the /v1/... path is appended below.
 export const TRANSCRIPTION_DEFAULT_CUSTOM_URL = "http://localhost:8000";
+export const TRANSCRIPTION_UNREACHABLE_MSG = "transcription server is unreachable";
+// Per request, i.e. per VAD segment, and covering the whole request: fetch has no separate
+// connect timeout. Without one, a server that never answers the connection is waited on for
+// the OS's TCP connect timeout (~2 min on Linux). Retries after a timeout use a shorter one
+// (WhisperQueue).
+export const TRANSCRIPTION_TIMEOUT_MS = 90_000;
 
-import { PROVIDER_BASE_URLS, isValidHttpUrl, getBaseUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
+export class TranscriptionTimeoutError extends Error {}
+
+import { PROVIDER_BASE_URLS, isValidCustomEndpoint, customEndpointUrl, TRANSCRIPTIONS_PATH } from "./customModelService";
 
 export interface TranscriptionConfig {
   apiUrl: string;
@@ -32,10 +40,10 @@ export function getTranscriptionConfig(): TranscriptionConfig {
       model: "whisper-1",
     };
   } else {
-    const base = getBaseUrl(localStorage.getItem("unhush_custom_url") || TRANSCRIPTION_DEFAULT_CUSTOM_URL);
     return {
       apiKey: localStorage.getItem("unhush_custom_key") || "",
-      apiUrl: `${base}${TRANSCRIPTIONS_PATH}`,
+      apiUrl: customEndpointUrl(localStorage.getItem("unhush_custom_url") || "",
+        TRANSCRIPTION_DEFAULT_CUSTOM_URL, TRANSCRIPTIONS_PATH),
       model: localStorage.getItem("unhush_custom_model") || "",
     };
   }
@@ -48,7 +56,7 @@ export function validateTranscriptionConfig(config: TranscriptionConfig): Config
     if (!(config.apiUrl && config.model)) {
       return { reasonKey: "config", message: "API URL or model is unset.\nOpen Settings from tray." };
     }
-    if (!isValidHttpUrl(config.apiUrl)) {
+    if (!isValidCustomEndpoint(config.apiUrl, TRANSCRIPTIONS_PATH)) {
       return { reasonKey: "badurl", message: "API URL is invalid.\nOpen Settings from tray." };
     }
   } else if (!config.apiKey) {
@@ -60,6 +68,8 @@ export function validateTranscriptionConfig(config: TranscriptionConfig): Config
 export async function transcribeAudioBlob(
   audioBlob: Blob,
   config: TranscriptionConfig,
+  timeoutMs = TRANSCRIPTION_TIMEOUT_MS,
+  signal?: AbortSignal, // the user cancelling
 ): Promise<string> {
   const provider = localStorage.getItem("unhush_provider") || "groq";
   const formData = new FormData();
@@ -82,8 +92,13 @@ export async function transcribeAudioBlob(
       method: "POST",
       headers,
       body: formData,
-  }).catch(() => {
-    throw new Error(provider === "custom" ? "transcription server is unreachable" : "network error");
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]) : AbortSignal.timeout(timeoutMs),
+  }).catch((err) => {
+    if (signal?.aborted) throw err;
+    if (err?.name === "TimeoutError") {
+      throw new TranscriptionTimeoutError(`transcription request timed out after ${timeoutMs / 1000}s`);
+    }
+    throw new Error(provider === "custom" ? TRANSCRIPTION_UNREACHABLE_MSG : "network error");
   });
 
   if (!response.ok) {

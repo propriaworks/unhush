@@ -132,9 +132,13 @@ wait_for_log() {
   fail "timed out after $2s waiting for '$pattern'"
 }
 
-# Fails on crashes only. Errors from the environment -- no ydotool or /dev/uinput on a bare CI
-# runner -- are what a user missing those would see, and the app must stay up through them, which
-# the liveness checks establish; they're listed at the end rather than failed on.
+# ERROR lines the test environment itself causes; the app must stay up through them, as it would
+# for a user missing the same things. Any other ERROR fails the test. Fixed strings, matched
+# anywhere in the line. WARN lines are listed at the end but never fail.
+EXPECTED_ERRORS=(
+  "no ydotool binary found"   # bare CI runners have no ydotool
+)
+
 crash_check() {
   grep -F "renderer process gone" "$(log_file)" >&2 && fail "renderer crashed"
   grep -F "uncaught exception in main process" "$(log_file)" >&2 && fail "uncaught exception in the main process"
@@ -162,6 +166,12 @@ app_pid=""
 grep -qF "shutting down after" "$(log_file)" || fail "no shutdown line in the log"
 crash_check
 
-echo "smoke ($MODE): OK -- started, stayed up ${STAY_UP_S}s, shut down cleanly."
-echo "Errors and warnings logged (environment-dependent; not failures):"
+unexpected=$(grep -F "ERROR: " "$(log_file)" | grep -vF -f <(printf '%s\n' "${EXPECTED_ERRORS[@]}") || true)
+if [[ -n "$unexpected" ]]; then
+  echo "$unexpected" >&2
+  fail "unexpected errors logged (if the test environment causes them, add them to EXPECTED_ERRORS)"
+fi
+
+echo "smoke ($MODE): OK -- started, stayed up ${STAY_UP_S}s, shut down cleanly, no unexpected errors."
+echo "Expected errors and warnings logged (environment-dependent; not failures):"
 grep -E "ERROR: |WARN: " "$(log_file)" || echo "(none)"

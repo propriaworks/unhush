@@ -114,7 +114,11 @@ rm -f /run/user/*/unhush.fifo /tmp/unhush-*.fifo
 
 rm -f /usr/local/bin/unhush
 rm -f /usr/local/bin/unhush-toggle
-rm -f /etc/udev/rules.d/80-uinput.rules
+rm -f /etc/udev/rules.d/70-unhush-uinput.rules
+# Pre-rename name (see postinstall.sh, keep until end 2026); only if it's ours, as that name isn't unique to us.
+if grep -qxF '## DO NOT EDIT -- managed by unhush app' /etc/udev/rules.d/80-uinput.rules 2>/dev/null; then
+  rm -f /etc/udev/rules.d/80-uinput.rules
+fi
 udevadm control --reload-rules 2>/dev/null || true
 
 # No ydotoold teardown needed: Unhush runs its own daemon as a child process (see

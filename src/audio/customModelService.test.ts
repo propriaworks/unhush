@@ -198,6 +198,51 @@ describe("ensureCustomServices — Phase 1 in-flight dedup", () => {
   });
 });
 
+describe("customServerReachable", () => {
+  const modelsCalls = (fetchMock: ReturnType<typeof makeFetchMock>) =>
+    fetchMock.mock.calls.filter(([url]) => url.endsWith(mod.MODELS_PATH)).length;
+
+  it("is true without probing while the server is believed healthy", async () => {
+    setupCustomTranscription({ url: "http://localhost:9040", model: "test-model" });
+    const fetchMock = makeFetchMock(() => ({ ok: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(mod.customServerReachable("transcription", noopLog)).resolves.toBe(true);
+    expect(modelsCalls(fetchMock)).toBe(0);
+  });
+
+  it("re-probes a server found down at once, inside the usual retry cooldown", async () => {
+    setupCustomTranscription({ url: "http://localhost:9041", model: "test-model" });
+    let up = false;
+    const fetchMock = makeFetchMock((url) =>
+      up && url.endsWith(mod.MODELS_PATH) ? { ok: true, json: async () => ({ object: "list", data: [] }) } : { ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mod.ensureCustomServices(noopLog); // finds it down
+    await expect(mod.customServerReachable("transcription", noopLog)).resolves.toBe(false);
+    expect(modelsCalls(fetchMock)).toBe(2);
+
+    up = true; // came back seconds later, well before HEALTHCHECK_FAILURE_RETRY_MS
+    await expect(mod.customServerReachable("transcription", noopLog)).resolves.toBe(true);
+  });
+
+  it("checks the LLM server the same way", async () => {
+    localStorage.setItem("unhush_llm_provider", "custom");
+    localStorage.setItem("unhush_llm_custom_url", "http://localhost:9042");
+    localStorage.setItem("unhush_llm_model_custom", "test-llm");
+    vi.stubGlobal("fetch", makeFetchMock(() => ({ ok: false })));
+
+    await expect(mod.customServerReachable("llm", noopLog)).resolves.toBe(true); // nothing known yet
+    await mod.ensureCustomServices(noopLog);
+    await expect(mod.customServerReachable("llm", noopLog)).resolves.toBe(false);
+  });
+
+  it("is true for a hosted provider", async () => {
+    localStorage.setItem("unhush_provider", "groq");
+    await expect(mod.customServerReachable("transcription", noopLog)).resolves.toBe(true);
+  });
+});
+
 describe("ensureCustomServices — unreachable warning wording", () => {
   const warn = () =>
     (window as unknown as { electronAPI: { setTranscriptionWarning: ReturnType<typeof vi.fn> } })

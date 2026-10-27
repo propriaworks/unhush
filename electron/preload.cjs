@@ -4,9 +4,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Recording control
   onStartRecording: (callback) => ipcRenderer.on("start-recording", callback),
   onStopRecording: (callback) => ipcRenderer.on("stop-recording", callback),
+  onCancelRecording: (callback) => ipcRenderer.on("cancel-recording", callback),
   setRecordingState: (state) => ipcRenderer.send("set-recording-state", state),
   getRecordingState: () => ipcRenderer.invoke("get-recording-state"),
   getDefaultMicSource: () => ipcRenderer.invoke("get-default-mic-source"),
+  restartAudioService: () => ipcRenderer.invoke("restart-audio-service"),
 
   // Clipboard
   copyToClipboard: (text) => ipcRenderer.invoke("copy-to-clipboard", text),
@@ -14,6 +16,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Window control
   hideWindow: () => ipcRenderer.invoke("hide-window"),
+  // A transcript that wasn't output (formatting cancelled), offered by the tray's "Copy last"
+  setLastTranscript: (text) => ipcRenderer.send("set-last-transcript", text),
   resizeWindow: (width, height) =>
     ipcRenderer.send("resize-window", width, height),
 

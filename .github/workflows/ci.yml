@@ -26,9 +26,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      # Exits non-zero whenever anything is found; osv-triage.mjs below decides what fails the job.
+      # A scanner crash leaves no results file, which makes the triage step fail.
       - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36  # v2.7.0
+        continue-on-error: true
         with:
-          scan-args: --lockfile=pnpm-lock.yaml
+          scan-args: --lockfile=pnpm-lock.yaml --format=json --output-file=osv-results.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: '22'
+          # No pnpm needed — script only uses built-in Node modules
+
+      # Fails only for packages that ship in the app; build/test-only findings become warnings
+      - name: Triage findings
+        run: node scripts/osv-triage.mjs osv-results.json pnpm-lock.yaml
 
   typecheck:
     name: Type Check & Test
@@ -36,9 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      # pnpm version comes from devEngines.packageManager in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
-        with:
-          version: 10  # pnpm 9 predates minimumReleaseAge (pnpm-workspace.yaml); 10.x still uses lockfileVersion 9.0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
@@ -68,9 +79,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      # pnpm version comes from devEngines.packageManager in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
-        with:
-          version: 10  # pnpm 9 predates minimumReleaseAge (pnpm-workspace.yaml); 10.x still uses lockfileVersion 9.0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
@@ -90,7 +100,10 @@ jobs:
       # Ubuntu can cross-build rpm; Fedora would need dpkg/fakeroot for deb.
       # xvfb, dbus, openbox and x11-utils (xprop) are for the launch smoke tests below.
       - name: Install cross-format build tools
-        run: sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb dbus openbox x11-utils
+        # Refresh indexes first: the runner image's package lists go stale and then 404 on superseded versions
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb dbus openbox x11-utils
 
       # Electron downloads large binaries; cache them to avoid re-downloading each run.
       # Key is per-job to avoid two parallel jobs racing to reserve the same key;
@@ -141,7 +154,11 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm git nodejs npm fakeroot zstd libxcrypt-compat
-          npm install -g pnpm@10  # pnpm 9 predates minimumReleaseAge (pnpm-workspace.yaml)
+          # bootstrap only: devEngines.packageManager (package.json) selects the version actually used.
+          # pnpm 12's install script swaps its shebang-less placeholder bins for the native binary;
+          # recent npm blocks install scripts by default, and the placeholder then fails with
+          # ENOEXEC when spawned without a shell (electron-builder runs `pnpm list` that way).
+          npm install -g --allow-scripts=pnpm pnpm@12
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 

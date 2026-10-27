@@ -133,6 +133,20 @@ export function getBaseUrl(url: string): string {
 
 /** True if `url` parses as an absolute http/https URL (e.g. rejects blank, malformed,
  * or non-http(s) values like a bare hostname or a "file:" URL). */
+/** The endpoint a custom server's "Server URL" setting resolves to: the value as typed (the
+ * default if blank), reduced to its server prefix, plus `path`. Shared by the request configs
+ * and Settings, so Settings flags exactly what the "badurl" config check rejects. */
+export function customEndpointUrl(setting: string, fallback: string, path: string): string {
+  return `${getBaseUrl(setting || fallback)}${path}`;
+}
+
+/** Whether a URL from customEndpointUrl() is usable: its server prefix must be a valid http(s)
+ * URL on its own. Checking the whole URL would let the appended path rescue a broken prefix:
+ * "http://" becomes "http:///v1/audio/transcriptions", which parses with host "v1". */
+export function isValidCustomEndpoint(url: string, path: string): boolean {
+  return url.endsWith(path) && isValidHttpUrl(url.slice(0, -path.length));
+}
+
 export function isValidHttpUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -456,6 +470,23 @@ const RELEVANT_CONFIG_KEYS = [
   "unhush_llm_custom_start_cmd",
   "unhush_llm_custom_warmup",
 ];
+
+/**
+ * Whether the custom transcription or LLM server can be sent a request. Free while it is
+ * believed healthy; after a failed health check, probes again (and runs any Start Command)
+ * right away, ignoring the usual retry cooldown, so a server that has just come back is not
+ * refused. Always true for hosted providers.
+ */
+export async function customServerReachable(kind: ServiceInfo["kind"], log: LogFn): Promise<boolean> {
+  const [providerKey, urlKey] = kind === "transcription"
+    ? ["unhush_provider", "unhush_custom_url"]
+    : ["unhush_llm_provider", "unhush_llm_custom_url"];
+  if (localStorage.getItem(providerKey) !== "custom") return true;
+  const baseUrl = getBaseUrl(localStorage.getItem(urlKey) || "");
+  if (lastHealthCheckOk.get(baseUrl) ?? true) return true;
+  await ensureCustomServices(log, true);
+  return lastHealthCheckOk.get(baseUrl) ?? true;
+}
 
 /** Snapshot of the fields ensureCustomServices() cares about, for cheaply detecting
  * whether anything relevant changed (e.g. across a Settings window open/close) without

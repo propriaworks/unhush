@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TRANSCRIPTION_DEFAULT_CUSTOM_URL,
   getTranscriptionConfig,
+  TranscriptionTimeoutError,
   transcribeAudioBlob,
   validateTranscriptionConfig,
 } from "./transcriptionApi";
-import { PROVIDER_BASE_URLS, TRANSCRIPTIONS_PATH } from "./customModelService";
+import { PROVIDER_BASE_URLS, TRANSCRIPTIONS_PATH, customEndpointUrl, isValidCustomEndpoint } from "./customModelService";
 import { makeFetchMock, type FetchResult } from "./testFetchMock";
 
 beforeEach(() => {
@@ -82,12 +83,23 @@ describe("validateTranscriptionConfig", () => {
     expect(validate()?.reasonKey).toBe("config");
   });
 
-  it.each(["localhost:8000", "not a url", "ftp://localhost:8000"])("custom: URL %j → badurl", (url) => {
+  it.each(["localhost:8000", "not a url", "ftp://localhost:8000", "http://", "https:"])("custom: URL %j → badurl", (url) => {
     localStorage.setItem("unhush_provider", "custom");
     localStorage.setItem("unhush_custom_url", url);
     localStorage.setItem("unhush_custom_model", "whisper-small");
     expect(validate()?.reasonKey).toBe("badurl");
   });
+
+  // Settings' Server URL field (ServerUrlInput) turns red by the same computation
+  it.each(["localhost:8000", "not a url", "ftp://localhost:8000", "http://", "http://localhost:8000", ""])(
+    "custom: Settings' field check agrees with badurl for %j", (url) => {
+      localStorage.setItem("unhush_provider", "custom");
+      localStorage.setItem("unhush_custom_url", url);
+      localStorage.setItem("unhush_custom_model", "whisper-small");
+      const fieldInvalid =
+        !isValidCustomEndpoint(customEndpointUrl(url, TRANSCRIPTION_DEFAULT_CUSTOM_URL, TRANSCRIPTIONS_PATH), TRANSCRIPTIONS_PATH);
+      expect(fieldInvalid).toBe(validate()?.reasonKey === "badurl");
+    });
 
   it("custom: valid URL and model, no key needed → valid", () => {
     localStorage.setItem("unhush_provider", "custom");
@@ -142,6 +154,25 @@ describe("transcribeAudioBlob", () => {
       localStorage.setItem("unhush_provider", provider);
       vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
       await expect(transcribeAudioBlob(audio, config)).rejects.toThrow(message);
+    });
+
+    it("reports a request that hit its timeout as such, not as unreachable", async () => {
+      localStorage.setItem("unhush_provider", "custom");
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }));
+      const result = transcribeAudioBlob(audio, config);
+      await expect(result).rejects.toThrow("transcription request timed out");
+      await expect(result).rejects.toBeInstanceOf(TranscriptionTimeoutError);
+    });
+
+    it("passes a cancellation through instead of reporting the server as unreachable", async () => {
+      localStorage.setItem("unhush_provider", "custom");
+      vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+        init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason));
+      })));
+      const cancel = new AbortController();
+      const result = transcribeAudioBlob(audio, config, undefined, cancel.signal);
+      cancel.abort();
+      await expect(result).rejects.toHaveProperty("name", "AbortError");
     });
 
     it("passes the API's own error message through, whatever the status", async () => {

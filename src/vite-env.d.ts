@@ -15,13 +15,18 @@ declare global {
     electronAPI: {
       onStartRecording: (callback: () => void) => void;
       onStopRecording: (callback: () => void) => void;
+      onCancelRecording: (callback: () => void) => void;
       setRecordingState: (state: boolean) => void;
       getRecordingState: () => Promise<boolean>;
       // Name of the source the system "default" mic resolves to ("" if unknown/not Linux)
       getDefaultMicSource: () => Promise<string>;
+      // Kill Chromium's audio service so it relaunches with a fresh sound-server connection
+      // (false if there was none to kill)
+      restartAudioService: () => Promise<boolean>;
       copyToClipboard: (text: string) => Promise<boolean>;
       outputText: (text: string, method: OutputMethod) => Promise<boolean>;
       hideWindow: () => Promise<void>;
+      setLastTranscript: (text: string) => void;
       resizeWindow: (width: number, height: number) => void;
       onOpenSettings: (callback: () => void) => void;
       onNavigateTab: (callback: (event: unknown, tab: string) => void) => void;

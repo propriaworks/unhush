@@ -1,10 +1,12 @@
 packages:
   - '.'
 
-onlyBuiltDependencies:
-  - electron
-  - electron-winstaller
-  - esbuild
+# pnpm >= 11 replaced onlyBuiltDependencies with allowBuilds; unlisted packages fail the install
+allowBuilds:
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  protobufjs: false
 
 minimumReleaseAge: 4320  # 3 days
 

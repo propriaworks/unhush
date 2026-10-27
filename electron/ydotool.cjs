@@ -432,9 +432,11 @@ function installCommandFor(d, pkg = "ydotool") {
 }
 function installCommand(pkg) { return installCommandFor(distro(), pkg); }
 
+// Same path as scripts/postinstall.sh writes; numbered below 73 for the reason given there.
+const UDEV_RULE = "/etc/udev/rules.d/70-unhush-uinput.rules";
 const UDEV_CMD =
   `echo 'KERNEL=="uinput", TAG+="uaccess", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' ` +
-  `| sudo tee /etc/udev/rules.d/80-uinput.rules`;
+  `| sudo tee ${UDEV_RULE}`;
 const UDEV_RELOAD = `sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput`;
 
 // Check everything the paste path needs, and describe whatever is broken.
@@ -454,7 +456,18 @@ async function preflight() {
   }
 
   const uinput = await checkUinput();
-  if (!uinput.ok) {
+  if (!uinput.ok && uinput.code !== "ENOENT" && fs.existsSync(UDEV_RULE)) {
+    // The rule is there but hasn't reached the device: written by hand without the reload, or a
+    // package install whose trigger didn't take. Repeating the rule-writing commands won't help.
+    problems.push({
+      code: "uinput",
+      title: "/dev/uinput access hasn't taken effect yet",
+      detail: `The udev rule granting access (${UDEV_RULE}) is installed, but hasn't been `
+            + "applied to /dev/uinput yet. Apply it now with:",
+      commands: [UDEV_RELOAD],
+      note: "Then press Re-check. If it still fails, log out and back in, or restart.",
+    });
+  } else if (!uinput.ok) {
     const missing = uinput.code === "ENOENT";
     problems.push({
       code: "uinput",

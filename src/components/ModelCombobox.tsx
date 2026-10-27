@@ -73,6 +73,7 @@ export function ModelCombobox({ value, onChange, models, formatHint, onFocus, pl
         type="text"
         value={value}
         placeholder={placeholder}
+        spellCheck={false}
         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary-500"
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => {
